@@ -10,11 +10,12 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
+import type { Readable } from 'node:stream';
 import { PrismaService } from '../prisma/prisma.service';
 import type { RequestContext } from '../auth/request-context';
 import { mimeMatchesSniffed, sniffMime } from '../site-builder/object-key';
 import { EmbeddingsClient } from '../site-builder/embeddings.client';
-import { SellerDocumentsStorage } from './seller-documents.storage';
+import { isS3NotFoundError, SellerDocumentsStorage } from './seller-documents.storage';
 import { SellerDocumentCleanupService } from './seller-document-cleanup.service';
 
 /** 允许的资料类型 → kind 与单文件上限（字节）。HTML/SVG/可执行类永不入列。 */
@@ -87,6 +88,27 @@ function storageUnavailable(): ServiceUnavailableException {
   return new ServiceUnavailableException({
     error: { code: 'SELLER_DOCUMENTS_STORAGE_UNAVAILABLE', message: '资料存储暂时不可用，请稍后重试' },
   });
+}
+
+export function formatContentDisposition(filename: string): string {
+  const withoutControls = [...filename]
+    .filter((ch) => {
+      const code = ch.charCodeAt(0);
+      return code >= 0x20 && code !== 0x7f;
+    })
+    .join('');
+  const safe = withoutControls.replace(/[/\\]/g, '_').trim();
+  const rawBase = safe.length > 0 ? safe : 'document';
+  const base = rawBase.replace(
+    /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g,
+    '_',
+  );
+  const asciiFallback = base.replace(/[^\x20-\x7e]/g, '_').replace(/["\\;]/g, '_');
+  const utf8Encoded = encodeURIComponent(base).replace(
+    /['()*!]/g,
+    (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+  return `attachment; filename="${asciiFallback}"; filename*=UTF-8''${utf8Encoded}`;
 }
 
 @Injectable()
@@ -355,6 +377,34 @@ export class SellerDocumentsService {
     try {
       return await this.storage.presignGet(row.objectKey);
     } catch {
+      throw storageUnavailable();
+    }
+  }
+
+  async openContentStream(
+    ctx: RequestContext,
+    documentId: string,
+  ): Promise<{ stream: Readable; mime: string; filename: string; contentLength?: number }> {
+    const row = await this.get(ctx, documentId);
+    if (row.status !== 'ready' && row.status !== 'queued' && row.status !== 'processing') {
+      throw new ConflictException({
+        error: { code: 'SELLER_DOCUMENT_NOT_READY', message: '资料尚未上传完成' },
+      });
+    }
+    try {
+      const obj = await this.storage.getObjectStream(row.objectKey);
+      return {
+        stream: obj.stream,
+        mime: row.mime,
+        filename: row.filename,
+        contentLength: obj.contentLength ?? Number(row.sizeBytes),
+      };
+    } catch (error) {
+      if (isS3NotFoundError(error)) {
+        throw new NotFoundException({
+          error: { code: 'NOT_FOUND', message: 'document object not found' },
+        });
+      }
       throw storageUnavailable();
     }
   }

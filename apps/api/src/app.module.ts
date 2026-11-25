@@ -4,8 +4,14 @@ import { CandidateOperationInterceptor } from './runtime/development-candidate-o
 import { ThrottlerModule } from '@nestjs/throttler';
 import { httpThrottlerOptions } from './common/redis-http-throttler.storage';
 import { PrismaModule } from './prisma/prisma.module';
-import { WsThrottlerGuard } from './common/ws-throttler.guard';
+import {
+  WS_THROTTLER_WORKSPACE_RESOLVER,
+  WsThrottlerGuard,
+  type WsThrottlerWorkspaceResolver,
+} from './common/ws-throttler.guard';
 import { AuthModule } from './auth/auth.module';
+import { TokenVerifier } from './auth/token-verifier';
+import { candidateWorkspaceAllowed } from './runtime/development-candidate';
 import { ModelGatewayModule } from './model-gateway/model-gateway.module';
 import { TemporalModule } from './temporal/temporal.module';
 import { SweepSchedulerService } from './temporal/sweep-scheduler.service';
@@ -94,6 +100,20 @@ import { CampaignPlanModule } from './campaign-plan/campaign-plan.module';
   ],
   controllers: [HealthController, WhoamiController],
   providers: [
+    {
+      provide: WS_THROTTLER_WORKSPACE_RESOLVER,
+      inject: [TokenVerifier],
+      useFactory:
+        (tokenVerifier: TokenVerifier): WsThrottlerWorkspaceResolver =>
+        async (token: string): Promise<string | undefined> => {
+          const verified = await tokenVerifier.verify(token);
+          return typeof verified.workspaceId === 'string' &&
+            verified.workspaceId.length > 0 &&
+            candidateWorkspaceAllowed(verified.workspaceId)
+            ? verified.workspaceId
+            : undefined;
+        },
+    },
     { provide: APP_GUARD, useClass: WsThrottlerGuard },
     { provide: APP_GUARD, useClass: RuntimeWorkAdmissionGuard },
     { provide: APP_INTERCEPTOR, useClass: CandidateOperationInterceptor },

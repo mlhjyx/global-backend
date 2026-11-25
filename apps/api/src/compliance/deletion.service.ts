@@ -1,7 +1,20 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { isUUID } from 'class-validator';
 import { PrismaService } from '../prisma/prisma.service';
-import { DeletionReason, DeletionStatus, DeletionSubjectType } from './deletion.types';
+import {
+  DELETION_STATUSES,
+  DELETION_SUBJECT_TYPES,
+  DeletionReason,
+  DeletionStatus,
+  DeletionSubjectType,
+} from './deletion.types';
+
+export interface ListDeletionRequestsOptions {
+  limit: number;
+  cursor?: string;
+  status?: string;
+}
 
 export interface CreateDeletionRequest {
   subjectType: DeletionSubjectType;
@@ -114,6 +127,45 @@ export class DeletionService {
       }
       throw err;
     }
+  }
+
+  async listRequests(
+    workspaceId: string,
+    opts: ListDeletionRequestsOptions,
+  ): Promise<{ data: DeletionRequestView[]; nextCursor: string | null; hasMore: boolean }> {
+    if (opts.cursor !== undefined && !isUUID(opts.cursor)) {
+      throw new BadRequestException({
+        error: { code: 'VALIDATION_ERROR', message: 'cursor must be a valid UUID' },
+      });
+    }
+    if (
+      opts.status !== undefined &&
+      !(DELETION_STATUSES as readonly string[]).includes(opts.status)
+    ) {
+      throw new BadRequestException({
+        error: { code: 'VALIDATION_ERROR', message: 'invalid deletion status' },
+      });
+    }
+    const limit = Math.min(Math.max(Math.floor(Number(opts.limit) || 20), 1), 100);
+    return this.prisma.withWorkspace(workspaceId, async (tx) => {
+      const rows = await tx.deletionRequest.findMany({
+        where: {
+          subjectType: { in: [...DELETION_SUBJECT_TYPES] },
+          ...(opts.status ? { status: opts.status } : {}),
+        },
+        take: limit + 1,
+        ...(opts.cursor ? { cursor: { id: opts.cursor }, skip: 1 } : {}),
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        include: { receipt: true },
+      });
+      const hasMore = rows.length > limit;
+      const sliced = hasMore ? rows.slice(0, limit) : rows;
+      return {
+        data: sliced.map(toView),
+        nextCursor: hasMore ? sliced[sliced.length - 1]!.id : null,
+        hasMore,
+      };
+    });
   }
 
   async getRequest(workspaceId: string, id: string): Promise<DeletionRequestView> {
