@@ -168,7 +168,14 @@ export class BillingReconciliationService {
           COALESCE(SUM(
             CASE
               WHEN o.status IN ('SETTLED', 'RESULT_UNKNOWN')
-                AND o.result_schema IN (${Prisma.join(SELF_HOSTED_FREE_RESULT_SCHEMAS)})
+                AND o.result_schema IN (
+                  'crawl4ai-fetch/v1',
+                  'crawl4ai-render/v1',
+                  'social-fetch/v1',
+                  'searxng-search/v1',
+                  'http-get/v1',
+                  'smtp-probe-verdict/v1'
+                )
                 AND (${from}::timestamptz IS NULL OR o.settled_at >= ${from}::timestamptz)
                 AND (${to}::timestamptz IS NULL OR o.settled_at <= ${to}::timestamptz)
               THEN CASE

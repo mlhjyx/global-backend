@@ -317,7 +317,8 @@ export class ConfigDriftDiagnosticsService implements OnApplicationBootstrap {
   constructor(@Optional() private readonly prisma?: PrismaService) {}
 
   onApplicationBootstrap(): void {
-    if (process.env.NODE_ENV === "test") return;
+    const enabledRaw = process.env.CONFIG_DRIFT_DIAGNOSTICS_ENABLED?.trim().toLowerCase();
+    if (enabledRaw === "off" || enabledRaw === "false" || enabledRaw === "0") return;
     void this.runDiagnostics(process.env);
   }
 

@@ -131,13 +131,13 @@ export async function purgeExpiredRuntimeLeases(
         SELECT instance_id
         FROM public.runtime_process_lease
         WHERE state <> 'STOPPED'
-          AND last_seen_at < ${staleCutoff}
+          AND last_seen_at < ${staleCutoff}::timestamptz
         ORDER BY last_seen_at ASC
-        LIMIT ${batchSize}
+        LIMIT ${batchSize}::int
       )
       UPDATE public.runtime_process_lease
       SET state = 'STOPPED',
-          stopped_at = COALESCE(stopped_at, ${now})
+          stopped_at = COALESCE(stopped_at, ${now}::timestamptz)
       WHERE instance_id IN (SELECT instance_id FROM zombies)
     `);
 
@@ -146,9 +146,9 @@ export async function purgeExpiredRuntimeLeases(
         SELECT instance_id
         FROM public.runtime_process_lease
         WHERE state = 'STOPPED'
-          AND last_seen_at < ${deleteCutoff}
+          AND last_seen_at < ${deleteCutoff}::timestamptz
         ORDER BY last_seen_at ASC
-        LIMIT ${batchSize}
+        LIMIT ${batchSize}::int
       )
       DELETE FROM public.runtime_process_lease
       WHERE instance_id IN (SELECT instance_id FROM doomed)
@@ -229,7 +229,7 @@ export class RuntimeLeaseMaintenanceService
   constructor(@Optional() private readonly prisma?: PrismaService) {}
 
   onApplicationBootstrap(): void {
-    if (!this.prisma || process.env.NODE_ENV === "test") return;
+    if (!this.prisma) return;
     this.handle = startRuntimeLeaseMaintenance(this.prisma, process.env);
   }
 
