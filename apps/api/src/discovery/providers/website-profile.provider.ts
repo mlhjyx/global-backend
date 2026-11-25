@@ -1,6 +1,10 @@
 import { getTask } from '../../ai-tasks/task-registry';
 import { extractSameSiteLinks } from '../../adapters/site-links';
-import type { CrawlHtmlResult, CrawlResult } from '../../adapters/web-crawler';
+import {
+  isCrawl4aiRenderEmptyHtml,
+  type CrawlHtmlResult,
+  type CrawlResult,
+} from '../../adapters/web-crawler';
 import { isExecutionControlError } from '../../execution-budget/execution-control-error';
 import { settledModelFailureReason } from '../settled-model-failure';
 import type { ModelGateway } from '../../model-gateway/model-gateway';
@@ -322,7 +326,9 @@ export class WebsiteProfileProvider {
       { url },
       this.toolContext(ctx),
     );
-    return result.data.robotsBlocked ? '' : result.data.html ?? '';
+    return result.data.robotsBlocked || isCrawl4aiRenderEmptyHtml(result.data.html)
+      ? ''
+      : result.data.html ?? '';
   }
 
   private async classify(

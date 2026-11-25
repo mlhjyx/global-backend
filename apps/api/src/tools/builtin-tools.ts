@@ -9,6 +9,7 @@ import {
   Tool,
   ToolContext,
 } from "./tool-contract";
+import { isDegradableWorkspaceCrawlTimeout } from "./crawl4ai-timeout-resilience";
 import { ToolRegistry } from "./tool-registry";
 import { registerDeepSeekTools } from "./deepseek-tools";
 import { registerSearchProviderTools } from "./search-provider-tools";
@@ -581,12 +582,22 @@ export function createCrawl4aiFetchTool(
       try {
         r = await invokeRender();
       } catch (error) {
+        if (isDegradableWorkspaceCrawlTimeout(error, ctx)) {
+          return { data: { url: input.url, text: "", contentHash: "" }, costCents: 0, degraded: true };
+        }
         // 429/限流：尊重上游节奏，单次重试（自适应衰减留 PR-B/C，避免双层限流打架）。
         if (!/\b429\b|too many requests/i.test(String((error as Error)?.message ?? error))) {
           throw error;
         }
         await sleep(render429RetryDelayMs());
-        r = await invokeRender();
+        try {
+          r = await invokeRender();
+        } catch (retryError) {
+          if (isDegradableWorkspaceCrawlTimeout(retryError, ctx)) {
+            return { data: { url: input.url, text: "", contentHash: "" }, costCents: 0, degraded: true };
+          }
+          throw retryError;
+        }
       }
       const text = r.text.slice(0, boundedCrawl4aiFetchChars(input.maxChars));
       if (Buffer.byteLength(text, "utf8") > MAX_CRAWL4AI_FETCH_ARTIFACT_BYTES) {

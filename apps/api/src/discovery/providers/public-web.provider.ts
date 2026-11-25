@@ -39,7 +39,10 @@ import {
 } from '../../adapters/search-providers';
 import { buildEcosystemSniperQueries } from '../ecosystem-sniper';
 import { fuseSearchEngineHits, type SearchSourceBucket } from '../cross-source-fusion';
-import type { CrawlResult } from '../../adapters/web-crawler';
+import {
+  isCrawl4aiRenderEmptyHtml,
+  type CrawlResult,
+} from '../../adapters/web-crawler';
 import { extractSameSiteLinks } from '../../adapters/site-links';
 import { extractPublicContacts, type PublicContact } from '../../adapters/contact-extractor';
 import { legalPageCandidates } from '../impressum/find-legal-pages';
@@ -560,7 +563,9 @@ export class PublicWebDiscoveryProvider
       for (const candidate of candidates) {
         try {
           const rendered = await render(candidate.url);
-          if (rendered.data.robotsBlocked || !rendered.data.html) throw new Error('render unavailable');
+          if (rendered.data.robotsBlocked || isCrawl4aiRenderEmptyHtml(rendered.data.html)) {
+            throw new Error('render unavailable');
+          }
           let html = rendered.data.html.slice(0, 300_000);
           let text = stripHtml(rendered.data.html).slice(0, 40_000);
           let usedUrl = candidate.url;
@@ -581,7 +586,7 @@ export class PublicWebDiscoveryProvider
               : `${candidate.url}/`;
             try {
               const alt = await render(toggled);
-              if (!alt.data.robotsBlocked && alt.data.html) {
+              if (!alt.data.robotsBlocked && !isCrawl4aiRenderEmptyHtml(alt.data.html)) {
                 const altText = stripHtml(alt.data.html).slice(0, 40_000);
                 if (altText.length > text.length) {
                   text = altText;

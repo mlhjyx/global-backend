@@ -26,6 +26,53 @@ export const MAX_CRAWL4AI_RENDER_ARTIFACT_BYTES =
 export const CRAWL4AI_REQUEST_TIMEOUT_MS = 75_000;
 
 /**
+ * Valid minimal HTML placeholder persisted when a workspace `crawl4ai.render` call
+ * times out or receives a blank/non-HTML upstream body. Satisfies the `crawl4ai-render/v1`
+ * HTML artifact contract (`isHtmlBody`) so ToolBroker settles cleanly at $0 instead of
+ * leaving the budget operation in `RESERVED`/`RESULT_UNKNOWN` (`BUDGET_AUTHORITY_NOT_READY`).
+ */
+export const CRAWL4AI_RENDER_DEGRADED_EMPTY_HTML =
+  '<!doctype html><html data-crawl4ai-empty="1"><body></body></html>';
+
+export function isCrawl4aiHtmlBody(value: string): boolean {
+  return /^\s*<(?:!doctype\s+html\b|[a-z][a-z0-9:-]*\b)/i.test(value);
+}
+
+export function isCrawl4aiRenderEmptyHtml(
+  value: string | null | undefined,
+): boolean {
+  return !value || value.trim() === CRAWL4AI_RENDER_DEGRADED_EMPTY_HTML;
+}
+
+const TIMEOUT_ERROR_CODES = new Set([
+  "UND_ERR_HEADERS_TIMEOUT",
+  "UND_ERR_BODY_TIMEOUT",
+  "UND_ERR_CONNECT_TIMEOUT",
+  "ETIMEDOUT",
+  "ABORT_ERR",
+]);
+
+/** True only for transport/client timeout or abort errors (never policy/egress/control denials). */
+export function isCrawlTimeoutError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const err = error as { name?: unknown; code?: unknown; cause?: unknown };
+  if (err.name === "TimeoutError" || err.name === "AbortError") return true;
+  if (typeof err.code === "string" && TIMEOUT_ERROR_CODES.has(err.code)) {
+    return true;
+  }
+  if (err.cause && typeof err.cause === "object") {
+    const cause = err.cause as { name?: unknown; code?: unknown };
+    if (cause.name === "TimeoutError" || cause.name === "AbortError") {
+      return true;
+    }
+    if (typeof cause.code === "string" && TIMEOUT_ERROR_CODES.has(cause.code)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * 渲染请求的 settle 延迟（秒）：env `CRAWLER_RENDER_DELAY_MS`，默认 500ms。
  * 2026-11-04 前硬编码 3.0 秒——每页白等 3 秒（主计划 §3.5b）。
  */
@@ -48,17 +95,17 @@ export function renderCacheMode(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 /**
- * 单页导航超时（毫秒）：env `CRAWLER_PAGE_TIMEOUT_MS`，默认 45000。
+ * 单页导航超时（毫秒）：env `CRAWLER_PAGE_TIMEOUT_MS`，默认 25000。
  * 上限必须低于本次 /crawl 请求的客户端中止时间（`CRAWL4AI_REQUEST_TIMEOUT_MS`，
- * 75s，同时是 discovery 租约预算的计量基准）：crawl4ai 的 /crawl 是同步接口，
- * page_timeout 高于客户端中止只会在客户端先超时并把慢页计成 pageFailures。
- * 因此钳制在 5s–70s（仍留出 delay_before_return_html 与响应传输余量）。
+ * 75s，同时是 discovery 租约预算的计量基准）：默认 25s 让并发 3 个慢页排队也能在
+ * 75s HTTP 超时窗口内由 Crawl4AI 自行收尾，避免客户端先 abort 导致账本卡 RESERVED。
+ * 钳制在 5s–70s（留出 delay_before_return_html 与响应传输余量）。
  */
 export function pageTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
   const raw = env.CRAWLER_PAGE_TIMEOUT_MS;
-  if (raw === undefined || raw.trim() === "") return 45_000;
+  if (raw === undefined || raw.trim() === "") return 25_000;
   const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed <= 0) return 45_000;
+  if (!Number.isFinite(parsed) || parsed <= 0) return 25_000;
   const ceiling = CRAWL4AI_REQUEST_TIMEOUT_MS - 5_000;
   return Math.min(ceiling, Math.max(5_000, Math.round(parsed)));
 }

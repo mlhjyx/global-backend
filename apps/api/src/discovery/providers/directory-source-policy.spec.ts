@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { PUBLIC_WEB_COMPANY_SITE_POLICY_DOMAIN } from '../source-policy-scope';
+import {
+  DIRECTORY_PUBLIC_B2B_LISTING_POLICY_DOMAIN,
+  PUBLIC_WEB_COMPANY_SITE_POLICY_DOMAIN,
+} from '../source-policy-scope';
 import { directorySourcePolicyDecision } from '../directory-source-policy';
 import type { CompanyDiscoveryQuery, DiscoveryOptions, ExecutionContext } from '../provider-contract';
 import type { RawSourcePolicySnapshot } from '../raw-source-ingestion';
@@ -30,6 +33,26 @@ beforeEach(() => { vi.clearAllMocks(); mocks.robots.mockResolvedValue(true); });
 describe('directory source admission matches raw policy semantics', () => {
   it('requires a real directory policy, without company-site fallback', () => {
     expect(directorySourcePolicyDecision('https://directory.example/members', [policy(PUBLIC_WEB_COMPANY_SITE_POLICY_DOMAIN)])).toEqual({ allowed: false, reasonCode: 'SOURCE_POLICY_MISSING' });
+  });
+  it('admits public B2B listing hosts via directory:public_b2b_listing while blocking deny-listed brokers and honoring site SUSPENDED', () => {
+    const fallback = policy(DIRECTORY_PUBLIC_B2B_LISTING_POLICY_DOMAIN);
+    expect(directorySourcePolicyDecision('https://www.italiasolare.eu/elenco-soci', [fallback])).toEqual({ allowed: true });
+    for (const url of [
+      'https://www.linkedin.com/company/acme',
+      'https://zoominfo.com/c/acme',
+      'https://www.europages.it/aziende/solare',
+      'https://sub.paginegialle.it/ricerca/fotovoltaico',
+      'https://www.kompass.com/z/it',
+    ]) {
+      expect(directorySourcePolicyDecision(url, [fallback])).toEqual({ allowed: false, reasonCode: 'SOURCE_POLICY_MISSING' });
+    }
+    expect(directorySourcePolicyDecision('https://italiasolare.eu/elenco-soci', [
+      fallback,
+      policy('italiasolare.eu', { reviewStatus: 'SUSPENDED' }),
+    ])).toEqual({ allowed: false, reasonCode: 'SOURCE_POLICY_SUSPENDED' });
+    expect(directorySourcePolicyDecision('https://italiasolare.eu/elenco-soci', [
+      policy(DIRECTORY_PUBLIC_B2B_LISTING_POLICY_DOMAIN, { reviewStatus: 'SUSPENDED' }),
+    ])).toEqual({ allowed: false, reasonCode: 'SOURCE_POLICY_SUSPENDED' });
   });
   it.each(['https://directory.example/members', 'https://www.directory.example/members', 'https://sub.directory.example/members'])('matches exact/parent and www policy: %s', url => {
     expect(directorySourcePolicyDecision(url, [policy('WWW.Directory.Example')])).toEqual({ allowed: true });

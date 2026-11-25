@@ -4,7 +4,11 @@ import {
   createRawSourceIndexedResolver,
   type RawSourceIndexedResolution,
 } from "./raw-source-indexed-resolution";
-import { PUBLIC_WEB_COMPANY_SITE_POLICY_DOMAIN, sourcePolicyAllowsDiscovery } from "./source-policy-scope";
+import {
+  fallbackSourcePolicyDomain,
+  isReservedSourcePolicyDomain,
+  sourcePolicyAllowsDiscovery,
+} from "./source-policy-scope";
 
 export type { RawSourceIndexedResolution } from "./raw-source-indexed-resolution";
 
@@ -415,22 +419,14 @@ export function governingPolicy(
   const { host, hostname } = provenance;
   if (!hostname) return undefined;
   const site = policies
-    .filter(
-      (candidate) => candidate.domain !== PUBLIC_WEB_COMPANY_SITE_POLICY_DOMAIN,
-    )
+    .filter((candidate) => !isReservedSourcePolicyDomain(candidate.domain))
     .map((policy) => ({ key: sitePolicyKey(policy.domain), policy }))
     .filter(({ key }) => key === hostname || hostname.endsWith(`.${key}`))
     .sort(bySpecificity)[0]?.policy;
   if (site) return site;
-  const ownDomain = typeof recordDomain === "string" ? recordDomain : null;
-  return (providerKey === "public_web" || providerKey === "model_web_search") &&
-    host !== null &&
-    ownDomain !== null &&
-    (host === ownDomain || host.endsWith(`.${ownDomain}`))
-    ? policies.find(
-        (candidate) =>
-          candidate.domain === PUBLIC_WEB_COMPANY_SITE_POLICY_DOMAIN,
-      )
+  const fallbackDomain = fallbackSourcePolicyDomain(providerKey, host, hostname, recordDomain);
+  return fallbackDomain
+    ? policies.find((candidate) => candidate.domain === fallbackDomain)
     : undefined;
 }
 

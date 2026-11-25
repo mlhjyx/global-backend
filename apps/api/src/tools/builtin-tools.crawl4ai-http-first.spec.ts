@@ -103,6 +103,25 @@ describe('crawl4ai.fetch 的 HTTP-first 分级（PR-A）', () => {
     expect(crawlUrl).toHaveBeenCalledOnce();
   });
 
+  it('settles cleanly at $0 on workspace render TimeoutError instead of leaving budget RESERVED', async () => {
+    const crawlUrl = vi.fn().mockRejectedValue(new DOMException('The operation was aborted due to timeout', 'TimeoutError'));
+    const tool = makeTool({ crawlUrl });
+    const out = await tool.execute({ url: 'https://slow.example/' }, ctx);
+    expect(out).toEqual({
+      data: { url: 'https://slow.example/', text: '', contentHash: '' },
+      costCents: 0,
+      degraded: true,
+    });
+  });
+
+  it('still propagates TimeoutError under platformEgress mode', async () => {
+    const crawlUrl = vi.fn().mockRejectedValue(new DOMException('timed out', 'TimeoutError'));
+    const tool = makeTool({ crawlUrl });
+    await expect(
+      tool.execute({ url: 'https://slow.example/' }, { ...(ctx as object), platformEgress: {} } as never),
+    ).rejects.toMatchObject({ name: 'TimeoutError' });
+  });
+
   it('wires the PR-B page cache port with the workspace and reports cache provenance', async () => {
     const port = { get: vi.fn(async () => null), put: vi.fn(async () => undefined) };
     const fetchHttpFirst = vi.fn(async () => ({
