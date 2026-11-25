@@ -14,6 +14,9 @@ interface Row {
   value: string;
   verification_state: string;
   confidence: number | null;
+  company_country?: string | null;
+  company_name?: string | null;
+  has_linkedin?: boolean | null;
 }
 
 function fakePrisma(rows: Row[]) {
@@ -133,5 +136,62 @@ describe('ContactEligibilityService.check', () => {
     } catch (error) {
       expect(errorCode(error)).toBe('OUTREACH_ELIGIBILITY_BATCH_TOO_LARGE');
     }
+  });
+
+  it('D3 合规与 Catch-All LinkedIn-First：DE 个人箱拒绝直邮并切领英；Catch-All 有领英推荐 linkedin_first', async () => {
+    const { prisma } = fakePrisma([
+      {
+        ...rowFor('klaus.weber@solar.de', 'VALID', 95),
+        company_country: 'DE',
+        company_name: 'Solar DE GmbH',
+        has_linkedin: true,
+      },
+      {
+        ...rowFor('m.rossi@refeel-epc.it', 'CATCH_ALL_RISKY', 78),
+        company_country: 'IT',
+        company_name: 'ReFeel EPC S.r.l.',
+        has_linkedin: true,
+      },
+      {
+        ...rowFor('buyer@us-solar.com', 'VALID', 96),
+        company_country: 'US',
+        company_name: 'US Solar LLC',
+        has_linkedin: false,
+      },
+    ]);
+    const service = new ContactEligibilityService(prisma as never);
+    const results = await service.check(WORKSPACE, [
+      'klaus.weber@solar.de',
+      'm.rossi@refeel-epc.it',
+      'buyer@us-solar.com',
+    ]);
+    expect(results[0]).toMatchObject({
+      state: 'VALID',
+      allowedActions: ['display', 'match'],
+      recommendedChannel: 'linkedin_first',
+      d3Policy: {
+        emailPolicy: 'CONSENT_REQUIRED',
+        emailAllowedNow: false,
+        complianceTag: 'DE:UWG_STRICT_LINKEDIN_FIRST+ART14',
+      },
+    });
+    expect(results[1]).toMatchObject({
+      state: 'CATCH_ALL_RISKY',
+      recommendedChannel: 'linkedin_first',
+      d3Policy: {
+        emailPolicy: 'LEGITIMATE_INTEREST_STRICT',
+        complianceTag: 'IT:GDPR_LI+ART14',
+      },
+    });
+    expect(results[2]).toMatchObject({
+      state: 'VALID',
+      allowedActions: ['display', 'match', 'outreach'],
+      recommendedChannel: 'email',
+      d3Policy: {
+        emailPolicy: 'ALLOWED_WITH_FOOTER',
+        emailAllowedNow: true,
+        complianceTag: 'US:CAN_SPAM_FOOTER',
+      },
+    });
   });
 });

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { isSameCorporateGroupDomain } from '../../discovery/corporate-group-domains';
 
 /**
  * P1-07：付费邮箱富集（finder）适配器的统一接口（计划 §2.3.4.4）。
@@ -20,6 +21,8 @@ export interface FindEmailInput {
   fullName: string;
   /** 已归一、无 www 的公司域名（小写）。 */
   domain: string;
+  /** 可选：经 GLEIF/官网核验的集团别名域（如 coesaenergy.it → coesa.it）。 */
+  verifiedAliasDomains?: readonly string[];
   companyName?: string;
   linkedinUrl?: string;
   /** 用于幂等与计费归因（run 内触发时带）。 */
@@ -112,14 +115,34 @@ const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
  * 不计费、下一家」）：语法必须像邮箱，且**域名必须与目标域一致**（防供应商串号）。
  * 通过时返回小写规范形，否则 null。
  */
-export function normalizeEnrichedEmail(raw: unknown, expectedDomain: string): string | null {
+export function normalizeEnrichedEmail(
+  raw: unknown,
+  expectedDomain: string,
+  options?: { allowCorporateGroup?: boolean; verifiedAliasDomains?: readonly string[] },
+): string | null {
   if (typeof raw !== 'string') return null;
   const email = raw.trim().toLowerCase();
   if (!EMAIL_SHAPE.test(email)) return null;
   const at = email.lastIndexOf('@');
   const domain = email.slice(at + 1).replace(/\.+$/u, '');
-  if (domain !== expectedDomain.trim().toLowerCase().replace(/^www\./u, '')) return null;
-  return email;
+  const expected = expectedDomain.trim().toLowerCase().replace(/^www\./u, '');
+  if (domain === expected) return email;
+  if (options && (options.allowCorporateGroup || (options.verifiedAliasDomains?.length ?? 0) > 0)) {
+    // 子域（如 mail.acme.example）除非显式列在 verifiedAliasDomains 中，否则保持拒绝；
+    // 集团主域/品牌变体（如 coesaenergy.it ↔ coesa.it）经 isSameCorporateGroupDomain 严格校验后放行。
+    const explicitAlias = (options.verifiedAliasDomains ?? []).some(
+      (alias) => alias.trim().toLowerCase().replace(/^www\./u, '') === domain,
+    );
+    if (explicitAlias) return email;
+    if (
+      options.allowCorporateGroup &&
+      !domain.endsWith(`.${expected}`) &&
+      isSameCorporateGroupDomain(domain, expected, options.verifiedAliasDomains)
+    ) {
+      return email;
+    }
+  }
+  return null;
 }
 
 /** 人名拆分（Hunter domain-search 按 first_name/last_name 匹配用）。 */

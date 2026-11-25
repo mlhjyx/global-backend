@@ -96,6 +96,68 @@ export class ReportController {
     return report.csv;
   }
 
+  @Get('battle-csv')
+  @ApiOperation({
+    summary:
+      '19 列受审计多通道作战清表 CSV：含决策委员会轨道、S/A/B/C 通道分层、D3 法域合规标签、Art.14/LIA 状态与 C 级转交信，复用 DataRights EXPORT 审计、制裁与隔离闸门',
+  })
+  @ApiQuery({ name: 'icpId', required: true, schema: { type: 'string', format: 'uuid' } })
+  @ApiQuery({
+    name: 'week',
+    required: false,
+    description: '可选 ISO 周（如 2026-W48）；缺省导出该 ICP 全部已交付线索（上限 1000 条）',
+    schema: { type: 'string', pattern: '^\\d{4}-W\\d{2}$' },
+  })
+  @ApiQuery({
+    name: 'maskEmails',
+    required: false,
+    description: '是否脱敏触达邮箱前缀（true 适用于对外汇报/审计，默认 false 供内部外贸团队作战导入）',
+    schema: { type: 'boolean' },
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'UTF-8（带 BOM）19 列作战 CSV，带 CWE-1236 公式注入防护',
+    content: { 'text/csv': { schema: { type: 'string' } } },
+    headers: {
+      'Content-Disposition': { description: '附件文件名', schema: { type: 'string' } },
+      'X-Report-Id': {
+        description: '本次导出的 policy_decision_log correlation_id',
+        schema: { type: 'string', format: 'uuid' },
+      },
+      'X-Report-Week': { description: '导出的 ISO 周或 all', schema: { type: 'string' } },
+      'X-Report-Rows': countHeader('导出的行数'),
+      'X-Report-Withheld-Rights': countHeader('DataRights EXPORT 拒绝而未导出的行数'),
+      'X-Report-Withheld-Sanctions': countHeader('制裁命中未经人工清除而未导出的行数'),
+      'X-Report-Withheld-Quarantined': countHeader('历史合成来源被隔离而未导出的行数'),
+    },
+  })
+  @ApiResponse({ status: 400, description: 'icpId 或 week 不合法', schema: errorSchema(['VALIDATION_ERROR']) })
+  @ApiResponse({ status: 404, description: '当前 workspace 不可见该 ICP', schema: errorSchema(['NOT_FOUND']) })
+  @ApiResponse({
+    status: 422,
+    description: `匹配线索超过 ${WEEKLY_REPORT_MAX_LEADS} 条，拒绝而不截断`,
+    schema: errorSchema(['WEEKLY_REPORT_TOO_LARGE']),
+  })
+  async battleCsv(
+    @Ctx() ctx: RequestContext,
+    @Query('icpId') icpId: string | undefined,
+    @Query('week') week: string | undefined,
+    @Query('maskEmails') maskEmails: string | undefined,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<string> {
+    const report = await this.reports.battleCsv(ctx, { icpId, week, maskEmails });
+    response.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    response.setHeader('Content-Disposition', `attachment; filename="battle-report-${report.week}-${report.icpId}.csv"`);
+    response.setHeader('Cache-Control', 'no-store');
+    response.setHeader('X-Report-Id', report.reportId);
+    response.setHeader('X-Report-Week', report.week);
+    response.setHeader('X-Report-Rows', String(report.rows));
+    response.setHeader('X-Report-Withheld-Rights', String(report.withheld.rights));
+    response.setHeader('X-Report-Withheld-Sanctions', String(report.withheld.sanctions));
+    response.setHeader('X-Report-Withheld-Quarantined', String(report.withheld.quarantined));
+    return report.csv;
+  }
+
   @Post('weekly/feedback')
   @RequireScopes('acquisition:review')
   @HttpCode(200)

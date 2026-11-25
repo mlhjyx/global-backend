@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import { classifyContactEmail, type ContactEmailType } from '../../discovery/contact-classifier';
+import type { KnownEmailSample } from '../../discovery/email-format-learning';
 import {
   legacyCatchAllFromClass,
   transitionVerificationState,
@@ -42,6 +43,13 @@ import {
   recordEnrichmentAttempt,
   updateAttemptEmailState,
 } from './enrichment-attempt';
+import {
+  hasAnyEnrichmentPath,
+  isPersonalOrOtherEmailType,
+  maybeNotifyValidPersonalEmail,
+  maybeScheduleEnrichedArticle14,
+  runStep0IfEligible,
+} from './step0-pattern-inference';
 
 /**
  * P1-08：单个联系人的邮箱富集编排（计划 §2.3.4.2 停止规则 / §2.3.4.5 数据流）。
@@ -70,6 +78,10 @@ export interface EnrichContactInput {
   fullName: string;
   /** 已归一、无 www 的公司域（小写）。 */
   domain: string;
+  /** 可选：公司国家 ISO2（EU/UK 具名邮箱入库时触发 GDPR Art.14 30 天通知排期）。 */
+  country?: string | null;
+  /** 可选：同公司已有 VALID 个人邮箱样本，用于 Step 0 零成本模式推断。 */
+  knownCompanyEmailSamples?: readonly KnownEmailSample[];
   companyName?: string;
   linkedinUrl?: string;
   runId?: string;
@@ -100,6 +112,8 @@ export interface EnrichContactDeps {
   perContactCapMicrousd?: number;
   /** 验证瀑布单地址调用上限（计划 ≤6）。 */
   maxVerificationCalls?: number;
+  /** 进程内回调：本联系人拿到 VALID 个人邮箱时通知同公司后续联系人复用格式学习（绝不出进程）。 */
+  onValidEmail?: (email: string) => void;
 }
 
 export type EnrichContactResult =
@@ -136,19 +150,8 @@ function storedBasisOf(raw: string | undefined): LawfulBasis | undefined {
   return isValidLawfulBasis(basis) ? basis : undefined;
 }
 
-export async function enrichContactEmail(
-  deps: EnrichContactDeps,
-  input: EnrichContactInput,
-): Promise<EnrichContactResult> {
-  if (deps.finders.length === 0) return { status: 'no_finders' };
-  const now = deps.clock ?? (() => new Date());
-  const actorId = deps.actorId ?? 'enrich-contact-email';
-  const attemptsCap = Math.max(1, Math.min(MAX_FINDER_ATTEMPTS, deps.maxFinderAttempts ?? MAX_FINDER_ATTEMPTS));
-  const budget =
-    deps.budget ??
-    new CapBudget(deps.perContactCapMicrousd ?? DEFAULT_PER_CONTACT_CAP_MICROUSD);
-  const lawfulBasis = storedBasisOf(input.lawfulBasis);
-  const findInput: FindEmailInput = {
+function buildFindEmailInput(input: EnrichContactInput): FindEmailInput {
+  return {
     workspaceId: input.workspaceId,
     contactId: input.contactId,
     fullName: input.fullName,
@@ -158,6 +161,23 @@ export async function enrichContactEmail(
     ...(input.runId ? { runId: input.runId } : {}),
     accountKey: input.accountKey,
   };
+}
+
+export async function enrichContactEmail(
+  deps: EnrichContactDeps,
+  input: EnrichContactInput,
+): Promise<EnrichContactResult> {
+  if (!hasAnyEnrichmentPath(deps.finders.length, input.knownCompanyEmailSamples, deps.verifiers.length)) {
+    return { status: 'no_finders' };
+  }
+  const now = deps.clock ?? (() => new Date());
+  const actorId = deps.actorId ?? 'enrich-contact-email';
+  const attemptsCap = Math.max(1, Math.min(MAX_FINDER_ATTEMPTS, deps.maxFinderAttempts ?? MAX_FINDER_ATTEMPTS));
+  const budget =
+    deps.budget ??
+    new CapBudget(deps.perContactCapMicrousd ?? DEFAULT_PER_CONTACT_CAP_MICROUSD);
+  const lawfulBasis = storedBasisOf(input.lawfulBasis);
+  const findInput = buildFindEmailInput(input);
 
   // 0) 合规前置：联系人/公司抑制检查（短事务；之后不再持锁跨网络）。
   const mayUse =
@@ -175,6 +195,33 @@ export async function enrichContactEmail(
   let attempts = 0;
   let costMicrousd = 0;
   let sawInvalidHit = false;
+
+  // Step 0（P0 Fix #3）：付费 finder 前先用同公司已有 VALID 邮箱样本反推命名法，零 finder 成本直验 VALID。
+  const step0 = await runStep0IfEligible(
+    {
+      prisma: deps.prisma,
+      verifiers: deps.verifiers,
+      budget,
+      clock: now,
+      actorId,
+      maxVerificationCalls: deps.maxVerificationCalls,
+      onValidEmail: deps.onValidEmail,
+    },
+    {
+      workspaceId: input.workspaceId,
+      contactId: input.contactId,
+      fullName: input.fullName,
+      domain: input.domain,
+      country: input.country,
+      runId: input.runId,
+      accountKey: input.accountKey,
+      lawfulBasis,
+      knownCompanyEmailSamples: input.knownCompanyEmailSamples,
+    },
+    deps.finders.length > 0,
+  );
+  costMicrousd += step0.costMicrousd;
+  if (step0.outcome) return step0.outcome;
 
   for (const finder of deps.finders) {
     if (attempts >= attemptsCap) break;
@@ -314,7 +361,7 @@ export async function enrichContactEmail(
       if (suppressed) return { allowed: false, reason: 'suppressed_email' };
       const decision = evaluateEmailGate({
         email,
-        kind: emailType === 'personal' ? 'personal' : 'role',
+        kind: isPersonalOrOtherEmailType(emailType) ? 'personal' : 'role',
         lawfulBasis,
         suppressed: false,
         policy: resolveEmailVerificationPolicy(),
@@ -451,12 +498,22 @@ export async function enrichContactEmail(
       if (attemptId) {
         await updateAttemptEmailState(tx, attemptId, resolved?.state ?? 'UNKNOWN');
       }
+      await maybeScheduleEnrichedArticle14(tx, {
+        workspaceId: input.workspaceId,
+        contactId: input.contactId,
+        country: input.country,
+        emailType,
+        sourceCategory: finder.key,
+        acquiredAt: attemptedAtPersist,
+      });
       return {
         pointId: point.id,
         state: (resolved?.state ?? 'UNKNOWN') as EmailVerificationState,
         lastEventId,
       };
     });
+
+    maybeNotifyValidPersonalEmail(email, emailType, stored.state, deps.onValidEmail);
 
     return {
       status: 'stored',

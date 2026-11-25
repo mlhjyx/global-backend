@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { canonicalizeSuppressionValue } from '../discovery/suppression-value';
+import { classifyContactEmail } from '../discovery/contact-classifier';
 import { encryptPii } from '../compliance/pii-crypto';
 import type { EmailVerificationState } from '../discovery/contact-point-verification-state';
 import {
@@ -10,6 +11,10 @@ import {
   catchAllSendTier,
   type CatchAllSendTier,
 } from '../enrichment/verification/catch-all-policy';
+import {
+  evaluateMultiChannelOutreachPolicy,
+  type MultiChannelEmailRule,
+} from './multi-channel-playbook';
 
 /**
  * 联系人可触达性查询（P1-16 引擎侧，ch02 §2.3.10.2）：gain-saas 发送门在批次提交前
@@ -37,6 +42,16 @@ export interface ContactEligibilityPolicy {
   tier: CatchAllSendTier;
 }
 
+export interface ContactEligibilityD3Policy {
+  emailPolicy: MultiChannelEmailRule;
+  emailAllowedNow: boolean;
+  complianceTag: string;
+  requiresArticle14Notice: boolean;
+  recommendedSequence: readonly string[];
+}
+
+export type ContactRecommendedChannel = 'email' | 'linkedin_first' | 'manual_review';
+
 export interface ContactEligibilityResult {
   emailHash: string;
   found: boolean;
@@ -48,6 +63,10 @@ export interface ContactEligibilityResult {
   contactPointId: string | null;
   allowedActions: string[];
   catchAllPolicy: ContactEligibilityPolicy | null;
+  /** D3 法域多通道合规策略（缺公司法域元数据时为 null）。 */
+  d3Policy: ContactEligibilityD3Policy | null;
+  /** 推荐首触达通道：Catch-All 且有领英或 D3 需同意 → linkedin_first；VALID 且合规允许 → email；其余 manual_review。 */
+  recommendedChannel: ContactRecommendedChannel;
 }
 
 const STATE_RANK: Record<EmailVerificationState, number> = {
@@ -113,14 +132,39 @@ export class ContactEligibilityService {
     }
     const ciphertexts = [...ciphertextToEmail.keys()];
     const rows = await this.prisma.withWorkspace(workspaceId, (tx) =>
-      tx.$queryRaw<Array<{ id: string; value: string; verification_state: string; confidence: number | null }>>`
-        SELECT id, value, verification_state, confidence
-        FROM contact_point
-        WHERE type = 'email' AND value IN (${Prisma.join(ciphertexts)})`,
+      tx.$queryRaw<
+        Array<{
+          id: string;
+          value: string;
+          verification_state: string;
+          confidence: number | null;
+          company_country?: string | null;
+          company_name?: string | null;
+          has_linkedin?: boolean | null;
+        }>
+      >`
+        SELECT cp.id, cp.value, cp.verification_state, cp.confidence,
+               co.country AS company_country,
+               co.name AS company_name,
+               EXISTS (
+                 SELECT 1 FROM contact_point lp
+                 WHERE lp.contact_id = cp.contact_id AND lp.type = 'linkedin'
+               ) AS has_linkedin
+        FROM contact_point cp
+        LEFT JOIN canonical_contact cc ON cc.id = cp.contact_id
+        LEFT JOIN canonical_company co ON co.id = cc.company_id
+        WHERE cp.type = 'email' AND cp.value IN (${Prisma.join(ciphertexts)})`,
     );
     const strongest = new Map<
       string,
-      { state: EmailVerificationState; score: number | null; contactPointId: string }
+      {
+        state: EmailVerificationState;
+        score: number | null;
+        contactPointId: string;
+        companyCountry: string | null;
+        companyName: string | null;
+        hasLinkedin: boolean;
+      }
     >();
     for (const row of rows) {
       const email = ciphertextToEmail.get(row.value);
@@ -128,13 +172,39 @@ export class ContactEligibilityService {
       const state = row.verification_state as EmailVerificationState;
       const existing = strongest.get(email);
       if (!existing || STATE_RANK[state] > STATE_RANK[existing.state]) {
-        strongest.set(email, { state, score: row.confidence ?? null, contactPointId: row.id });
+        strongest.set(email, {
+          state,
+          score: row.confidence ?? null,
+          contactPointId: row.id,
+          companyCountry: row.company_country ?? null,
+          companyName: row.company_name ?? null,
+          hasLinkedin: row.has_linkedin === true,
+        });
       }
     }
 
     return canonical.map((email) => {
       const hit = strongest.get(email);
       const state = hit?.state ?? 'UNKNOWN';
+      const emailType = classifyContactEmail(email).emailType;
+      const isPersonalEmail = emailType === 'personal' || emailType === 'other';
+      const d3Decision =
+        hit && hit.companyCountry
+          ? evaluateMultiChannelOutreachPolicy({
+              country: hit.companyCountry,
+              companyName: hit.companyName ?? '',
+              isPersonalEmail,
+            })
+          : null;
+      const d3Policy: ContactEligibilityD3Policy | null = d3Decision
+        ? {
+            emailPolicy: d3Decision.emailPolicy,
+            emailAllowedNow: d3Decision.emailAllowedNow,
+            complianceTag: d3Decision.complianceTag,
+            requiresArticle14Notice: d3Decision.requiresArticle14Notice,
+            recommendedSequence: d3Decision.recommendedSequence,
+          }
+        : null;
       const catchAllPolicy: ContactEligibilityPolicy | null =
         state === 'CATCH_ALL_RISKY'
           ? {
@@ -145,14 +215,29 @@ export class ContactEligibilityService {
               tier: catchAllSendTier(hit?.score ?? 0),
             }
           : null;
+      const baseActions = hit ? ALLOWED_ACTIONS[state] : [];
+      const allowedActions =
+        d3Policy && !d3Policy.emailAllowedNow
+          ? baseActions.filter((action) => action !== 'outreach')
+          : [...baseActions];
+      const recommendedChannel: ContactRecommendedChannel =
+        d3Policy && d3Policy.emailPolicy === 'CONSENT_REQUIRED' && !d3Policy.emailAllowedNow
+          ? 'linkedin_first'
+          : state === 'CATCH_ALL_RISKY' && hit?.hasLinkedin
+            ? 'linkedin_first'
+            : state === 'VALID' && allowedActions.includes('outreach')
+              ? 'email'
+              : 'manual_review';
       return {
         emailHash: this.emailHash(email),
         found: hit !== undefined,
         state,
         score: hit ? hit.score : null,
         contactPointId: hit?.contactPointId ?? null,
-        allowedActions: hit ? ALLOWED_ACTIONS[state] : [],
+        allowedActions,
         catchAllPolicy,
+        d3Policy,
+        recommendedChannel,
       };
     });
   }

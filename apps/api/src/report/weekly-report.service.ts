@@ -32,6 +32,12 @@ import {
   type WeeklyReportSanctionsStatus,
 } from './weekly-report-row';
 import { parseWeeklyFeedbackCsv, type FeedbackRejectionReason } from './weekly-feedback';
+import {
+  buildBattleCsvRow,
+  renderBattleCsvFromRows,
+  type BattleCsvRow,
+  type BattleDecisionMaker,
+} from './battle-csv-builder';
 
 /** A week's accepted leads are reviewed by hand; more than this is refused, never truncated. */
 export const WEEKLY_REPORT_MAX_LEADS = 1_000;
@@ -45,6 +51,21 @@ const TRANSACTION = { maxWait: 5_000, timeout: 30_000 } as const;
 export interface WeeklyReportRequest {
   icpId?: unknown;
   week?: unknown;
+}
+
+export interface BattleCsvReportRequest {
+  icpId?: unknown;
+  week?: unknown;
+  maskEmails?: unknown;
+}
+
+export interface BattleCsvReport {
+  readonly reportId: string;
+  readonly week: string;
+  readonly icpId: string;
+  readonly csv: string;
+  readonly rows: number;
+  readonly withheld: WeeklyReport['withheld'];
 }
 
 export interface WeeklyReport {
@@ -221,6 +242,44 @@ export class WeeklyReportService {
   }
 
   /**
+   * 19 列受审计多通道作战清表（Batch 1.4-C）：
+   * 复用与周报完全一致的 DataRights EXPORT 判定留痕、制裁拦截、合成隔离与抑制过滤。
+   * `week` 缺省时导出该 ICP 下全部已交付线索（QUALIFIED/CONTACTED/CONVERTED，上限 WEEKLY_REPORT_MAX_LEADS）；
+   * 传 `week` 时仅导出该 ISO 周 accept 的线索。
+   */
+  async battleCsv(ctx: RequestContext, request: BattleCsvReportRequest): Promise<BattleCsvReport> {
+    const { icpId } = request;
+    if (typeof icpId !== 'string' || !UUID.test(icpId)) throw invalid('icpId must be a UUID');
+    const hasWeek = typeof request.week === 'string' && request.week.trim().length > 0;
+    const range = hasWeek ? parseIsoWeek(String(request.week).trim()) : null;
+    if (hasWeek && !range) throw invalid('week must be an ISO week such as 2026-W42');
+    const maskEmails = request.maskEmails === true || request.maskEmails === 'true' || request.maskEmails === '1';
+    const reportId = randomUUID();
+
+    const snapshot = await this.prisma.withWorkspace(
+      ctx.workspaceId,
+      (tx) => this.readForBattleCsv(tx, ctx.workspaceId, icpId, range),
+      TRANSACTION,
+    );
+    const built = snapshot ? this.buildBattleRows(ctx, reportId, snapshot) : null;
+    if (built && built.decisions.length > 0) {
+      await this.prisma.withWorkspace(
+        ctx.workspaceId,
+        (tx) => this.dataRights.logDecisions(tx, ctx.workspaceId, built.decisions),
+        TRANSACTION,
+      );
+    }
+    return {
+      reportId,
+      week: range?.week ?? 'all',
+      icpId,
+      csv: renderBattleCsvFromRows(built?.rows ?? [], maskEmails),
+      rows: built?.rows.length ?? 0,
+      withheld: built?.withheld ?? { rights: 0, sanctions: 0, quarantined: 0 },
+    };
+  }
+
+  /**
    * BI-23（设计 §6）：客户填好的周报 CSV 原样上传回来。按线索 ID 匹配本工作区的线索，
    * 逐行校验后只追加写 `lead_outcome`（source = customer）。空行跳过，坏行计数拒绝；
    * 文件缺「线索 ID」列时整份拒绝，不做部分解析。
@@ -335,6 +394,179 @@ export class WeeklyReportService {
     const leads = candidates.flatMap((lead) => deliveredInWeek(lead, range) ?? []);
     if (leads.length === 0) return null;
     return { leads, facts: await this.loadFacts(tx, workspaceId, icpId, leads) };
+  }
+
+  private async readForBattleCsv(tx: Tx, workspaceId: string, icpId: string, range: IsoWeekRange | null) {
+    const icp = await tx.icpDefinition.findUnique({
+      where: { id: icpId },
+      select: { id: true, companyId: true, name: true },
+    });
+    if (!icp) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'icp not found' } });
+
+    const where: Prisma.LeadWhereInput = {
+      icpId,
+      status: { in: [...DELIVERED_LEAD_STATUSES] },
+      ...(range
+        ? {
+            decisions: {
+              some: { action: 'accept', createdAt: { gte: range.start, lt: range.end } },
+              none: { createdAt: { gte: range.end } },
+            },
+          }
+        : {}),
+    };
+    const candidates: ReportLead[] = await tx.lead.findMany({
+      where,
+      select: {
+        id: true,
+        canonicalCompanyId: true,
+        fitVerdict: true,
+        scoreDetail: true,
+        queue: true,
+        totalScore: true,
+        scores: true,
+        decisions: {
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          take: 1,
+          select: { action: true, createdAt: true },
+        },
+      },
+      orderBy: [{ totalScore: { sort: 'desc', nulls: 'last' } }, { id: 'asc' }],
+      take: WEEKLY_REPORT_MAX_LEADS + 1,
+    });
+    if (candidates.length > WEEKLY_REPORT_MAX_LEADS) {
+      throw new UnprocessableEntityException({
+        error: {
+          code: 'WEEKLY_REPORT_TOO_LARGE',
+          message: `more than ${WEEKLY_REPORT_MAX_LEADS} leads matched for battle-csv export`,
+        },
+      });
+    }
+    const leads: DeliveredLead[] = range
+      ? candidates.flatMap((lead) => deliveredInWeek(lead, range) ?? [])
+      : candidates.map((lead) => ({ ...lead, acceptedAt: lead.decisions[0]?.createdAt ?? new Date() }));
+    if (leads.length === 0) return null;
+
+    const facts = await this.loadFacts(tx, workspaceId, icpId, leads);
+    const companyIds = [...new Set(leads.map((lead) => lead.canonicalCompanyId))];
+    const battleContacts = await tx.canonicalContact.findMany({
+      where: { companyId: { in: companyIds } },
+      select: {
+        id: true,
+        companyId: true,
+        fullName: true,
+        title: true,
+        department: true,
+        contactPoints: { select: { type: true, value: true, status: true, verificationState: true } },
+      },
+      orderBy: [{ companyId: 'asc' }, { fullName: 'asc' }],
+    });
+    const contactIds = battleContacts.map((c) => c.id);
+    const article14Rows =
+      contactIds.length > 0 && typeof (tx as { article14Notice?: { findMany?: unknown } }).article14Notice?.findMany === 'function'
+        ? await tx.article14Notice.findMany({
+            where: { workspaceId, subjectId: { in: contactIds } },
+            select: { subjectId: true, status: true },
+            orderBy: { createdAt: 'desc' },
+          })
+        : [];
+    const article14StatusByContactId = new Map<string, string>();
+    for (const row of article14Rows) {
+      if (!article14StatusByContactId.has(row.subjectId)) {
+        article14StatusByContactId.set(row.subjectId, row.status);
+      }
+    }
+    const activeLia =
+      typeof (tx as { liaRecord?: { findFirst?: unknown } }).liaRecord?.findFirst === 'function'
+        ? await tx.liaRecord.findFirst({
+            where: { workspaceId, status: 'ACTIVE' },
+            select: { id: true },
+          })
+        : null;
+    const seller =
+      icp.companyId &&
+      typeof (tx as { companyProfile?: { findUnique?: unknown } }).companyProfile?.findUnique === 'function'
+        ? await tx.companyProfile.findUnique({ where: { id: icp.companyId }, select: { name: true } })
+        : null;
+
+    const battleDecisionMakers = new Map<string, BattleDecisionMaker[]>();
+    for (const c of battleContacts) {
+      const safePoints = c.contactPoints.filter((p) => {
+        if (p.type !== 'email') return true;
+        const email = canonicalizeSuppressionValue('email', p.value);
+        const domain = email ? canonicalizeSuppressionValue('domain', email.split('@')[1]) : null;
+        return Boolean(email && !facts.suppressedEmails.has(email) && !(domain && facts.suppressedDomains.has(domain)));
+      });
+      const list = battleDecisionMakers.get(c.companyId) ?? [];
+      list.push({ id: c.id, fullName: c.fullName, title: c.title, department: c.department, points: safePoints });
+      battleDecisionMakers.set(c.companyId, list);
+    }
+
+    return {
+      leads,
+      facts,
+      battleDecisionMakers,
+      article14StatusByContactId,
+      hasActiveWorkspaceLia: Boolean(activeLia),
+      sellerName: seller?.name ?? null,
+      sellerProductSummary: icp.name ?? null,
+    };
+  }
+
+  private buildBattleRows(
+    ctx: RequestContext,
+    reportId: string,
+    snapshot: NonNullable<Awaited<ReturnType<WeeklyReportService['readForBattleCsv']>>>,
+  ) {
+    const rows: BattleCsvRow[] = [];
+    const decisions: PolicyDecisionEntry[] = [];
+    const withheld = { rights: 0, sanctions: 0, quarantined: 0 };
+    const screen = this.memoizedScreen();
+    const { leads, facts } = snapshot;
+
+    for (const lead of leads) {
+      const company = facts.companies.get(lead.canonicalCompanyId);
+      if (!company) continue;
+      const evidence = facts.evidence.get(company.id) ?? [];
+      const provenance = facts.provenance.get(company.id) ?? [];
+      const rightsContext = exportRightsContextForLead({
+        country: company.country,
+        suppressed: company.status === 'SUPPRESSED' || facts.isListed(company),
+        hasEvidence: evidence.length > 0,
+      });
+      const meta = { subjectType: 'lead', subjectId: lead.id, actorId: ctx.userId, correlationId: reportId };
+      if (provenance.some(isSyntheticDiscoveryProvenance)) {
+        withheld.quarantined += 1;
+        decisions.push({ ctx: rightsContext, decision: gateDenial('synthetic_quarantined'), meta });
+        continue;
+      }
+      const sanctions = sanctionsDelivery(facts.screenings.get(company.id), screen(company));
+      if (sanctions.blocking) {
+        withheld.sanctions += 1;
+        decisions.push({ ctx: rightsContext, decision: gateDenial('sanctions_hold'), meta });
+        continue;
+      }
+      const decision = this.dataRights.evaluate(rightsContext);
+      decisions.push({ ctx: rightsContext, decision, meta });
+      if (!decision.allowed) {
+        withheld.rights += 1;
+        continue;
+      }
+      rows.push(
+        buildBattleCsvRow({
+          lead,
+          company,
+          companyContactPoints: facts.reachablePoints(company),
+          decisionMakers: snapshot.battleDecisionMakers.get(company.id) ?? [],
+          draft: facts.draftsByLead.get(lead.id) ?? null,
+          article14StatusByContactId: snapshot.article14StatusByContactId,
+          hasActiveWorkspaceLia: snapshot.hasActiveWorkspaceLia,
+          sellerName: snapshot.sellerName,
+          sellerProductSummary: snapshot.sellerProductSummary,
+        }),
+      );
+    }
+    return { rows, decisions, withheld };
   }
 
   /** Pure CPU over the snapshot: screening, decisions and rows. Never inside a transaction. */
@@ -515,6 +747,8 @@ export class WeeklyReportService {
       contactPoints: pointsByCompany,
       /** M4 named decision makers per company, suppressed emails already removed. */
       decisionMakers: decisionMakersByCompany,
+      suppressedEmails,
+      suppressedDomains,
       /** Latest draft version per lead, when one was generated. */
       draftsByLead,
       /**

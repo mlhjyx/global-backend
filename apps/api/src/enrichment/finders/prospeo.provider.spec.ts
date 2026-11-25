@@ -152,6 +152,7 @@ describe('ProspeoProvider.findEmail：HTTP 契约', () => {
     const limited = new ProspeoProvider(
       resolveProspeoConfig({ PROSPEO_API_KEY: 'k' }),
       vi.fn(async () => jsonResponse(429, {})),
+      vi.fn(async () => undefined),
     );
     expect(await limited.findEmail(INPUT)).toMatchObject({
       status: 'error',
@@ -174,5 +175,37 @@ describe('ProspeoProvider.findEmail：HTTP 契约', () => {
       errorCode: 'provider_unconfigured',
     });
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('supports QPS pacing, bounded 429 retry with Retry-After, and corporate-group email domains', async () => {
+    const sleeps: number[] = [];
+    let call = 0;
+    const fetchImpl = vi.fn(async () => {
+      call += 1;
+      if (call === 1) {
+        return new Response('{}', { status: 429, headers: { 'retry-after': '1' } });
+      }
+      return jsonResponse(200, {
+        error: false,
+        person: { email: { email: 'm.rossi@coesa.it', status: 'VERIFIED', revealed: true } },
+      });
+    });
+    const cfg = resolveProspeoConfig({ PROSPEO_API_KEY: 'k', PROSPEO_MIN_INTERVAL_MS: '600' });
+    expect(cfg.minIntervalMs).toBe(600);
+    const provider = new ProspeoProvider(cfg, fetchImpl, async (ms) => {
+      sleeps.push(ms);
+    });
+    const res = await provider.findEmail({
+      ...INPUT,
+      fullName: 'Marco Rossi',
+      domain: 'coesaenergy.it',
+      companyName: 'Coesa Energy S.r.l.',
+    });
+    expect(res).toMatchObject({
+      status: 'hit',
+      hit: { email: 'm.rossi@coesa.it', providerConfidence: 95 },
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(sleeps).toContain(1000);
   });
 });
