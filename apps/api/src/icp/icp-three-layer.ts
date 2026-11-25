@@ -1,7 +1,13 @@
-import { classifySellerWebsiteChannel, type SellerWebsiteChannel } from '../company/seller-source-allowlist';
 import { icpTradeRole } from '../discovery/icp-trade-role';
 import type { BuyerProcurementScenario } from '../discovery/buyer-procurement-scenarios';
 import { targetCountryCodes } from '../discovery/search-localization';
+
+export type SellerSourceChannel =
+  | 'official_website'
+  | 'alibaba_1688'
+  | 'alibaba_intl'
+  | 'pdf_brochure'
+  | 'description';
 
 export interface IcpSellerProfileLayer {
   readonly company_name: string;
@@ -9,7 +15,7 @@ export interface IcpSellerProfileLayer {
   readonly industry: string | null;
   readonly offerings: readonly string[];
   readonly technical_specs: readonly string[];
-  readonly source_channel: SellerWebsiteChannel | 'pdf_brochure' | 'description' | null;
+  readonly source_channel: SellerSourceChannel | null;
 }
 
 export interface IcpBuyerSpecLayer {
@@ -105,6 +111,18 @@ function hostFromWebsite(website: string | null | undefined): string | null {
   }
 }
 
+function isExactHostOrSubdomain(host: string, root: string): boolean {
+  return host === root || host.endsWith(`.${root}`);
+}
+
+function detectSellerWebsiteChannel(website: string | null | undefined): SellerSourceChannel | null {
+  const host = hostFromWebsite(website);
+  if (!host) return null;
+  if (isExactHostOrSubdomain(host, '1688.com')) return 'alibaba_1688';
+  if (isExactHostOrSubdomain(host, 'alibaba.com')) return 'alibaba_intl';
+  return 'official_website';
+}
+
 export function resolveOfferingsForOverrides<T extends { name: string; description: string | null; attributes: unknown }>(
   offerings: readonly T[],
   productLines?: readonly string[],
@@ -167,7 +185,7 @@ export function buildThreeLayerIcpAttributes(input: {
     ...asStrings(attrs.specifications),
   ]);
 
-  const websiteChannel = classifySellerWebsiteChannel(input.company.website);
+  const websiteChannel = detectSellerWebsiteChannel(input.company.website);
   const sellerSourceChannel: IcpSellerProfileLayer['source_channel'] =
     websiteChannel ?? (input.company.summary?.trim() ? 'description' : null);
 
@@ -263,7 +281,9 @@ export function buildThreeLayerIcpAttributes(input: {
     excluded_keywords: uniqueStrings(asStrings(existingPeer.excluded_keywords), 25),
     excluded_domains: uniqueStrings([
       ...asStrings(existingPeer.excluded_domains),
-      ...(sellerHost && !sellerHost.endsWith('1688.com') && !sellerHost.endsWith('alibaba.com')
+      ...(sellerHost &&
+      !isExactHostOrSubdomain(sellerHost, '1688.com') &&
+      !isExactHostOrSubdomain(sellerHost, 'alibaba.com')
         ? [sellerHost]
         : []),
     ], 20),

@@ -204,4 +204,48 @@ describe('fit-v3 unified rubric & R0 Ordina ora false-positive fix', () => {
     expect(result.fitReasons.reasons[0]).toContain('意大利光伏组件批发分销商');
     expect(gateway.generateStructured).toHaveBeenCalledTimes(1);
   });
+
+  it('does not downgrade weak verdict to mismatch when reasons contain negated peer phrases like 非同行/不是竞争对手', async () => {
+    const gateway = {
+      generateStructured: vi.fn(async () => ({
+        data: {
+          verdict: 'weak',
+          material_gate: 'weak: mentions solar modules briefly',
+          role_gate: 'weak: small regional installer, not a direct competitor',
+          process_gate: 'not_applicable',
+          business_model_gate: 'weak: local B2B project team',
+          reasons: ['非同行制造厂，也不是竞争对手，但规模偏小且产品页信息有限'],
+        },
+        usage: { inputTokens: 250, outputTokens: 70, costCents: 0 },
+        model: 'test-model',
+        provider: 'test',
+      })),
+    } as unknown as ModelGateway;
+
+    const result = await judgeCompanyFitV3({
+      gateway,
+      workspaceId: '10000000-0000-4000-8000-000000000001',
+      runId: '30000000-0000-4000-8000-000000000003',
+      icp: {
+        name: '意大利光伏分销商',
+        targetMarkets: ['IT'],
+        exclusions: ['光伏组件制造同行'],
+        companyAttributes: { trade_side: 'distributor', product: 'photovoltaic modules' },
+      },
+      company: {
+        id: '20000000-0000-4000-8000-000000000002',
+        name: 'Piccolo Solare S.r.l.',
+        domain: 'piccolo-solare.it',
+        country: 'IT',
+        industry: 'Solar',
+        visibleText: 'Installazione impianti fotovoltaici locali in Lombardia.',
+        title: 'Piccolo Solare',
+        metaDescription: null,
+        channelsSummary: 'roleEmails=1',
+      },
+    });
+
+    expect(result.verdict).toBe('weak');
+    expect(result.score).toBeGreaterThanOrEqual(50);
+  });
 });

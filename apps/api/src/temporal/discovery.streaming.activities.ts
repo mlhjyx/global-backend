@@ -125,6 +125,19 @@ function mergeStreamingProgress(
   };
 }
 
+/** Row-level lock on discovery_run so concurrent L1/L2 activities never clobber stats.streaming. */
+async function lockDiscoveryRunRow(
+  tx: Prisma.TransactionClient,
+  workspaceId: string,
+  runId: string,
+): Promise<void> {
+  await tx.$queryRaw`
+    SELECT "id" FROM "discovery_run"
+    WHERE "id" = ${runId}::uuid AND "workspace_id" = ${workspaceId}::uuid
+    FOR UPDATE
+  `;
+}
+
 async function persistExtractionFacts(
   tx: Prisma.TransactionClient,
   workspaceId: string,
@@ -345,6 +358,7 @@ export function createStreamingDiscoveryActivities(deps: {
             skipDuplicates: true,
           });
         }
+        await lockDiscoveryRunRow(tx, args.workspaceId, args.runId);
         const run = await tx.discoveryRun.findUnique({ where: { id: args.runId } });
         if (run) {
           const now = new Date().toISOString();
@@ -506,6 +520,7 @@ export function createStreamingDiscoveryActivities(deps: {
             where: { runId: args.runId, canonicalCompanyId: args.companyId },
             data: { stage: 'done', verdictDeep: fit.verdict, finishedAt: new Date() },
           });
+          await lockDiscoveryRunRow(tx, args.workspaceId, args.runId);
           const run = await tx.discoveryRun.findUnique({ where: { id: args.runId } });
           if (run) {
             const { nextStats } = mergeStreamingProgress(run.stats, run, (current, now) => {
@@ -586,6 +601,7 @@ export function createStreamingDiscoveryActivities(deps: {
     ): Promise<void> {
       await ensureRunBudget(args);
       await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+        await lockDiscoveryRunRow(tx, args.workspaceId, args.runId);
         const run = await tx.discoveryRun.findUnique({ where: { id: args.runId } });
         if (!run) return;
         const now = new Date().toISOString();
@@ -668,6 +684,7 @@ export function createStreamingDiscoveryActivities(deps: {
         }
 
         await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+          await lockDiscoveryRunRow(tx, args.workspaceId, args.runId);
           const run = await tx.discoveryRun.findUnique({ where: { id: args.runId } });
           if (!run) return;
           const { nextStats } = mergeStreamingProgress(run.stats, run, (current, now) => ({
@@ -719,6 +736,7 @@ export function createStreamingDiscoveryActivities(deps: {
             data: { stage: 'skipped', lastErrorCode: 'STREAMING_STOPPED', finishedAt: nowDate },
           });
         }
+        await lockDiscoveryRunRow(tx, args.workspaceId, args.runId);
         const run = await tx.discoveryRun.findUnique({ where: { id: args.runId } });
         if (!run) return;
         const stageOutcome =
@@ -732,12 +750,17 @@ export function createStreamingDiscoveryActivities(deps: {
             l0Recall: {
               ...current.stages.l0Recall,
               status: current.stages.l0Recall.status === 'running' ? stageOutcome : current.stages.l0Recall.status,
+              queriesTotal: args.summary.queriesTotal,
+              queriesCompleted: args.summary.queriesCompleted,
+              candidatesRecalled: args.summary.rawCount,
+              canonicalUpserted: args.summary.canonicalCount,
               completedAt: current.stages.l0Recall.completedAt ?? nowIso,
             },
             l1ExtractFit: {
               ...current.stages.l1ExtractFit,
               status:
                 current.stages.l1ExtractFit.status === 'running' ? stageOutcome : current.stages.l1ExtractFit.status,
+              processed: Math.max(current.stages.l1ExtractFit.processed, args.summary.l1Processed),
               failed: args.summary.l1Failed,
               completedAt: current.stages.l1ExtractFit.completedAt ?? nowIso,
             },
@@ -745,6 +768,9 @@ export function createStreamingDiscoveryActivities(deps: {
               ...current.stages.l2TopKEnrich,
               status:
                 current.stages.l2TopKEnrich.status === 'running' ? stageOutcome : current.stages.l2TopKEnrich.status,
+              selected: Math.max(current.stages.l2TopKEnrich.selected, args.summary.l2Selected),
+              enriched: Math.max(current.stages.l2TopKEnrich.enriched, args.summary.l2Enriched),
+              contactsFound: Math.max(current.stages.l2TopKEnrich.contactsFound, args.summary.l2ContactsFound),
               watchesRegistered: args.summary.watchesRegistered,
               failed: args.summary.l2Failed,
               completedAt: current.stages.l2TopKEnrich.completedAt ?? nowIso,

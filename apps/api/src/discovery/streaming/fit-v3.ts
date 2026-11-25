@@ -173,6 +173,20 @@ function gateLooksFailed(gateText: string): boolean {
   return /^(?:fail|no|reject|mismatch|不符合|排除|不通过)\b/iu.test(gateText.trim());
 }
 
+const PEER_EXCLUSION_WORD_RE = /同行|竞争对手|peer\s*exclusion|competitor/iu;
+const NEGATED_PEER_EXCLUSION_RE =
+  /(?:非|不是|并非|不属于|无|不涉及)\s*(?:同行|竞争对手)|not\s+(?:a\s+)?(?:direct\s+)?(?:peer|competitor)/iu;
+
+function isPositivePeerExclusionHit(out: LegacyQualifyFitOutput): boolean {
+  const roleGate = out.role_gate ?? '';
+  const bizGate = out.business_model_gate ?? '';
+  const gateFailed = gateLooksFailed(roleGate) || gateLooksFailed(bizGate);
+  if (!gateFailed) return false;
+  const text = `${roleGate} ${bizGate} ${(out.reasons ?? []).join(' ')}`;
+  if (!PEER_EXCLUSION_WORD_RE.test(text)) return false;
+  return !NEGATED_PEER_EXCLUSION_RE.test(text);
+}
+
 function gateLooksPassed(gateText: string): boolean {
   return /^(?:pass|yes|match|ok|符合|通过)\b/iu.test(gateText.trim());
 }
@@ -249,9 +263,7 @@ export async function judgeCompanyFitV3(args: {
     verdict: out.verdict,
     industry_track_pass: !gateLooksFailed(out.material_gate ?? ''),
     buyer_role_pass: !gateLooksFailed(out.role_gate ?? ''),
-    peer_exclusion_hit: /同行|竞争对手|peer\s*exclusion|competitor/iu.test(
-      `${out.role_gate ?? ''} ${(out.reasons ?? []).join(' ')}`,
-    ) && out.verdict !== 'match',
+    peer_exclusion_hit: isPositivePeerExclusionHit(out),
   });
   const score = computeFitV3Score(verdict, out);
 

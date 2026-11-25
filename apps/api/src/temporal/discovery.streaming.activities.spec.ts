@@ -112,9 +112,19 @@ describe('streaming discovery activities & rollout switch', () => {
     );
     expect(runUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ status: 'CANCELLED' }),
+        data: expect.objectContaining({
+          status: 'CANCELLED',
+          stats: expect.objectContaining({
+            streaming: expect.objectContaining({
+              stages: expect.objectContaining({
+                l1ExtractFit: expect.objectContaining({ processed: 3 }),
+              }),
+            }),
+          }),
+        }),
       }),
     );
+    expect(tx.$queryRaw).toHaveBeenCalled();
     expect(outboxCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({

@@ -171,6 +171,93 @@ function legacyStageStatus(status: string): StreamingStageStatus {
   return 'running';
 }
 
+function asInt(value: unknown): number {
+  const n = Number(value ?? 0);
+  return Number.isFinite(n) ? Math.trunc(n) : 0;
+}
+
+function resolveTerminalCurrentStage(
+  runStatus: string,
+  recorded: StreamingCurrentStage | undefined,
+): StreamingCurrentStage {
+  if (runStatus === 'CANCELLED') return 'cancelled';
+  if (runStatus === 'FAILED') return 'failed';
+  if (runStatus === 'DONE' || runStatus === 'PARTIAL') return 'done';
+  return recorded ?? 'l1_extract_fit';
+}
+
+function projectExistingStreamingProgress(
+  run: { id: string; status: string; createdAt: Date; completedAt: Date | null },
+  raw: unknown,
+): StreamingRunProgressSnapshot | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const record = raw as Partial<StreamingRunProgressSnapshot>;
+  if (record.pipelineMode !== 'streaming' || !record.stages) return null;
+  return {
+    ...record,
+    runId: run.id,
+    pipelineMode: 'streaming',
+    runStatus: run.status,
+    currentStage: resolveTerminalCurrentStage(run.status, record.currentStage),
+    updatedAt: record.updatedAt ?? (run.completedAt ?? run.createdAt).toISOString(),
+    recentCandidates: Array.isArray(record.recentCandidates) ? record.recentCandidates : [],
+  } as StreamingRunProgressSnapshot;
+}
+
+function synthesizeLegacyStreamingProgress(
+  run: { id: string; status: string; createdAt: Date; completedAt: Date | null },
+  stats: Record<string, unknown>,
+): StreamingRunProgressSnapshot {
+  const stageStatus = legacyStageStatus(run.status);
+  const startedAt = run.createdAt.toISOString();
+  const completedAt = run.completedAt?.toISOString() ?? null;
+  return {
+    runId: run.id,
+    pipelineMode: 'legacy',
+    runStatus: run.status,
+    currentStage: legacyCurrentStage(run.status),
+    updatedAt: completedAt ?? startedAt,
+    stages: {
+      l0Recall: {
+        status: stageStatus,
+        queriesTotal: asInt(stats.queriesTotal),
+        queriesCompleted: asInt(stats.queriesSucceeded),
+        candidatesRecalled: asInt(stats.rawCount),
+        canonicalUpserted: asInt(stats.canonicalCount),
+        startedAt,
+        completedAt,
+      },
+      l1ExtractFit: {
+        status: stageStatus,
+        total: asInt(stats.canonicalCount),
+        processed: asInt(stats.fitEvaluated),
+        rawHttpHits: 0,
+        crawl4aiFallbacks: 0,
+        pdfSkipped: 0,
+        wwwRetries: 0,
+        fitMatch: asInt(stats.fitMatch),
+        fitWeak: asInt(stats.fitWeak),
+        fitMismatch: asInt(stats.fitMismatch),
+        failed: asInt(stats.fitFailed),
+        startedAt,
+        completedAt,
+      },
+      l2TopKEnrich: {
+        status: stageStatus,
+        topKCap: 0,
+        selected: asInt(stats.fitMatch),
+        enriched: asInt(stats.contactsEnriched),
+        contactsFound: asInt(stats.contactsCreated),
+        watchesRegistered: asInt(stats.watchesRegistered),
+        failed: 0,
+        startedAt,
+        completedAt,
+      },
+    },
+    recentCandidates: [],
+  };
+}
+
 /**
  * Reads DiscoveryRun.stats.streaming if present, or synthesizes a clean `pipelineMode: 'legacy'`
  * projection for historical discoveryWorkflow runs so frontend pollers never break.
@@ -186,75 +273,8 @@ export function readStreamingRunProgress(run: {
     run.stats && typeof run.stats === 'object' && !Array.isArray(run.stats)
       ? (run.stats as Record<string, unknown>)
       : {};
-  const raw = stats.streaming;
-  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
-    const record = raw as Partial<StreamingRunProgressSnapshot>;
-    if (record.pipelineMode === 'streaming' && record.stages) {
-      return {
-        ...record,
-        runId: run.id,
-        pipelineMode: 'streaming',
-        runStatus: run.status,
-        currentStage:
-          run.status === 'CANCELLED'
-            ? 'cancelled'
-            : run.status === 'FAILED'
-              ? 'failed'
-              : run.status === 'DONE' || run.status === 'PARTIAL'
-                ? 'done'
-                : (record.currentStage ?? 'l1_extract_fit'),
-        updatedAt: record.updatedAt ?? (run.completedAt ?? run.createdAt).toISOString(),
-        recentCandidates: Array.isArray(record.recentCandidates) ? record.recentCandidates : [],
-      } as StreamingRunProgressSnapshot;
-    }
-  }
-
-  const stageStatus = legacyStageStatus(run.status);
-  const startedAt = run.createdAt.toISOString();
-  const completedAt = run.completedAt?.toISOString() ?? null;
-  return {
-    runId: run.id,
-    pipelineMode: 'legacy',
-    runStatus: run.status,
-    currentStage: legacyCurrentStage(run.status),
-    updatedAt: completedAt ?? startedAt,
-    stages: {
-      l0Recall: {
-        status: stageStatus,
-        queriesTotal: Number(stats.queriesTotal ?? 0) || 0,
-        queriesCompleted: Number(stats.queriesSucceeded ?? 0) || 0,
-        candidatesRecalled: Number(stats.rawCount ?? 0) || 0,
-        canonicalUpserted: Number(stats.canonicalCount ?? 0) || 0,
-        startedAt,
-        completedAt,
-      },
-      l1ExtractFit: {
-        status: stageStatus,
-        total: Number(stats.canonicalCount ?? 0) || 0,
-        processed: Number(stats.fitEvaluated ?? 0) || 0,
-        rawHttpHits: 0,
-        crawl4aiFallbacks: 0,
-        pdfSkipped: 0,
-        wwwRetries: 0,
-        fitMatch: Number(stats.fitMatch ?? 0) || 0,
-        fitWeak: Number(stats.fitWeak ?? 0) || 0,
-        fitMismatch: Number(stats.fitMismatch ?? 0) || 0,
-        failed: Number(stats.fitFailed ?? 0) || 0,
-        startedAt,
-        completedAt,
-      },
-      l2TopKEnrich: {
-        status: stageStatus,
-        topKCap: 0,
-        selected: Number(stats.fitMatch ?? 0) || 0,
-        enriched: Number(stats.contactsEnriched ?? 0) || 0,
-        contactsFound: Number(stats.contactsCreated ?? 0) || 0,
-        watchesRegistered: Number(stats.watchesRegistered ?? 0) || 0,
-        failed: 0,
-        startedAt,
-        completedAt,
-      },
-    },
-    recentCandidates: [],
-  };
+  return (
+    projectExistingStreamingProgress(run, stats.streaming) ??
+    synthesizeLegacyStreamingProgress(run, stats)
+  );
 }

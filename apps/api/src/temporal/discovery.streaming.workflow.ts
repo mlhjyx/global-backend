@@ -113,6 +113,7 @@ export async function discoveryStreamingWorkflow(input: DiscoveryStreamingInput)
   let canonicalCount = 0;
   const l1Results: StreamingL1CompanyResult[] = [];
   let l1Failed = 0;
+  let l2Selected = 0;
   let l2Enriched = 0;
   let l2ContactsFound = 0;
   let l2Failed = 0;
@@ -207,6 +208,7 @@ export async function discoveryStreamingWorkflow(input: DiscoveryStreamingInput)
 
     // ── Stage L2: Top-K bounded enrichment + website watch registration ──
     const topK = selectTopKStreamingCompanies(l1Results, topKCap);
+    l2Selected = topK.length;
     currentStage = 'contacts';
     await streamingActivities.startStreamingL2Stage({
       ...authority,
@@ -307,7 +309,7 @@ export async function discoveryStreamingWorkflow(input: DiscoveryStreamingInput)
           canonicalCount,
           l1Processed: l1Results.length,
           l1Failed,
-          l2Selected: 0,
+          l2Selected,
           l2Enriched,
           l2ContactsFound,
           l2Failed,
