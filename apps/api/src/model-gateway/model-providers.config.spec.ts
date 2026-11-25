@@ -102,30 +102,33 @@ describe('buildGatewayProvider — verified production model transports', () => 
     expect(request().url).toBe('http://gw.test/v1/responses');
   });
 
-  it('Sonnet uses the verified native Messages endpoint and headers', async () => {
-    mockResponse({
-      stop_reason: 'tool_use',
-      model: 'claude-sonnet-5',
-      content: [{ type: 'tool_use', name: 'json', input: { ok: true } }],
-      usage: { input_tokens: 1, output_tokens: 1 },
-    });
-    const provider = buildGatewayProvider(providerEnv());
-    expect(provider).not.toBeNull();
-    await provider!.generateStructured({
-      task: 'site_builder.brand_profile',
-      model: 'claude-sonnet-5',
-      prompt: 'p',
-      schema: {},
-      maxTokens: 100,
-    });
-    expect(request()).toMatchObject({
-      url: 'http://gw.test/v1/messages',
-      headers: {
-        'x-api-key': 'test-key',
-        'anthropic-version': '2023-06-01',
-      },
-    });
-  });
+  it.each(['claude-sonnet-5', 'claude-sonnet-5-5', 'claude-sonnet-4-6', 'claude-fable-5', 'claude-fable-5-1'])(
+    '%s uses the verified native Messages endpoint and headers',
+    async (claudeModel) => {
+      mockResponse({
+        stop_reason: 'tool_use',
+        model: claudeModel,
+        content: [{ type: 'tool_use', name: 'json', input: { ok: true } }],
+        usage: { input_tokens: 1, output_tokens: 1 },
+      });
+      const provider = buildGatewayProvider(providerEnv());
+      expect(provider).not.toBeNull();
+      await provider!.generateStructured({
+        task: 'outreach.first_contact_draft',
+        model: claudeModel,
+        prompt: 'p',
+        schema: {},
+        maxTokens: 100,
+      });
+      expect(request()).toMatchObject({
+        url: 'http://gw.test/v1/messages',
+        headers: {
+          'x-api-key': 'test-key',
+          'anthropic-version': '2023-06-01',
+        },
+      });
+    },
+  );
 
   it('unregistered models keep the existing OpenAI Chat transport', async () => {
     mockResponse({
