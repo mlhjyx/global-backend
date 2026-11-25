@@ -7,11 +7,11 @@
  * 经 `ctx.onDurableReceipt` 上报。
  */
 import { createHash } from 'node:crypto';
-import type { ProviderCompanyRecord } from '../discovery/provider-contract';
+import type { ProviderCompanyRecord } from './provider-contract';
 import {
   DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
   type DiscoveryCompanyResultLineageV1,
-} from '../discovery/company-discovery-lineage';
+} from './company-discovery-lineage';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 
 export const CHANNEL_CATALOG_QUERY_PRODUCER_ID = 'channel_catalog.query' as const;

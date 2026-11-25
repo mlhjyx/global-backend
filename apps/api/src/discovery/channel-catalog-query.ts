@@ -6,13 +6,13 @@
  * 个人联系人字段（contactName/email/phone）留在本表不带入公司级 Raw 记录（遵循数据最小化）。
  */
 import type { PrismaClient } from '@prisma/client';
-import { normalizeCompanyNameTypography } from '../discovery/company-name-format';
-import { normalizeDomain } from '../discovery/identity';
-import { isIso3166Alpha2 } from '../discovery/iso3166';
-import { isStableSafeHttpsUrl } from '../discovery/raw-source-provider-normalizer';
-import { targetCountryCodes } from '../discovery/search-localization';
-import { lookupCountryIso } from '../discovery/vocab';
-import type { ProviderCompanyRecord } from '../discovery/provider-contract';
+import { normalizeCompanyNameTypography } from './company-name-format';
+import { normalizeDomain } from './identity';
+import { isIso3166Alpha2 } from './iso3166';
+import { isStableSafeHttpsUrl } from './raw-source-provider-normalizer';
+import { targetCountryCodes } from './search-localization';
+import { lookupCountryIso } from './vocab';
+import type { ProviderCompanyRecord } from './provider-contract';
 
 export const CHANNEL_CATALOG_DEFAULT_LIMIT = 100;
 export const CHANNEL_CATALOG_MAX_LIMIT = 500;

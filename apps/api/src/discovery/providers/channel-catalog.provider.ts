@@ -20,11 +20,11 @@ import {
   buildChannelCatalogLocalQueryReceipt,
   buildChannelCatalogQueryLineage,
   channelCatalogQueryDigest,
-} from '../../channels/channel-catalog-receipt';
+} from '../channel-catalog-receipt';
 import {
   buildChannelCatalogQueryInput,
   queryChannelCatalogRecords,
-} from '../../channels/channel-catalog-query';
+} from '../channel-catalog-query';
 import type {
   CompanyDiscoveryAdapter,
   CompanyDiscoveryQuery,
