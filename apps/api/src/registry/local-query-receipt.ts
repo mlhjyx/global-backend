@@ -113,7 +113,7 @@ export function buildRegistryLocalQueryReceipt(
   });
 }
 
-/** 回执 → 公司结果血缘（单回执覆盖全部记录索引；空结果给空覆盖，合法）。 */
+/** 回执 → 公司结果血缘（有记录写入 receiptCoverage，0 条记录写入 attemptReceipts，避免回执误落辅助区）。 */
 export function buildRegistryQueryLineage(
   receipt: DurableExecutionReceipt,
   recordCount: number,
@@ -124,7 +124,15 @@ export function buildRegistryQueryLineage(
   return Object.freeze({
     schemaVersion: DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
     recordCount,
-    attemptReceipts: Object.freeze([]),
+    attemptReceipts:
+      recordCount === 0
+        ? Object.freeze([
+            Object.freeze({
+              producerId: REGISTRY_QUERY_PRODUCER_ID,
+              receipt,
+            }),
+          ])
+        : Object.freeze([]),
     receiptCoverage:
       recordCount === 0
         ? Object.freeze([])

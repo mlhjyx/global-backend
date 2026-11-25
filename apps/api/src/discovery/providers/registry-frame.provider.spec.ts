@@ -385,5 +385,41 @@ describe('local_query lineage mode (A 方案)', () => {
       recordIndexes: [0],
       providerRecordCount: 1,
     });
+    expect(plan.auxiliaryReceipts).toEqual([]);
+  });
+
+  it('keeps an empty-result local receipt in company attempts rather than auxiliaryReceipts', async () => {
+    const provider = new RegistryFrameDiscoveryProvider({
+      prisma: prismaReturning([]),
+      lineageEnabled: true,
+    });
+    const { ctx, receipts } = lineageCtx();
+    const result = await provider.discoverCompanies(query({ country: 'IT' }), ctx);
+    expect(result.records).toEqual([]);
+    expect(receipts).toHaveLength(1);
+    const plan = buildGovernedDiscoveryQueryExecutionPlan({
+      lineageEnabled: true,
+      adapters: [provider],
+      settled: [
+        {
+          status: 'fulfilled',
+          value: {
+            key: 'registry_frame',
+            r: result,
+            durableReceipts: receipts as never,
+          },
+        },
+      ],
+    });
+    expect(plan.mode).toBe('governed');
+    if (plan.mode !== 'governed') return;
+    expect(plan.auxiliaryReceipts).toEqual([]);
+    expect(plan.providerPlan.attempts).toHaveLength(1);
+    expect(plan.providerPlan.attempts[0]).toMatchObject({
+      providerKey: 'registry_frame',
+      producerId: 'registry.query',
+      recordIndexes: [],
+      providerRecordCount: 0,
+    });
   });
 });

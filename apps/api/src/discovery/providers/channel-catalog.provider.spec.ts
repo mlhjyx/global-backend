@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { ChannelCatalogDiscoveryProvider } from './channel-catalog.provider';
 import { parseDiscoveryCompanyResultLineage } from '../company-discovery-lineage';
 import { validateRawSourceProviderPayload } from '../raw-source-provider-schema';
+import { buildGovernedDiscoveryQueryExecutionPlan } from '../../temporal/discovery-query-governed-execution';
 
 const WS = '00000000-0000-4000-8000-0000000000a1';
 const RUN = '11111111-1111-4111-8111-111111111111';
@@ -93,6 +94,32 @@ describe('ChannelCatalogDiscoveryProvider (本地已审渠道库 zero-egress)', 
     expect(onDurableReceipt).toHaveBeenCalledTimes(1);
     const receipt = onDurableReceipt.mock.calls[0]?.[1] as { operationKey: string };
     expect(receipt.operationKey.length).toBeLessThanOrEqual(200);
-    expect(parseDiscoveryCompanyResultLineage(res.lineage, 'channel_catalog').recordCount).toBe(0);
+    const parsed = parseDiscoveryCompanyResultLineage(res.lineage, 'channel_catalog');
+    expect(parsed.recordCount).toBe(0);
+    expect(parsed.attemptReceipts).toHaveLength(1);
+    const plan = buildGovernedDiscoveryQueryExecutionPlan({
+      lineageEnabled: true,
+      adapters: [provider],
+      settled: [
+        {
+          status: 'fulfilled',
+          value: {
+            key: 'channel_catalog',
+            r: res,
+            durableReceipts: onDurableReceipt.mock.calls.map(([producerId, r]) => ({ producerId, receipt: r })) as never,
+          },
+        },
+      ],
+    });
+    expect(plan.mode).toBe('governed');
+    if (plan.mode !== 'governed') return;
+    expect(plan.auxiliaryReceipts).toEqual([]);
+    expect(plan.providerPlan.attempts).toHaveLength(1);
+    expect(plan.providerPlan.attempts[0]).toMatchObject({
+      providerKey: 'channel_catalog',
+      producerId: 'channel_catalog.query',
+      recordIndexes: [],
+      providerRecordCount: 0,
+    });
   });
 });
