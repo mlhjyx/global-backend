@@ -59,11 +59,11 @@ const domainSearchBody = {
 };
 
 describe('resolveHunterConfig：env 解析', () => {
-  it('缺省值：无 key、官方 baseUrl、8s 超时、1700 微美元；非法值回退', () => {
+  it('缺省值：无 key、官方 baseUrl、15s 超时、1700 微美元；非法值回退', () => {
     expect(resolveHunterConfig({})).toEqual({
       apiKey: null,
       baseUrl: 'https://api.hunter.io',
-      timeoutMs: 8_000,
+      timeoutMs: 15_000,
       costMicrousd: 1_700,
     });
     expect(
@@ -76,7 +76,7 @@ describe('resolveHunterConfig：env 解析', () => {
     ).toEqual({
       apiKey: null,
       baseUrl: 'https://hunter.example',
-      timeoutMs: 8_000,
+      timeoutMs: 15_000,
       costMicrousd: 1_700,
     });
   });
@@ -192,6 +192,56 @@ describe('HunterProvider.findEmail：HTTP 契约（/v2/email-finder）', () => {
     });
   });
 
+  it('确定性 4xx（400/404/422/451 合法 Hunter errors 载荷）→ miss（成本 0）；鉴权/计费/畸形体仍为 error', async () => {
+    for (const [status, id] of [
+      [400, 'wrong_params'],
+      [400, 'invalid_full_name'],
+      [400, 'invalid_domain'],
+      [404, 'not_found'],
+      [422, 'unprocessable_entity'],
+      [451, 'claimed_email'],
+    ] as const) {
+      const provider = new HunterProvider(
+        resolveHunterConfig({ HUNTER_API_KEY: 'k' }),
+        vi.fn(async () => jsonResponse(status, { errors: [{ id, code: status, details: 'deterministic miss' }] })),
+      );
+      expect(await provider.findEmail(INPUT)).toMatchObject({
+        status: 'miss',
+        costMicrousd: 0,
+        detail: `hunter_http_${status}_${id}`,
+      });
+    }
+
+    for (const [status, body] of [
+      [400, { errors: [{ id: 'insufficient_credits', code: 400, details: 'No credits left' }] }],
+      [400, { errors: [{ id: 'invalid_api_key', code: 401, details: 'Bad key' }] }],
+      [400, { errors: [{ id: 'too_many_requests', code: 429, details: 'Rate limited' }] }],
+      [400, {}],
+      [404, { message: 'nginx not found' }],
+    ] as const) {
+      const provider = new HunterProvider(
+        resolveHunterConfig({ HUNTER_API_KEY: 'k' }),
+        vi.fn(async () => jsonResponse(status, body)),
+      );
+      expect(await provider.findEmail(INPUT)).toMatchObject({
+        status: 'error',
+        retryable: false,
+        costMicrousd: 0,
+      });
+    }
+
+    const htmlError = new HunterProvider(
+      resolveHunterConfig({ HUNTER_API_KEY: 'k' }),
+      vi.fn(async () => new Response('<html>Bad Request</html>', { status: 400 })),
+    );
+    expect(await htmlError.findEmail(INPUT)).toMatchObject({
+      status: 'error',
+      errorCode: 'provider_http_error',
+      retryable: false,
+      costMicrousd: 0,
+    });
+  });
+
   it('429 → 可重试；401 → 不可重试；5xx → 可重试；均不计费', async () => {
     const cases: Array<[number, string, boolean]> = [
       [429, 'rate_limited', true],
@@ -208,6 +258,24 @@ describe('HunterProvider.findEmail：HTTP 契约（/v2/email-finder）', () => {
         errorCode,
         retryable,
         costMicrousd: 0,
+      });
+    }
+  });
+
+  it('支持同集团跨国别 TLD 邮箱（如 enpal.com → @enpal.de、memodo.it → @memodo.de），仍拒绝无关域', async () => {
+    for (const [domain, email] of [
+      ['enpal.com', 'mario.kohle@enpal.de'],
+      ['memodo.it', 'tobias.michl@memodo.de'],
+      ['centroplan.com', 'niklas.reinartz@centroplan.de'],
+    ] as const) {
+      const provider = new HunterProvider(
+        resolveHunterConfig({ HUNTER_API_KEY: 'k' }),
+        vi.fn(async () => jsonResponse(200, { data: { email, score: 92, accept_all: false } })),
+      );
+      expect(await provider.findEmail({ ...INPUT, domain })).toMatchObject({
+        status: 'hit',
+        hit: { email },
+        costMicrousd: 1_700,
       });
     }
   });

@@ -134,6 +134,35 @@ describe('DiscoveryService synthetic provenance read quarantine', () => {
     });
   });
 
+  it('filters generic switchboard placeholder contacts from company detail while keeping named decision makers', async () => {
+    const tx = {
+      canonicalCompany: {
+        findUnique: vi.fn(async () => ({
+          id: 'company-real',
+          name: 'Forme srl',
+          domain: 'formesrl.it',
+          status: 'ENRICHED',
+          attributes: {},
+          contacts: [
+            { id: 'ct-1', fullName: 'Giulio Rossi', title: 'CEO', contactPoints: [] },
+            { id: 'ct-2', fullName: '公开联系点 (info@)', title: 'switchboard', contactPoints: [] },
+            { id: 'ct-3', fullName: 'Company Switchboard', title: null, contactPoints: [] },
+          ],
+        })),
+      },
+      fieldEvidence: {
+        findMany: vi.fn(async () => []),
+      },
+    };
+
+    const result = await serviceWithTx(tx).getCanonicalCompany(ctx, 'company-real');
+    expect(result.company.contacts.map((contact) => contact.id)).toEqual(['ct-1']);
+    expect(tx.fieldEvidence.findMany).toHaveBeenCalledWith({
+      where: { entityId: { in: ['company-real', 'ct-1', 'ct-2', 'ct-3'] } },
+      orderBy: { fetchedAt: 'desc' },
+    });
+  });
+
   it('blocks historical sandbox companies before contact provider routing or external work', async () => {
     const routeContactDiscovery = vi.fn(async () => {
       throw new Error('provider routing must not occur');

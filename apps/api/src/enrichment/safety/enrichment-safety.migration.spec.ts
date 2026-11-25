@@ -186,11 +186,13 @@ describe.runIf(Boolean(ownerUrl && appUrl))('contact enrichment safety schema on
     expect(byName.get('contact_enrichment_execution_step_operation_scope_fkey')?.confdeltype).toBe('a');
   });
 
-  it('expected-facts validator admits only the new schema with all six facts NULL', async () => {
+  it('expected-facts validator admits only the allowlisted schemas with all six facts NULL', async () => {
     const [row] = await owner.$queryRaw<
       Array<{
         hunter_null_ok: boolean;
         hunter_fact_rejected: boolean;
+        prospeo_null_ok: boolean;
+        prospeo_fact_rejected: boolean;
         unknown_rejected: boolean;
         http_get_ok: boolean;
         http_get_bad: boolean;
@@ -203,6 +205,12 @@ describe.runIf(Boolean(ownerUrl && appUrl))('contact enrichment safety schema on
         NOT generic_operation_artifact_expected_facts_valid_v1(
           'contact-email-find-hunter/v1'::text,
           200::smallint, true::boolean, NULL::text, NULL::text, NULL::text, NULL::boolean) AS hunter_fact_rejected,
+        generic_operation_artifact_expected_facts_valid_v1(
+          'contact-email-find-prospeo/v1'::text,
+          NULL::smallint, NULL::boolean, NULL::text, NULL::text, NULL::text, NULL::boolean) AS prospeo_null_ok,
+        NOT generic_operation_artifact_expected_facts_valid_v1(
+          'contact-email-find-prospeo/v1'::text,
+          200::smallint, true::boolean, NULL::text, NULL::text, NULL::text, NULL::boolean) AS prospeo_fact_rejected,
         NOT generic_operation_artifact_expected_facts_valid_v1(
           'contact-email-unknown/v1'::text,
           NULL::smallint, NULL::boolean, NULL::text, NULL::text, NULL::text, NULL::boolean) AS unknown_rejected,
@@ -215,6 +223,8 @@ describe.runIf(Boolean(ownerUrl && appUrl))('contact enrichment safety schema on
     expect(row).toEqual({
       hunter_null_ok: true,
       hunter_fact_rejected: true,
+      prospeo_null_ok: true,
+      prospeo_fact_rejected: true,
       unknown_rejected: true,
       http_get_ok: true,
       http_get_bad: true,
@@ -222,12 +232,21 @@ describe.runIf(Boolean(ownerUrl && appUrl))('contact enrichment safety schema on
   });
 
   it('typed verification receipts pass the generic receipt-facts gate', async () => {
-    const [row] = await owner.$queryRaw<Array<{ ok: boolean }>>`
-      SELECT execution_receipt_facts_valid_v1(
-        'contact-email-verify-millionverifier/v1',
-        '{"currency":"USD","unit":"microusd","callCount":1,"chargedMicrousd":"1000","upperBoundMicrousd":"1000"}'::jsonb,
-        'provider_reported') AS ok`;
-    expect(row.ok).toBe(true);
+    const [row] = await owner.$queryRaw<Array<{ mv: boolean; emailable: boolean; zerobounce: boolean }>>`
+      SELECT
+        execution_receipt_facts_valid_v1(
+          'contact-email-verify-millionverifier/v1',
+          '{"currency":"USD","unit":"microusd","callCount":1,"chargedMicrousd":"1000","upperBoundMicrousd":"1000"}'::jsonb,
+          'provider_reported') AS mv,
+        execution_receipt_facts_valid_v1(
+          'contact-email-verify-emailable/v1',
+          '{"currency":"USD","unit":"microusd","callCount":1,"chargedMicrousd":"7600","upperBoundMicrousd":"7600"}'::jsonb,
+          'estimated_upper_bound') AS emailable,
+        execution_receipt_facts_valid_v1(
+          'contact-email-verify-zerobounce/v1',
+          '{"currency":"USD","unit":"microusd","callCount":1,"chargedMicrousd":"9900","upperBoundMicrousd":"9900"}'::jsonb,
+          'estimated_upper_bound') AS zerobounce`;
+    expect(row).toEqual({ mv: true, emailable: true, zerobounce: true });
   });
 
   it('the privilege manifest names both new tables with the same column grants', async () => {
@@ -239,5 +258,42 @@ describe.runIf(Boolean(ownerUrl && appUrl))('contact enrichment safety schema on
     }
     expect(Object.keys(manifest.columns[HEAD]).sort()).toEqual([...HEAD_UPDATE_COLUMNS].sort());
     expect(Object.keys(manifest.columns[STEP]).sort()).toEqual([...STEP_UPDATE_COLUMNS].sort());
+  });
+});
+
+describe('Prospeo artifact expected-facts migration contract (20261125163000)', () => {
+  const migrationPath = path.resolve(
+    import.meta.dirname,
+    '../../../../../packages/db/prisma/migrations/20261125163000_prospeo_artifact_expected_facts_allowlist/migration.sql',
+  );
+
+  it('adds contact-email-find-prospeo/v1 while preserving signature, search_path, invoker mode and zero grants', () => {
+    const sql = readFileSync(migrationPath, 'utf8');
+    expect(sql).toMatch(/^BEGIN;/mu);
+    expect(sql).toContain("SET LOCAL lock_timeout = '5s';");
+    expect(sql).toContain("SET LOCAL statement_timeout = '60s';");
+    expect(sql).toContain('CREATE OR REPLACE FUNCTION public.generic_operation_artifact_expected_facts_valid_v1(');
+    expect(sql).toContain('RETURNS BOOLEAN');
+    expect(sql).toContain('LANGUAGE SQL');
+    expect(sql).toContain('IMMUTABLE');
+    expect(sql).not.toMatch(/SECURITY\s+DEFINER/iu);
+    expect(sql).toContain('SET search_path = pg_catalog, public, pg_temp');
+    expect(sql).toMatch(
+      /WHEN 'contact-email-find-prospeo\/v1' THEN\s+p_expected_http_status IS NULL\s+AND p_expected_http_ok IS NULL\s+AND p_expected_sanitized_url IS NULL\s+AND p_expected_content_hash IS NULL\s+AND p_expected_blocked_code IS NULL\s+AND p_expected_robots_blocked IS NULL/su,
+    );
+    for (const schema of [
+      'sanctions-download/v1',
+      'contact-email-find-hunter/v1',
+      'http-get/v1',
+      'crawl4ai-fetch/v1',
+      'crawl4ai-render/v1',
+    ]) {
+      expect(sql).toContain(`WHEN '${schema}' THEN`);
+    }
+    expect(sql).toContain('ELSE false');
+    expect(sql).toMatch(
+      /REVOKE ALL ON FUNCTION public\.generic_operation_artifact_expected_facts_valid_v1\(\s*TEXT,\s*SMALLINT,\s*BOOLEAN,\s*TEXT,\s*TEXT,\s*TEXT,\s*BOOLEAN\s*\)\s+FROM PUBLIC, app_user, execution_budget_platform_writer;/su,
+    );
+    expect(sql.trimEnd()).toMatch(/COMMIT;$/u);
   });
 });

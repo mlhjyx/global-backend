@@ -427,6 +427,101 @@ describe("four original-parser controlled HTTP Tools; fake resolver/transport on
       reason: "no_match",
     });
   });
+  it.each([
+    [400, { error: true, error_code: "NO_MATCH" }],
+    [400, { error: true, error_code: "INVALID_DATAPOINTS" }],
+    [404, { error: true, error_code: "NO_MATCH" }],
+    [422, { error: true, error_code: "INVALID_DATAPOINTS" }],
+  ] as const)(
+    "settles deterministic Prospeo HTTP %s miss cleanly without BUDGET_OPERATION_REPLAY_UNAVAILABLE",
+    async (status, body) => {
+      const x = world("prospeo", { status, body });
+      const result = await x.tool.execute({ stepId: STEP }, x.context);
+      expect(result.costMicrousd).toBe("1700");
+      expect(result.data).toEqual({
+        status: "miss",
+        email: null,
+        providerConfidence: null,
+        acceptAll: null,
+        pattern: null,
+        reason: "no_match",
+      });
+      expect(x.executePinned).toHaveBeenCalledTimes(1);
+    },
+  );
+  it.each([
+    [400, { errors: [{ id: "wrong_params", code: 400, details: "Missing last_name" }] }],
+    [400, { errors: [{ id: "invalid_full_name", code: 400, details: "Invalid name" }] }],
+    [404, { errors: [{ id: "not_found", code: 404, details: "Not found" }] }],
+    [422, { errors: [{ id: "unprocessable_entity", code: 422, details: "Invalid domain" }] }],
+    [451, { errors: [{ id: "claimed_email", code: 451, details: "GDPR opt-out" }] }],
+  ] as const)(
+    "settles deterministic Hunter HTTP %s miss cleanly without BUDGET_OPERATION_REPLAY_UNAVAILABLE",
+    async (status, body) => {
+      const x = world("hunter", { status, body });
+      const result = await x.tool.execute({ stepId: STEP }, x.context);
+      expect(result.costMicrousd).toBe("1700");
+      expect(result.data).toEqual({
+        status: "miss",
+        email: null,
+        providerConfidence: null,
+        acceptAll: null,
+        pattern: null,
+        reason: "no_match",
+      });
+      expect(x.executePinned).toHaveBeenCalledTimes(1);
+    },
+  );
+  it.each([
+    ["prospeo", 400, { error: true, error_code: "INSUFFICIENT_CREDITS" }],
+    ["prospeo", 400, {}],
+    ["prospeo", 401, { error: true, error_code: "INVALID_API_KEY" }],
+    ["prospeo", 403, { error: true, error_code: "FORBIDDEN" }],
+    ["hunter", 400, { errors: [{ id: "insufficient_credits", code: 400 }] }],
+    ["hunter", 400, {}],
+    ["hunter", 401, { errors: [{ id: "unauthorized", code: 401 }] }],
+    ["hunter", 403, { errors: [{ id: "forbidden", code: 403 }] }],
+    ["millionverifier", 400, { error: "bad_request" }],
+    ["emailable", 422, { message: "unprocessable" }],
+    ["zerobounce", 404, { error: "not_found" }],
+  ] as const)(
+    "preserves fail-closed unknownResult for %s HTTP %s non-miss or auth/billing responses",
+    async (provider, status, body) => {
+      const x = world(provider, { status, body });
+      await expect(
+        x.tool.execute({ stepId: STEP }, x.context),
+      ).rejects.toThrow("BUDGET_OPERATION_REPLAY_UNAVAILABLE");
+      expect(x.executePinned).toHaveBeenCalledTimes(1);
+    },
+  );
+  it.each(["hunter", "prospeo"] as const)(
+    "preserves fail-closed unknownResult for %s HTTP 400 unparseable body",
+    async (provider) => {
+      const x = world(provider, { status: 400, rawBody: "<html>Bad Request</html>" });
+      await expect(
+        x.tool.execute({ stepId: STEP }, x.context),
+      ).rejects.toThrow("BUDGET_OPERATION_REPLAY_UNAVAILABLE");
+      expect(x.executePinned).toHaveBeenCalledTimes(1);
+    },
+  );
+  it("logs non-PII provider and HTTP status diagnostics without leaking email or API key", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const x = world("hunter", {
+        status: 400,
+        body: { errors: [{ id: "wrong_params", code: 400, details: "secret@company.example.invalid" }] },
+      });
+      await x.tool.execute({ stepId: STEP }, x.context);
+      expect(warn).toHaveBeenCalled();
+      const logged = warn.mock.calls.map((args) => args.join(" ")).join("\n");
+      expect(logged).toContain("provider=hunter");
+      expect(logged).toContain("http_status=400");
+      expect(logged).not.toContain("secret@");
+      expect(logged).not.toContain("fake");
+    } finally {
+      warn.mockRestore();
+    }
+  });
   it("keeps a complete provider UNKNOWN verdict distinct from transport/error UNKNOWN", async () => {
     const x = world("millionverifier", {
       body: { result: "unknown", accept_all: false },

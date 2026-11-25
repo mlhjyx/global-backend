@@ -115,5 +115,7 @@ export function isGenericSwitchboardContact(contact: {
   const title = (contact.title ?? '').trim().toLowerCase();
   if (title === GENERIC_CONTACT_TITLE) return true;
   const name = (contact.fullName ?? '').trim();
-  return name.startsWith('公开联系点');
+  if (name.startsWith('公开联系点')) return true;
+  const lowerName = name.toLowerCase();
+  return lowerName === 'company switchboard' || lowerName === 'switchboard';
 }

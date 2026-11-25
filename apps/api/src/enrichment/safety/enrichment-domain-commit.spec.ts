@@ -195,6 +195,25 @@ describe('Batch 1.6: Prospeo only_verified_email attestation & unverified point 
     );
   });
 
+  it('accepts corporate-group sibling TLD emails from Hunter (e.g. enpal.com -> @enpal.de) without HOLD', async () => {
+    const x = domainWorld();
+    const siblingInput = { fullName: 'Mario Kohle', domain: 'enpal.com', companyName: 'Enpal Italia Srl' };
+    const inputVersion = enrichmentInputVersion(siblingInput);
+    const hunterMat = x.materialized[0]!;
+    if (hunterMat.phase !== 'FINDER') throw new Error('expected finder');
+    Object.assign(hunterMat.result, { email: 'mario.kohle@enpal.de' });
+    Object.assign(x.state, {
+      currentInput: siblingInput,
+      target: {
+        ...x.state.target,
+        inputVersion,
+        beforeDigest: contactTargetBeforeDigest({ inputVersion, points: [] }),
+      },
+    });
+    const result = await x.committer.commitContact(address, x.stepIds, 'synthetic-actor');
+    expect(result).toMatchObject({ status: 'APPLIED', reasonCode: 'STORED', state: 'VALID', newCandidatePoints: 1 });
+  });
+
   it('allows upgrading an existing unverified (UNKNOWN) email point without INPUT_CONFLICT', async () => {
     const x = domainWorld();
     const unverifiedPoint = {

@@ -646,7 +646,16 @@ export function createContactEnrichmentSafetyRuntime(deps: ContactEnrichmentSafe
       const record = await query.loadByRef({ workspaceId, companyId }, operationRef);
       return record ? { view: record.view, workspaceId, companyId, businessRunId: record.businessRunId, accountKey: record.accountKey, admissionRequestSha256: record.admissionRequestSha256 } : null;
     },
-    execute: ({ view, workspaceId, companyId, actorId, mode }) => executeView(view, workspaceId, companyId, actorId, mode),
+    execute: async ({ view, workspaceId, companyId, actorId, mode }) => {
+      try {
+        return await executeView(view, workspaceId, companyId, actorId, mode);
+      } catch (error) {
+        if (mode === 'EXECUTE') {
+          await releaseUnstartedAdmittedSteps(prisma, workspaceId, view.executionId);
+        }
+        throw error;
+      }
+    },
   };
   const resultsAdapters: ContactEnrichmentResultsAdapterDeps = {
     database: prisma,
@@ -806,6 +815,21 @@ export async function createWorkerContactEnrichmentSafety(input: {
     buildBroker: (ports) => buildToolBroker({ sourcePolicyReader: input.sourcePolicyReader, paidLedger: input.costLedger as never, budgetStore: input.budgetStore, prisma: input.prisma, ...(ports ? { contactEnrichment: ports } : {}) }),
   });
 }
+async function releaseUnstartedAdmittedSteps(
+  transactions: ContactEnrichmentPreparationDeps['prisma'],
+  workspaceId: string,
+  executionId: string,
+): Promise<void> {
+  try {
+    await transactions.withWorkspace(workspaceId, (tx) =>
+      tx.$queryRaw`UPDATE public.contact_enrichment_execution_step SET dispatch_phase='RELEASED'
+        WHERE workspace_id=${workspaceId}::uuid AND execution_id=${executionId}::uuid AND dispatch_phase='ADMITTED' AND budget_operation_id IS NULL`,
+    );
+  } catch {
+    /* best-effort fence cleanup for never-started steps */
+  }
+}
+
 async function loadStepRowByStep(transactions: ContactEnrichmentPreparationDeps['prisma'], workspaceId: string, stepId: string): Promise<import('./enrichment-safety.contract').EnrichmentRuntimeStepRow> {
   return transactions.withWorkspace(workspaceId, async (tx) => {
     const rows = await tx.$queryRaw<import('./enrichment-safety.contract').EnrichmentRuntimeStepRow[]>`SELECT s.id::text,s.workspace_id::text,s.execution_id::text,s.contact_id::text,s.contact_ordinal,s.slot_key,s.phase,s.provider,s.tool_id,s.tool_version,s.quote_microusd,s.pricing_version,s.depends_on_slot_key,

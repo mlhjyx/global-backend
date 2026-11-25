@@ -1,5 +1,6 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
-import type { LawfulBasis } from '../../discovery/provider-contract';
+import { GENERIC_CONTACT_TITLE, type LawfulBasis } from '../../discovery/provider-contract';
+import { isGenericSwitchboardContact } from '../../discovery/providers/contact-quality-filter';
 import {
   ENRICH_COMPANY_CONCURRENCY,
   ENRICH_SOFT_DEADLINE_MS,
@@ -8,7 +9,10 @@ import {
   MAX_ENRICH_VERIFICATION_CALLS_PER_ADDRESS,
 } from '../../discovery/execution-envelope';
 import { checkProviderGates } from '../provider-gates';
-import type { EmailEnrichmentAdapter } from '../finders/email-enrichment-provider';
+import {
+  personNameParts,
+  type EmailEnrichmentAdapter,
+} from '../finders/email-enrichment-provider';
 import {
   resolveConfiguredVerificationProviders,
   withSmtpProbeFallback,
@@ -315,19 +319,30 @@ export async function loadContactEnrichmentTargets(
     select: { id: true, name: true, domain: true },
   });
   if (!company?.domain) return { company: null, contacts: [] as Array<{ id: string; fullName: string }> };
-  const contacts = await tx.canonicalContact.findMany({
+  const rows = await tx.canonicalContact.findMany({
     where: {
       companyId: input.companyId,
       ...(input.contactIds ? { id: { in: input.contactIds } } : {}),
+      OR: [
+        { title: null },
+        { NOT: { title: { equals: GENERIC_CONTACT_TITLE, mode: 'insensitive' } } },
+      ],
       // 默认只补缺 email 点；显式开启 includeUnverifiedEmails 时扩展至仅有 CATCH_ALL_RISKY/UNKNOWN 而无 VALID 邮箱的联系人。
       contactPoints: input.includeUnverifiedEmails
         ? { none: { type: 'email', verificationState: 'VALID' } }
         : { none: { type: 'email' } },
     },
-    select: { id: true, fullName: true },
+    select: { id: true, fullName: true, title: true },
     orderBy: { createdAt: 'asc' },
     take: maxContacts,
   });
+  const contacts = rows
+    .filter(
+      (contact) =>
+        !isGenericSwitchboardContact(contact) &&
+        personNameParts(contact.fullName) !== null,
+    )
+    .map(({ id, fullName }) => ({ id, fullName }));
   return { company, contacts };
 }
 

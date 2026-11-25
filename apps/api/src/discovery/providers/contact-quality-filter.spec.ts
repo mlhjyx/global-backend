@@ -57,6 +57,11 @@ describe('contact-quality-filter', () => {
 
   it('identifies generic switchboard placeholder contacts', () => {
     expect(isGenericSwitchboardContact({ fullName: '公开联系点 (info@)', title: 'switchboard' })).toBe(true);
+    expect(isGenericSwitchboardContact({ fullName: 'Any Label', title: 'Switchboard' })).toBe(true);
+    expect(isGenericSwitchboardContact({ fullName: '公开联系点 (sales@)', title: null })).toBe(true);
+    expect(isGenericSwitchboardContact({ fullName: 'Company Switchboard', title: null })).toBe(true);
+    expect(isGenericSwitchboardContact({ fullName: 'Switchboard', title: null })).toBe(true);
     expect(isGenericSwitchboardContact({ fullName: 'Marco Rossi', title: 'CEO' })).toBe(false);
+    expect(isGenericSwitchboardContact({ fullName: 'Marco Rossi', title: null })).toBe(false);
   });
 });

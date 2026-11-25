@@ -1,5 +1,5 @@
 import { prepareDiscoveryExecutionMetadata } from './discovery-execution-metadata';
-import { loadCanonicalCompanyChannels } from './company-channels';
+import { filterDecisionMakerContacts, loadCanonicalCompanyChannels } from './company-channels';
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
@@ -365,7 +365,7 @@ export class DiscoveryService {
         });
       }
       const channels = await loadCanonicalCompanyChannels(tx, company);
-      return { company, evidence, ...channels };
+      return { company: { ...company, contacts: filterDecisionMakerContacts(company.contacts) }, evidence, ...channels };
     });
   }
 

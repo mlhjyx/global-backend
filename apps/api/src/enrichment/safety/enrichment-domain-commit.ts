@@ -166,7 +166,7 @@ export class EnrichmentDomainCommitter {
     const finder = this.singleFinder(results);
     const candidate = parseContactEmailFindPayload(finder.result);
     if (candidate.status === "miss" && results.length !== 1) return this.hold();
-    if (candidate.email !== null && normalizeEnrichedEmail(candidate.email, state.currentInput.domain, { allowCorporateGroup: finder.step.provider === "prospeo" }) !== candidate.email) return this.hold();
+    if (candidate.email !== null && normalizeEnrichedEmail(candidate.email, state.currentInput.domain, { allowCorporateGroup: true }) !== candidate.email) return this.hold();
     if (!isValidLawfulBasis(state.lawfulBasis)) return this.hold();
     if (!(await this.deps.authorizeCurrent(tx, address, candidate.email ?? undefined))) {
       await this.deps.store.savePending(tx, address, "SUPPRESSED");
