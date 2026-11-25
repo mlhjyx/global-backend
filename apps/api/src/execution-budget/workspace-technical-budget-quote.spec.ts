@@ -171,7 +171,7 @@ describe('WorkspaceTechnicalBudgetQuoteService', () => {
 
   it('no longer quotes enrich-contacts as the 1 µUSD representation minimum', () => {
     const quote = enrichQuote({});
-    expect(quote.requiredCapMicrousd).toBe('400000');
+    expect(quote.requiredCapMicrousd).toBe('600000');
     expect(quote.purpose).toBe('contact.enrich');
     expect(quote.schemaVersion).toBe('execution-budget-technical-quote/v1');
   });
