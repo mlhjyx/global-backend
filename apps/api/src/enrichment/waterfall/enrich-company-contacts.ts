@@ -17,7 +17,9 @@ import type { EmailVerificationProvider } from '../verification/email-verificati
 import type { ExecutionBroker } from '../../tools/tool-contract';
 import { CapBudget, CompositeBudget, DEFAULT_PER_CONTACT_CAP_MICROUSD, type EnrichmentBudget } from './enrichment-budget';
 import { enrichContactEmail, MAX_FINDER_ATTEMPTS, type EnrichContactResult } from './enrich-contact-email';
+import { loadCompanyEnrichmentMeta, loadKnownCompanyEmailSamples } from './step0-pattern-inference';
 import type { CircuitBreakerStore } from './circuit-breaker';
+import { prioritizeBuyingCommitteeContacts } from '../buying-committee';
 
 /**
  * P1-10：公司级富集编排（HTTP 端点与 run activity 共用的核心）。
@@ -162,9 +164,21 @@ export async function enrichCompanyContacts(
   const budget =
     deps.budget ?? new CapBudget(maxContacts * DEFAULT_PER_CONTACT_CAP_MICROUSD);
 
-  const loaded = await deps.prisma.withWorkspace(input.workspaceId, (tx) =>
-    loadContactEnrichmentTargets(tx, input, maxContacts),
-  );
+  const loaded = await deps.prisma.withWorkspace(input.workspaceId, async (tx) => {
+    const targets = await loadContactEnrichmentTargets(tx, input, maxContacts);
+    const knownSamples = targets.company
+      ? await loadKnownCompanyEmailSamples(tx, input.companyId)
+      : [];
+    const meta =
+      targets.company && targets.contacts.length > 0
+        ? await loadCompanyEnrichmentMeta(
+            tx,
+            input.companyId,
+            targets.contacts.map((c) => c.id),
+          )
+        : { country: null, titleByContactId: new Map<string, string | null>() };
+    return { ...targets, knownSamples, meta };
+  });
   const domain = loaded.company?.domain ?? null;
   if (!loaded.company || !domain) {
     return { companyId: input.companyId, tier, skipped: 'no_domain', attempted: 0, costMicrousd: 0, deadlineHit: false, results: [] };
@@ -173,6 +187,13 @@ export async function enrichCompanyContacts(
     return { companyId: input.companyId, tier, skipped: 'no_contacts', attempted: 0, costMicrousd: 0, deadlineHit: false, results: [] };
   }
   const companyName = loaded.company.name;
+  const companyCountry = loaded.meta.country;
+  const knownSamples = [...loaded.knownSamples];
+  // 决策委员会 4 轨优先级排序：sourcing → technical → executive → assistant 优先消耗有限的每公司 10 次 finder 预算
+  const prioritizedContacts = prioritizeBuyingCommitteeContacts(
+    loaded.contacts.map((c) => ({ ...c, title: loaded.meta.titleByContactId.get(c.id) ?? null })),
+    maxContacts,
+  );
 
   const results: EnrichCompanyContactsResult['results'] = [];
   let remainingFinderCalls = finderCallCap;
@@ -180,7 +201,7 @@ export async function enrichCompanyContacts(
   let attempted = 0;
   let deadlineHit = false;
 
-  for (const contact of loaded.contacts) {
+  for (const contact of prioritizedContacts) {
     if (now().getTime() >= deadlineAtMs) {
       deadlineHit = true;
       results.push({ contactId: contact.id, status: 'skipped_deadline' });
@@ -209,12 +230,17 @@ export async function enrichCompanyContacts(
           input.maxProvidersPerContact ?? MAX_FINDER_ATTEMPTS,
         ),
         maxVerificationCalls: input.maxVerificationCalls,
+        onValidEmail: (email) => {
+          knownSamples.push({ fullName: contact.fullName, email });
+        },
       },
       {
         workspaceId: input.workspaceId,
         contactId: contact.id,
         fullName: contact.fullName,
         domain,
+        country: companyCountry,
+        ...(knownSamples.length > 0 ? { knownCompanyEmailSamples: knownSamples } : {}),
         companyName,
         ...(input.runId ? { runId: input.runId } : {}),
         accountKey: input.accountKey,

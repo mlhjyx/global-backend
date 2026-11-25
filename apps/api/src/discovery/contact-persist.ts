@@ -3,6 +3,7 @@ import { contactIdentity, contactSuppressionKeys, declinedContactIdentity } from
 import { resolvePersonIdentity, PersonResolveHit } from './person-identity';
 import { LawfulBasis, ProviderContactRecord } from './provider-contract';
 import { encryptPii, blindContactKey } from '../compliance/pii-crypto';
+import { scheduleArticle14NoticeInTransaction } from '../compliance/article14-lia.service';
 import { cleanEmail } from '../acquisition/clean';
 import { classifyContactEmail } from './contact-classifier';
 import { canonicalizeSuppressionValue, canonicalizeSuppressionValues,
@@ -77,8 +78,8 @@ export async function persistDiscoveredContacts(
   // 🔒 Codex P1「Prevent inserts after the company contact re-read」的写入侧硬底：在**本写入事务内**对公司行
   // 取 FOR SHARE 锁并复读 status（与删除擦除活动的 FOR UPDATE 互斥）。载入闸门在长网络 fan-out 后可能已失效
   //（发现载入时 ACTIVE、擦除随后标 SUPPRESSED）——此处是提交前最后一道确定性闸：公司已 SUPPRESSED 则整批不入库。
-  const locked = await tx.$queryRaw<{ status: string; name: string; domain: string | null }[]>`
-    SELECT status, name, domain FROM canonical_company WHERE id = ${args.company.id}::uuid FOR SHARE`;
+  const locked = await tx.$queryRaw<{ status: string; name: string; domain: string | null; country?: string | null }[]>`
+    SELECT status, name, domain, country FROM canonical_company WHERE id = ${args.company.id}::uuid FOR SHARE`;
   if (!locked[0] || locked[0].status === 'SUPPRESSED') {
     return {
       created: 0,
@@ -253,10 +254,45 @@ export async function persistDiscoveredContacts(
         },
       });
     }
+    await maybeScheduleContactArticle14(tx, {
+      workspaceId: args.workspaceId,
+      contactId,
+      country: locked[0].country,
+      adapterKey: args.adapterKey,
+      email,
+      personalData: c.personalData,
+    });
     if (hit) merged += 1;
     else created += 1;
   }
   return { created, merged, skippedSuppressed, skippedInvalid };
+}
+
+/** 具名联系人或 personal/other 邮箱在 EU/UK 入库时同事务排期 GDPR Art.14 通知。 */
+async function maybeScheduleContactArticle14(
+  tx: Prisma.TransactionClient,
+  args: {
+    workspaceId: string;
+    contactId: string;
+    country?: string | null;
+    adapterKey: string;
+    email?: string;
+    personalData?: boolean;
+  },
+): Promise<void> {
+  if (!args.country) return;
+  const emailType = args.email ? classifyContactEmail(args.email).emailType : null;
+  const isPersonalRecord =
+    Boolean(args.personalData) || emailType === 'personal' || emailType === 'other';
+  if (!isPersonalRecord) return;
+  const noticeModel = (tx as { article14Notice?: { findFirst?: unknown } }).article14Notice;
+  if (typeof noticeModel?.findFirst !== 'function') return;
+  await scheduleArticle14NoticeInTransaction(tx, {
+    workspaceId: args.workspaceId,
+    subjectId: args.contactId,
+    country: args.country,
+    sourceCategory: args.adapterKey,
+  });
 }
 
 /**

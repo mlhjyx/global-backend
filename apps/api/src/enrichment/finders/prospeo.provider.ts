@@ -31,6 +31,8 @@ export interface ProspeoConfig {
   baseUrl: string;
   timeoutMs: number;
   costMicrousd: number;
+  /** 可选：请求最小间隔毫秒（QPS 限速，生产 env PROSPEO_MIN_INTERVAL_MS=600；缺省 0 不等待）。 */
+  minIntervalMs?: number;
 }
 
 export function resolveProspeoConfig(env: NodeJS.ProcessEnv = process.env): ProspeoConfig {
@@ -38,12 +40,14 @@ export function resolveProspeoConfig(env: NodeJS.ProcessEnv = process.env): Pros
     const parsed = Number.parseInt(raw ?? '', 10);
     return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
   };
+  const minInterval = positiveInt(env.PROSPEO_MIN_INTERVAL_MS, 0);
   return {
     apiKey: (env.PROSPEO_API_KEY ?? '').trim() || null,
     baseUrl: (env.PROSPEO_BASE_URL ?? 'https://api.prospeo.io').replace(/\/+$/u, ''),
     timeoutMs: positiveInt(env.PROSPEO_TIMEOUT_MS, 8_000),
     // $49/mo（2,000 credits）≈ $0.0245；年付 $0.0166–$0.0198 → 取月付口径 19800 微美元。
     costMicrousd: positiveInt(env.PROSPEO_COST_MICROUSD, 19_800),
+    ...(minInterval > 0 ? { minIntervalMs: minInterval } : {}),
   };
 }
 
@@ -123,17 +127,42 @@ export function parseProspeoResponse(raw: unknown): ProspeoParse {
   return { ok: true, email, confidence: null, extra: { provider: 'prospeo' } };
 }
 
+const PROSPEO_MAX_429_RETRIES = 2;
+const PROSPEO_RETRY_CAP_MS = 5_000;
+
+function parseRetryAfterMs(header: string | null, attempt: number, baseMs: number): number {
+  const fallback = Math.min(PROSPEO_RETRY_CAP_MS, baseMs * (attempt + 1));
+  if (!header) return fallback;
+  const secs = Number.parseFloat(header.trim());
+  if (Number.isFinite(secs) && secs >= 0) {
+    return Math.min(PROSPEO_RETRY_CAP_MS, Math.round(secs * 1000));
+  }
+  return fallback;
+}
+
 export class ProspeoProvider implements EmailEnrichmentAdapter {
   readonly key = 'prospeo' as const;
   readonly domain = 'api.prospeo.io';
   readonly class = 'b2b_company_person' as const;
   readonly costMicrousd: number;
+  private nextAllowedAt = 0;
 
   constructor(
     private readonly config: ProspeoConfig = resolveProspeoConfig(),
     private readonly fetchImpl: typeof fetch = fetch,
+    private readonly sleepImpl: (ms: number) => Promise<void> = (ms) =>
+      new Promise((resolve) => setTimeout(resolve, ms)),
   ) {
     this.costMicrousd = config.costMicrousd;
+  }
+
+  private async waitForPacingSlot(): Promise<void> {
+    const interval = this.config.minIntervalMs ?? 0;
+    if (interval <= 0) return;
+    const now = Date.now();
+    const waitMs = Math.max(0, this.nextAllowedAt - now);
+    this.nextAllowedAt = Math.max(now, this.nextAllowedAt) + interval;
+    if (waitMs > 0) await this.sleepImpl(waitMs);
   }
 
   isConfigured(): boolean {
@@ -148,43 +177,55 @@ export class ProspeoProvider implements EmailEnrichmentAdapter {
     const startedAt = Date.now();
     if (!this.config.apiKey) return unconfiguredFindEmailOutcome();
 
-    let response: Response;
+    let response: Response | null = null;
     const nameParts = splitProspeoName(input.fullName);
-    try {
-      response = await this.fetchImpl(new URL(`${this.config.baseUrl}/enrich-person`), {
-        method: 'POST',
-        headers: {
-          'x-key': this.config.apiKey,
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({
-          data: {
-            full_name: input.fullName,
-            ...(nameParts.firstName ? { first_name: nameParts.firstName } : {}),
-            ...(nameParts.lastName ? { last_name: nameParts.lastName } : {}),
-            company_website: input.domain,
-            ...(input.companyName ? { company_name: input.companyName } : {}),
-            ...(input.linkedinUrl ? { linkedin_url: input.linkedinUrl } : {}),
+    const retryBaseMs = Math.max(200, this.config.minIntervalMs ?? 200);
+    const body = JSON.stringify({
+      data: {
+        full_name: input.fullName,
+        ...(nameParts.firstName ? { first_name: nameParts.firstName } : {}),
+        ...(nameParts.lastName ? { last_name: nameParts.lastName } : {}),
+        company_website: input.domain,
+        ...(input.companyName ? { company_name: input.companyName } : {}),
+        ...(input.linkedinUrl ? { linkedin_url: input.linkedinUrl } : {}),
+      },
+      only_verified_email: true,
+    });
+
+    for (let attempt = 0; attempt <= PROSPEO_MAX_429_RETRIES; attempt += 1) {
+      await this.waitForPacingSlot();
+      try {
+        response = await this.fetchImpl(new URL(`${this.config.baseUrl}/enrich-person`), {
+          method: 'POST',
+          headers: {
+            'x-key': this.config.apiKey,
+            'content-type': 'application/json',
           },
-          only_verified_email: true,
-        }),
-        signal: AbortSignal.timeout(this.config.timeoutMs),
-      });
-    } catch (error) {
-      const timedOut =
-        error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
-      return {
-        status: 'error',
-        errorCode: timedOut ? 'timeout' : 'network_error',
-        retryable: true,
-        costMicrousd: 0,
-        latencyMs: Date.now() - startedAt,
-        detail: timedOut ? 'prospeo_timeout' : 'prospeo_network_error',
-      };
+          body,
+          signal: AbortSignal.timeout(this.config.timeoutMs),
+        });
+      } catch (error) {
+        const timedOut =
+          error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
+        return {
+          status: 'error',
+          errorCode: timedOut ? 'timeout' : 'network_error',
+          retryable: true,
+          costMicrousd: 0,
+          latencyMs: Date.now() - startedAt,
+          detail: timedOut ? 'prospeo_timeout' : 'prospeo_network_error',
+        };
+      }
+      if (response.status === 429 && attempt < PROSPEO_MAX_429_RETRIES) {
+        const delayMs = parseRetryAfterMs(response.headers?.get?.('retry-after') ?? null, attempt, retryBaseMs);
+        await this.sleepImpl(delayMs);
+        continue;
+      }
+      break;
     }
 
     const latencyMs = Date.now() - startedAt;
-    if (response.status === 429) {
+    if (!response || response.status === 429) {
       return {
         status: 'error',
         errorCode: 'rate_limited',
@@ -230,7 +271,10 @@ export class ProspeoProvider implements EmailEnrichmentAdapter {
     if (parsed.email === null) {
       return { status: 'miss', costMicrousd: 0, latencyMs, detail: 'prospeo_no_match' };
     }
-    const email = normalizeEnrichedEmail(parsed.email, input.domain);
+    const email = normalizeEnrichedEmail(parsed.email, input.domain, {
+      allowCorporateGroup: true,
+      verifiedAliasDomains: input.verifiedAliasDomains,
+    });
     if (!email) {
       return {
         status: 'error',

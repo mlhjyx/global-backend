@@ -5,6 +5,8 @@ import {
   buildReferralFirstInfoDraft,
   classifyBuyingCommitteeTrack,
   classifyContactChannelTier,
+  localizedCommitteeXrayQuery,
+  prioritizeBuyingCommitteeContacts,
   validateLinkedInConnectionNote,
 } from './buying-committee';
 
@@ -93,5 +95,21 @@ describe('Batch 1.3-A Anti-info@ 4-track Buying Committee engine', () => {
     });
     expect(itDraft.subject).toContain('inoltro');
     expect(itDraft.body).toContain('ReFeel EPC');
+  });
+
+  it('prioritizes distinct buying-committee tracks ahead of duplicate or non-buyer roles', () => {
+    const ordered = prioritizeBuyingCommitteeContacts(
+      [
+        { id: 'other-1', title: 'Office Coordinator' },
+        { id: 'exec-1', title: 'Managing Director' },
+        { id: 'src-1', title: 'Head of Procurement' },
+        { id: 'src-2', title: 'Senior Buyer' },
+        { id: 'tech-1', title: 'Technical Manager' },
+      ],
+      4,
+    );
+    expect(ordered.map((c) => c.id)).toEqual(['src-1', 'tech-1', 'exec-1', 'src-2']);
+    expect(localizedCommitteeXrayQuery({ name: 'Coesa Energy', country: 'IT' })).toContain('Responsabile Acquisti');
+    expect(localizedCommitteeXrayQuery({ name: 'Coesa Energy' })).toBeNull();
   });
 });

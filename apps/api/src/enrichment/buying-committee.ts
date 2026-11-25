@@ -206,6 +206,53 @@ export function buildBuyingCommitteeQueries(input: {
   return { exaPeopleQuery, serperXrayQueries, serperTriggerQuery };
 }
 
+/** 根据目标国家生成 1 条本土化采购/决策委员会 LinkedIn X-Ray 检索串（缺国家时返回 null）。 */
+export function localizedCommitteeXrayQuery(company: {
+  name: string;
+  domain?: string;
+  country?: string;
+}): string | null {
+  const country = (company.country ?? '').trim().toUpperCase();
+  if (!country || !company.name.trim()) return null;
+  const plan = buildBuyingCommitteeQueries({
+    companyName: company.name,
+    domain: company.domain,
+    country,
+  });
+  return plan.serperXrayQueries[0] ?? null;
+}
+
+/**
+ * 按 4 轨决策委员会优先级排序并优先保底不同轨道各取 1 人（sourcing → technical → executive → assistant），
+ * 再按轨道优先级补足剩余名额，避免有限富集预算浪费在非关键岗位或同一轨道重复联系人上。
+ */
+export function prioritizeBuyingCommitteeContacts<T extends { title?: string | null }>(
+  contacts: readonly T[],
+  limit?: number,
+): T[] {
+  const cap = limit === undefined ? contacts.length : Math.max(0, limit);
+  if (contacts.length <= 1 || cap === 0) return contacts.slice(0, cap);
+  const indexed = contacts.map((contact, idx) => ({
+    contact,
+    idx,
+    cls: classifyBuyingCommitteeTrack(contact.title),
+  }));
+  indexed.sort((a, b) => a.cls.priority - b.cls.priority || a.idx - b.idx);
+
+  const primary: typeof indexed = [];
+  const rest: typeof indexed = [];
+  const seenTracks = new Set<BuyingCommitteeTrack>();
+  for (const item of indexed) {
+    if (item.cls.track !== 'other' && !seenTracks.has(item.cls.track)) {
+      seenTracks.add(item.cls.track);
+      primary.push(item);
+    } else {
+      rest.push(item);
+    }
+  }
+  return [...primary, ...rest].slice(0, cap).map((item) => item.contact);
+}
+
 /** 将多语种职位头衔归入 4 轨决策委员会之一。 */
 export function classifyBuyingCommitteeTrack(title?: string | null): TrackClassification {
   const text = (title ?? '').trim();

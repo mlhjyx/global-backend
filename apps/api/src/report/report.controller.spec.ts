@@ -71,4 +71,28 @@ describe('ReportController (BI-22)', () => {
     expect(recordFeedback).toHaveBeenCalledWith(ctx, { csv: '\uFEFF线索 ID\r\n11111111-1111-4111-8111-111111111111\r\n' });
     expect(body).toEqual({ data: { accepted: 2, rejected: [], skipped: 1 } });
   });
+
+  it('serves GET /reports/battle-csv with UTF-8 CSV headers and maskEmails passthrough', async () => {
+    const handler = ReportController.prototype.battleCsv;
+    expect(Reflect.getMetadata(METHOD_METADATA, handler)).toBe(RequestMethod.GET);
+    expect(Reflect.getMetadata(PATH_METADATA, handler)).toBe('battle-csv');
+
+    const battleCsv = vi.fn(async () => ({
+      reportId: '88888888-8888-4888-8888-888888888888',
+      week: 'all',
+      icpId: ICP,
+      csv: '\uFEFF目标买家公司\r\n',
+      rows: 3,
+      withheld: { rights: 0, sanctions: 1, quarantined: 0 },
+    }));
+    const controller = new ReportController({ battleCsv } as never);
+    const headers = new Map<string, string>();
+    const response = { setHeader: vi.fn((name: string, value: string) => headers.set(name, value)) };
+
+    const body = await controller.battleCsv(ctx, ICP, undefined, 'true', response as never);
+    expect(battleCsv).toHaveBeenCalledWith(ctx, { icpId: ICP, week: undefined, maskEmails: 'true' });
+    expect(body).toBe('\uFEFF目标买家公司\r\n');
+    expect(headers.get('Content-Disposition')).toBe(`attachment; filename="battle-report-all-${ICP}.csv"`);
+    expect(headers.get('X-Report-Rows')).toBe('3');
+  });
 });

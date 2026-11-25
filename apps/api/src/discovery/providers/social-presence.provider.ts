@@ -18,11 +18,8 @@ import type { RuntimeTelemetry } from '../../model-runtime/types';
 import { isExecutionControlError } from '../../execution-budget/execution-control-error';
 import { normalizePersonName } from '../person-name';
 import { cleanEmail, cleanPhone } from '../../acquisition/clean';
-import {
-  ExtractedPerson,
-  cleanPersonName,
-  extractPeopleFromPage,
-} from './contact-extraction';
+import { localizedCommitteeXrayQuery, prioritizeBuyingCommitteeContacts } from '../../enrichment/buying-committee';
+import { ExtractedPerson, cleanPersonName, extractPeopleFromPage } from './contact-extraction';
 
 /**
  * 社媒/渠道联系人适配器（M2a 索引层 + M2b 档案/直抓层）。
@@ -79,10 +76,7 @@ function rethrowIfTerminal(error: unknown): void {
 }
 
 /** 社媒 dork：公司名 + 目标角色（LinkedIn / Xing），有域名时补一条域名锚定。 */
-export function buildSocialDorks(
-  company: { name: string; domain?: string },
-  roles: readonly string[],
-): string[] {
+export function buildSocialDorks(company: { name: string; domain?: string; country?: string }, roles: readonly string[]): string[] {
   const name = company.name.trim().replace(/"/g, '');
   if (!name) return [];
   const roleHint = roles
@@ -91,10 +85,11 @@ export function buildSocialDorks(
     .slice(0, 3)
     .map((role) => `"${role}"`)
     .join(' OR ');
+  const localizedCommittee = roleHint ? null : localizedCommitteeXrayQuery(company);
   const queries = [
     `site:linkedin.com/in "${name}"`,
     `site:xing.com/profile "${name}"`,
-    `site:linkedin.com/in "${name}" ${roleHint}`.trim(),
+    localizedCommittee ?? `site:linkedin.com/in "${name}" ${roleHint}`.trim(),
   ];
   if (company.domain) {
     queries.push(`site:linkedin.com/in "${company.name.trim()}" "${company.domain}"`);
@@ -756,7 +751,7 @@ export class SocialPresenceContactAdapter implements ContactDiscoveryAdapter {
     }
 
     return {
-      contacts: [...seen.values()].slice(0, MAX_CONTACTS_PER_DISCOVERY_ADAPTER),
+      contacts: prioritizeBuyingCommitteeContacts([...seen.values()], MAX_CONTACTS_PER_DISCOVERY_ADAPTER),
       costCents: 0,
       ...(Object.keys(diagnostics).length ? { diagnostics } : {}),
     };
