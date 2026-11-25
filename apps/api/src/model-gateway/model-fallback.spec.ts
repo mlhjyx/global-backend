@@ -136,4 +136,67 @@ describe('model-fallback (Batch 1.4-A cross-channel resilience)', () => {
     ).rejects.toBeInstanceOf(ProviderHttpError);
     expect(seen).toEqual([{ model: 'claude-sonnet-5-5', correlationId: 'corr-2' }]);
   });
+
+  it('falls back on 403 upstreamChannelExhausted and fails closed on plain 403 auth error', async () => {
+    process.env.MODEL_CROSS_CHANNEL_FALLBACK_ENABLED = 'on';
+    const seen: string[] = [];
+    const schema = {
+      type: 'object',
+      required: ['subject', 'body', 'body_zh', 'language', 'cited_claim_ids'],
+      properties: {
+        subject: { type: 'string' },
+        body: { type: 'string' },
+        body_zh: { type: 'string' },
+        language: { type: 'string' },
+        cited_claim_ids: { type: 'array', items: { type: 'string' } },
+      },
+    };
+    const gwPoolExhausted = {
+      generateStructured: async (input: { model?: string }) => {
+        seen.push(input.model ?? '');
+        if (input.model === 'claude-sonnet-5-5') {
+          throw new ProviderHttpError({
+            provider: 'gateway',
+            model: 'claude-sonnet-5-5',
+            status: 403,
+            upstreamChannelExhausted: true,
+          });
+        }
+        return {
+          data: { subject: 'Ok', body: 'Hello', body_zh: '你好', language: 'en', cited_claim_ids: [] },
+          provider: 'gateway',
+          model: input.model ?? 'gpt-6.2-sol',
+          usage: { inputTokens: 10, outputTokens: 20 },
+        };
+      },
+    } as unknown as ModelGateway;
+
+    const ok = await executeStructuredTaskWithRuntime(
+      gwPoolExhausted,
+      { task: 'outreach.first_contact_draft', model: 'claude-sonnet-5-5', prompt: 'draft', schema },
+      { workspaceId: 'ws-1', correlationId: 'corr-403-pool' },
+    );
+    expect(ok.model).toBe('gpt-6.2-sol');
+    expect(seen).toEqual(['claude-sonnet-5-5', 'gpt-6.2-sol']);
+
+    seen.length = 0;
+    const gwAuth403 = {
+      generateStructured: async (input: { model?: string }) => {
+        seen.push(input.model ?? '');
+        throw new ProviderHttpError({
+          provider: 'gateway',
+          model: 'claude-sonnet-5-5',
+          status: 403,
+        });
+      },
+    } as unknown as ModelGateway;
+    await expect(
+      executeStructuredTaskWithRuntime(
+        gwAuth403,
+        { task: 'outreach.first_contact_draft', model: 'claude-sonnet-5-5', prompt: 'draft', schema },
+        { workspaceId: 'ws-1', correlationId: 'corr-403-auth' },
+      ),
+    ).rejects.toBeInstanceOf(ProviderHttpError);
+    expect(seen).toEqual(['claude-sonnet-5-5']);
+  });
 });

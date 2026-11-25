@@ -401,3 +401,86 @@ describe('DecisionMakerProvider execution envelope', () => {
     expect(DecisionMakerProvider.toContactRecords(people)).toHaveLength(25);
   });
 });
+
+describe('DecisionMakerProvider Batch 1.4-D multilingual HTTP-first & www TLS recovery', () => {
+  it('picks Italian localized paths and skips HTTP 404 guessed pages without spawning crawl4ai', async () => {
+    const calls: Array<{ tool: string; url?: string }> = [];
+    const broker = {
+      invoke: vi.fn(async (tool: string, input: { url?: string }) => {
+        calls.push({ tool, url: input.url });
+        if (tool === 'crawl4ai.fetch' && input.url === 'https://duowatt.it/') {
+          return { data: { url: input.url, text: 'short home' } };
+        }
+        if (tool === 'http.get' && input.url === 'https://duowatt.it/') {
+          return { data: { status: 200, ok: true, finalUrl: 'https://duowatt.it/', text: '<html><body>Home</body></html>' } };
+        }
+        if (tool === 'http.get' && input.url === 'https://duowatt.it/chi-siamo') {
+          return {
+            data: {
+              status: 200,
+              ok: true,
+              text: `<html><body>PAGE-PEOPLE ${'Chi siamo responsabile acquisti '.repeat(25)}</body></html>`,
+            },
+          };
+        }
+        if (tool === 'http.get') {
+          return { data: { status: 404, ok: false, text: 'Not Found' } };
+        }
+        return { data: { url: input.url, text: '' } };
+      }),
+    } as unknown as ExecutionBroker;
+
+    const provider = new DecisionMakerProvider({ gateway: {} as never, broker });
+    const people = await provider.findDecisionMakers(
+      { domain: 'duowatt.it', name: 'Duowatt S.r.l.', country: 'IT' },
+      { workspaceId: 'w', runId: 'r', artifactSubject: { subjectType: 'company', subjectId: 'c1' } } as never,
+    );
+
+    const crawlUrls = calls.filter((c) => c.tool === 'crawl4ai.fetch').map((c) => c.url);
+    const httpUrls = calls.filter((c) => c.tool === 'http.get').map((c) => c.url);
+    expect(httpUrls).toContain('https://duowatt.it/contatti');
+    expect(httpUrls).toContain('https://duowatt.it/chi-siamo');
+    expect(httpUrls).not.toContain('https://duowatt.it/impressum');
+    // Only the homepage ever touched crawl4ai; guessed 404 and rich HTTP 200 stayed off Chromium.
+    expect(crawlUrls).toEqual(['https://duowatt.it/']);
+    expect(people.map((p) => p.fullName)).toEqual(['Page Person']);
+  });
+
+  it('recovers via www. when apex TLS fails (coenergia.com)', async () => {
+    const calls: Array<{ tool: string; url?: string }> = [];
+    const broker = {
+      invoke: vi.fn(async (tool: string, input: { url?: string }) => {
+        calls.push({ tool, url: input.url });
+        if (input.url === 'https://coenergia.com/') {
+          throw new Error('ERR_TLS_CERT_ALTNAME_INVALID');
+        }
+        if (tool === 'crawl4ai.fetch' && input.url === 'https://www.coenergia.com/') {
+          return { data: { url: input.url, text: 'short home' } };
+        }
+        if (tool === 'http.get' && input.url === 'https://www.coenergia.com/') {
+          return {
+            data: {
+              status: 200,
+              ok: true,
+              finalUrl: 'https://www.coenergia.com/',
+              text: '<a href="/chi-siamo">Chi siamo</a>',
+            },
+          };
+        }
+        if (tool === 'crawl4ai.fetch' && input.url === 'https://www.coenergia.com/chi-siamo') {
+          return { data: { url: input.url, text: `PAGE-PEOPLE ${'Team '.repeat(40)}` } };
+        }
+        return { data: { status: 404, ok: false, text: '' } };
+      }),
+    } as unknown as ExecutionBroker;
+
+    const provider = new DecisionMakerProvider({ gateway: {} as never, broker });
+    const people = await provider.findDecisionMakers(
+      { domain: 'coenergia.com', name: 'Coenergia S.r.l.', country: 'IT' },
+      { workspaceId: 'w', runId: 'r', artifactSubject: { subjectType: 'company', subjectId: 'c1' } } as never,
+    );
+
+    expect(calls.some((c) => c.tool === 'crawl4ai.fetch' && c.url === 'https://www.coenergia.com/')).toBe(true);
+    expect(people.map((p) => p.fullName)).toEqual(['Page Person']);
+  });
+});

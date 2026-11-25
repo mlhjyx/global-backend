@@ -502,6 +502,7 @@ export async function enrichContactEmail(
         workspaceId: input.workspaceId,
         contactId: input.contactId,
         country: input.country,
+        domain: input.domain,
         emailType,
         sourceCategory: finder.key,
         acquiredAt: attemptedAtPersist,

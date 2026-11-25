@@ -50,6 +50,7 @@ import {
 import {
   buildAnthropicMessagesControlFields,
   classifyBoundedStreamReadError,
+  detectUpstreamChannelExhausted,
   fetchWith429Backoff,
   readBoundedResponseText,
   wireTemperatureField,
@@ -1190,11 +1191,12 @@ export class OpenAICompatibleProvider implements ModelProvider {
     ctx: AiContext | undefined,
   ): Promise<never> {
     if (!ctx?.paidCost) {
-      await response.body?.cancel().catch(() => undefined);
+      const upstreamChannelExhausted = await detectUpstreamChannelExhausted(response);
       throw new ProviderHttpError({
         status: response.status,
         provider: this.id,
         model,
+        ...(upstreamChannelExhausted ? { upstreamChannelExhausted: true } : {}),
       });
     }
     const usage = await this.settledUsage(
@@ -1835,11 +1837,12 @@ export class OpenAICompatibleProvider implements ModelProvider {
       },
     );
     if (!res.ok) {
-      await res.body?.cancel().catch(() => undefined);
+      const upstreamChannelExhausted = await detectUpstreamChannelExhausted(res);
       throw new ProviderHttpError({
         status: res.status,
         provider: this.id,
         model: input.model,
+        ...(upstreamChannelExhausted ? { upstreamChannelExhausted: true } : {}),
       });
     }
     const json = (await res.json()) as {

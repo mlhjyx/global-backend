@@ -17,6 +17,7 @@ import {
   type WebSearchToolHit,
 } from '../model-web-search/model-web-search';
 import { normalizeDomain } from '../identity';
+import { inferCountryFromCcTld } from '../domain-country';
 import { isStableSafeHttpsUrl } from '../raw-source-provider-normalizer';
 import { settledModelFailureReason } from '../settled-model-failure';
 import {
@@ -420,9 +421,9 @@ export class ModelWebSearchDiscoveryProvider implements CompanyDiscoveryAdapter 
       if (evidenceUrls.length === 0) { dropped.noEvidence += 1; continue; } // 未在检索结果出现 → 不臆造
       seen.add(domain);
       const country =
-        typeof candidate.countryCode === 'string' && /^[A-Z]{2}$/u.test(candidate.countryCode)
+        (typeof candidate.countryCode === 'string' && /^[A-Z]{2}$/u.test(candidate.countryCode)
           ? candidate.countryCode
-          : undefined;
+          : undefined) ?? inferCountryFromCcTld(domain);
       records.push({
         externalId: `${PROVIDER_KEY}:${domain}`,
         name: name.slice(0, 500),

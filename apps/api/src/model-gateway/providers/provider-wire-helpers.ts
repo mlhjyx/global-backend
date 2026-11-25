@@ -170,3 +170,25 @@ export async function fetchWith429Backoff(
     attempt += 1;
   }
 }
+
+const UPSTREAM_CHANNEL_EXHAUSTED_RE =
+  /grouped routing channel has been exhausted|channel[^.\n]{0,60}exhausted|no available channel/iu;
+
+/**
+ * Inspect a non-OK gateway HTTP 403 response safely (bounded to 4KB, never returning raw body)
+ * to distinguish transient upstream channel/pool exhaustion (e.g. 4router grouped channel pool empty)
+ * from permanent auth/permission denials. Always consumes or cancels the body stream cleanly.
+ */
+export async function detectUpstreamChannelExhausted(response: Response): Promise<boolean> {
+  if (response.status !== 403) {
+    await response.body?.cancel?.().catch(() => undefined);
+    return false;
+  }
+  try {
+    const snippet = await readBoundedResponseText(response, 4_096);
+    return UPSTREAM_CHANNEL_EXHAUSTED_RE.test(snippet);
+  } catch {
+    await response.body?.cancel?.().catch(() => undefined);
+    return false;
+  }
+}

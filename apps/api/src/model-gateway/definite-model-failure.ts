@@ -79,7 +79,8 @@ export function definiteModelFailureCode(
   error: unknown,
 ): DefiniteModelFailureCode | undefined {
   if (error instanceof ProviderHttpError) {
-    return isUnavailableStatus(error.status)
+    return isUnavailableStatus(error.status) ||
+      (error.status === 403 && error.upstreamChannelExhausted === true)
       ? "MODEL_PROVIDER_HTTP_UNAVAILABLE"
       : undefined;
   }

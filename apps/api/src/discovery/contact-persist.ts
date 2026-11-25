@@ -13,6 +13,7 @@ import { lockWorkspaceSuppressionPolicy } from './suppression-policy-lock';
 import { assertProductDiscoveryProvenance, resolveEvidenceLicense } from './evidence-license';
 import { sourceTypeForContactObservation } from './contact-point-verification-state';
 import { upsertObservedContactPoint } from './contact-point-writer';
+import { inferCountryFromCcTld } from './domain-country';
 
 /** field_evidence 的 email 值分级：职能邮箱 amber（ePrivacy），人名邮箱 red（GDPR Art.4）。 */
 function emailDataClass(email: string): 'amber' | 'red' {
@@ -258,6 +259,7 @@ export async function persistDiscoveredContacts(
       workspaceId: args.workspaceId,
       contactId,
       country: locked[0].country,
+      domain: locked[0].domain,
       adapterKey: args.adapterKey,
       email,
       personalData: c.personalData,
@@ -275,12 +277,14 @@ async function maybeScheduleContactArticle14(
     workspaceId: string;
     contactId: string;
     country?: string | null;
+    domain?: string | null;
     adapterKey: string;
     email?: string;
     personalData?: boolean;
   },
 ): Promise<void> {
-  if (!args.country) return;
+  const effectiveCountry = args.country ?? inferCountryFromCcTld(args.domain);
+  if (!effectiveCountry) return;
   const emailType = args.email ? classifyContactEmail(args.email).emailType : null;
   const isPersonalRecord =
     Boolean(args.personalData) || emailType === 'personal' || emailType === 'other';
@@ -290,7 +294,7 @@ async function maybeScheduleContactArticle14(
   await scheduleArticle14NoticeInTransaction(tx, {
     workspaceId: args.workspaceId,
     subjectId: args.contactId,
-    country: args.country,
+    country: effectiveCountry,
     sourceCategory: args.adapterKey,
   });
 }

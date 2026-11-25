@@ -486,8 +486,27 @@ export class WeeklyReportService {
     const seller =
       icp.companyId &&
       typeof (tx as { companyProfile?: { findUnique?: unknown } }).companyProfile?.findUnique === 'function'
-        ? await tx.companyProfile.findUnique({ where: { id: icp.companyId }, select: { name: true } })
+        ? await tx.companyProfile.findUnique({
+            where: { id: icp.companyId },
+            select: { name: true, summary: true, industry: true },
+          })
         : null;
+    const offerings =
+      icp.companyId &&
+      typeof (tx as { offering?: { findMany?: unknown } }).offering?.findMany === 'function'
+        ? await tx.offering.findMany({
+            where: { companyId: icp.companyId },
+            select: { name: true },
+            orderBy: { createdAt: 'asc' },
+            take: 3,
+          })
+        : [];
+    const offeringSummary = offerings
+      .map((item) => item.name.trim())
+      .filter(Boolean)
+      .join(', ');
+    const sellerProductSummary =
+      offeringSummary || seller?.summary?.trim() || seller?.industry?.trim() || null;
 
     const battleDecisionMakers = new Map<string, BattleDecisionMaker[]>();
     for (const c of battleContacts) {
@@ -509,7 +528,7 @@ export class WeeklyReportService {
       article14StatusByContactId,
       hasActiveWorkspaceLia: Boolean(activeLia),
       sellerName: seller?.name ?? null,
-      sellerProductSummary: icp.name ?? null,
+      sellerProductSummary,
     };
   }
 

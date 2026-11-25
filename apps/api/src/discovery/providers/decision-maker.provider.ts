@@ -22,6 +22,11 @@ import {
 } from '../execution-envelope';
 import type { RuntimeTelemetry } from '../../model-runtime/types';
 import { isExecutionControlError } from '../../execution-budget/execution-control-error';
+import {
+  fixedPathsForCompany,
+  probeGuessedPeoplePageHttpFirst,
+  toggleWwwHost,
+} from './decision-maker-paths';
 
 const PARSER_VERSION = 'decision_maker/v1';
 
@@ -30,18 +35,23 @@ function hasPeopleText(text: string | null): text is string {
   return typeof text === 'string' && text.trim().length >= 120;
 }
 
-/** 人物页优先级（Impressum 最高——德国 §5 DDG 依法列 Geschäftsführer；然后管理层/团队）。 */
+/** 人物页优先级（Impressum/法律声明最高；然后管理层/团队/关于/联系，兼容德/意/西/法/葡/荷/英）。 */
 const PEOPLE_PATTERNS: { re: RegExp; w: number }[] = [
-  { re: /impressum|imprint|legal-?notice|mentions-legales/i, w: 100 },
-  { re: /management|leadership|vorstand|gesch(ae|ä)ftsf(ue|ü)hr|gesch(ae|ä)ftsleitung|executive|board|direktion/i, w: 95,
+  { re: /impressum|imprint|legal-?notice|mentions-legales|note-legali|aviso-legal/i, w: 100 },
+  {
+    re: /management|leadership|vorstand|gesch(ae|ä)ftsf(ue|ü)hr|gesch(ae|ä)ftsleitung|executive|board|direktion|direzione|dirigenza|direccion/i,
+    w: 95,
   },
-  { re: /team|ansprechpartner|mitarbeiter|our-?people|\/people|\/staff/i, w: 85,
+  {
+    re: /team|ansprechpartner|mitarbeiter|our-?people|\/people|\/staff|equipo|equipe|persone/i,
+    w: 85,
   },
-  { re: /(ueber|über)-?uns|about-?us|\/about|unternehmen/i, w: 70 },
-  { re: /kontakt|\/contact/i, w: 60 },
+  {
+    re: /(ueber|über)-?uns|about-?us|\/about|unternehmen|chi-siamo|azienda|quienes-somos|a-propos|over-ons|\/sobre|empresa/i,
+    w: 70,
+  },
+  { re: /kontakt|\/contact|contatti|contacto|contato/i, w: 60 },
 ];
-/** 常见固定路径（未被首页链接也直接试）。 */
-const FIXED_PATHS = ['/impressum', '/kontakt', '/en/imprint', '/impressum.html', '/team', '/ueber-uns'];
 
 /**
  * 从原始 HTML 抽同站锚点（www 不敏感、去 query/hash、相对链接按 base 解析）。
@@ -165,7 +175,7 @@ export class DecisionMakerProvider {
    * @param sellerContext 卖方/ICP 摘要 + 目标买家角色（用于判 is_target_role），可选
    */
   async findDecisionMakers(
-    company: { domain: string; name?: string },
+    company: { domain: string; name?: string; country?: string },
     ctx: ExecutionContext,
     sellerContext?: {
       seller?: string;
@@ -187,9 +197,7 @@ export class DecisionMakerProvider {
       // origin，那里 robots 明确放行。robots 约束实际被抓取的 origin：改从同注册域
       // 的另一主机形态（裸域 ⇄ www，站点常只在其一上配好 robots）抓取并以该 origin
       // 自身 robots 为准；两个 origin 都拒绝才放弃。
-      const host = company.domain.toLowerCase();
-      const altHost = host.startsWith('www.') ? host.slice(4) : `www.${host}`;
-      const altBase = `https://${altHost}/`;
+      const altBase = `https://${toggleWwwHost(company.domain)}/`;
       if (!(await isAllowedByRobots(altBase, robotDeps))) {
         this.log(`skip ${company.domain}: robots disallow`);
         return [];
@@ -197,34 +205,23 @@ export class DecisionMakerProvider {
       base = altBase;
     }
 
-    // 1) 选人物页：首页链接里按 people-pattern 打分 + 固定路径兜底
-    const selection = await this.selectPeoplePages(company.domain, base, ctx);
+    // 1) 选人物页：首页链接里按 people-pattern 打分 + 匹配国别语种的固定路径兜底
+    const selection = await this.selectPeoplePages(company.domain, base, ctx, company.country);
     if (!selection.pages.length && !hasPeopleText(selection.homeText)) return [];
 
     // 2) 逐页抓取 + LLM 抽取分类，按人名去重合并
     const dedup = new Map<string, DecisionMakerContact>();
-    for (const url of selection.pages.slice(0, MAX_DECISION_MAKER_PAGES)) {
-      if (!(await isAllowedByRobots(url, robotDeps))) continue;
-      let text: string;
-      try {
-        const crawled = await this.deps.broker!.invoke<{ url: string }, CrawlResult>(
-          'crawl4ai.fetch',
-          { url },
-          // FIX C（Codex P1）：显式用途，防 crawl4ai site_builder 扩宽波及决策人抓取（复现变更前有效集）。
-          {
-            ...this.toolCtx(ctx, 'contact.find_decision_makers'),
-            purpose: ['discovery', 'enrichment'],
-          },
-        );
-        text = crawled.data.text.slice(0, 30_000);
-      } catch (err) {
-        if (isExecutionControlError(err)) throw err;
-        continue;
-      }
-      if (text.trim().length < 120) continue;
+    const peopleToolCtx: ToolContext = {
+      ...this.toolCtx(ctx, 'contact.find_decision_makers'),
+      purpose: ['discovery', 'enrichment'],
+    };
+    for (const page of selection.pages.slice(0, MAX_DECISION_MAKER_PAGES)) {
+      if (!(await isAllowedByRobots(page.url, robotDeps))) continue;
+      const text = await this.fetchPeoplePageText(page, ctx, peopleToolCtx);
+      if (!text || text.trim().length < 120) continue;
 
-      const people = await this.extract(url, text, ctx, sellerContext);
-      this.mergePeople(dedup, people, url, text);
+      const people = await this.extract(page.url, text, ctx, sellerContext);
+      this.mergePeople(dedup, people, page.url, text);
     }
     // 2b) 兜底：小站把团队/决策人直接铺在首页（M5：jaeckel-ohg.de 的 geschäftsführende
     // Gesellschafter 只在首页团队区块出现，Impressum 反倒没有具名人）。选定的人物页
@@ -277,86 +274,142 @@ export class DecisionMakerProvider {
     }
   }
 
+  private async fetchPeoplePageText(
+    page: { url: string; guessed: boolean },
+    ctx: ExecutionContext,
+    toolCtx: ToolContext,
+  ): Promise<string | null> {
+    if (page.guessed && ctx.artifactSubject) {
+      const probe = await probeGuessedPeoplePageHttpFirst(this.deps.broker!, page.url, toolCtx);
+      if (probe.kind === 'skip_not_found') return null;
+      if (probe.kind === 'text') return probe.text;
+    }
+    try {
+      const crawled = await this.deps.broker!.invoke<{ url: string }, CrawlResult>(
+        'crawl4ai.fetch',
+        { url: page.url },
+        toolCtx,
+      );
+      return crawled.data.text.slice(0, 30_000);
+    } catch (err) {
+      if (isExecutionControlError(err)) throw err;
+      return null;
+    }
+  }
+
+  private async fetchHomeMarkdown(
+    base: string,
+    altBase: string,
+    ctx: ExecutionContext,
+    toolCtx: ToolContext,
+  ): Promise<{ text: string | null; url: string }> {
+    const candidates = altBase === base ? [base] : [base, altBase];
+    for (let i = 0; i < candidates.length; i += 1) {
+      const candidate = candidates[i]!;
+      if (i > 0 && !(await isAllowedByRobots(candidate, { authorizeExternalAction: ctx.authorizeExternalAction }))) {
+        continue;
+      }
+      try {
+        const home = await this.deps.broker!.invoke<{ url: string }, CrawlResult>(
+          'crawl4ai.fetch',
+          { url: candidate },
+          toolCtx,
+        );
+        return { text: home.data.text ?? null, url: candidate };
+      } catch (err) {
+        if (isExecutionControlError(err)) throw err;
+      }
+    }
+    return { text: null, url: base };
+  }
+
+  private async fetchHomeRawHtml(
+    anchorBase: string,
+    altBase: string,
+    ctx: ExecutionContext,
+    toolCtx: ToolContext,
+  ): Promise<{ raw: HttpGetOutput; usedBase: string } | null> {
+    const candidates = altBase === anchorBase ? [anchorBase] : [anchorBase, altBase];
+    for (let i = 0; i < candidates.length; i += 1) {
+      const candidate = candidates[i]!;
+      if (i > 0 && !(await isAllowedByRobots(candidate, { authorizeExternalAction: ctx.authorizeExternalAction }))) {
+        continue;
+      }
+      try {
+        const raw = await this.deps.broker!.invoke<{ url: string }, HttpGetOutput>('http.get', { url: candidate }, toolCtx);
+        return { raw: raw.data, usedBase: candidate };
+      } catch (err) {
+        if (isExecutionControlError(err)) throw err;
+      }
+    }
+    return null;
+  }
+
   private async selectPeoplePages(
     domain: string,
     base: string,
     ctx: ExecutionContext,
-  ): Promise<{ pages: string[]; homeUrl: string; homeText: string | null }> {
-    const picked: { url: string; w: number }[] = [];
+    country?: string,
+  ): Promise<{ pages: { url: string; guessed: boolean }[]; homeUrl: string; homeText: string | null }> {
+    const picked: { url: string; w: number; guessed: boolean }[] = [];
     const pickedKeys = new Set<string>();
-    const addPicked = (url: string, w: number): void => {
+    const addPicked = (url: string, w: number, guessed = false): void => {
       // www / 大小写 / 尾斜杠不敏感：markdown（按裸域解析）与原始 HTML（按 finalUrl
       // 解析）常给出同一页的两种 host 形态，去重避免占用预抓名额。
       const key = url.toLowerCase().replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '');
       if (pickedKeys.has(key)) return;
       pickedKeys.add(key);
-      picked.push({ url, w });
+      picked.push({ url, w, guessed });
     };
-    let homeText: string | null = null;
-    let fixedHost = domain;
-    let anchorBase = base;
-    try {
-      const home = await this.deps.broker!.invoke<{ url: string }, CrawlResult>(
-        'crawl4ai.fetch',
-        { url: base },
-        // FIX C（Codex P1）：显式用途，防 crawl4ai site_builder 扩宽波及决策人抓取（复现变更前有效集）。
-        {
-          ...this.toolCtx(ctx, 'contact.find_decision_makers'),
-          purpose: ['discovery', 'enrichment'],
-        },
-      );
-      homeText = home.data.text ?? null;
-      const links = extractSameSiteLinks(home.data.text, base);
+    const toolCtx: ToolContext = {
+      ...this.toolCtx(ctx, 'contact.find_decision_makers'),
+      purpose: ['discovery', 'enrichment'],
+    };
+    const altBase = `https://${toggleWwwHost(new URL(base).host)}/`;
+    const homeFetched = await this.fetchHomeMarkdown(base, altBase, ctx, toolCtx);
+    const homeText = homeFetched.text;
+    let fixedHost = new URL(homeFetched.url).host;
+    let anchorBase = homeFetched.url;
+    if (homeText) {
+      const links = extractSameSiteLinks(homeText, homeFetched.url);
       for (const s of links
         .map((l) => ({ l, w: scorePeoplePageUrl(l) }))
         .filter((s) => s.w > 0)) {
-        addPicked(s.l, s.w);
+        addPicked(s.l, s.w, false);
       }
-    } catch (err) {
-      if (isExecutionControlError(err)) throw err;
-      // 首页抓不到也无妨，走固定路径兜底
     }
-    // 无论 markdown 给没给链接都用原始 HTML 补抽人物页锚点：markdown 会丢导航/JS
-    // 菜单里的链接（M5：ava-berlin.de 的 markdown 恰好只有 3 条人物页链接、真实
-    // Impressum 只在原始 HTML 里，按「不足 3 条才补」的旧门槛从未被选中）；同时
-    // finalUrl 给出重定向后的主机（裸域→www），固定路径改用它拼，避免坏跳转。
+    // 无论 markdown 给没给链接都用原始 HTML 补抽人物页锚点；裸域 TLS 证书仅覆盖 www. 时自动回退 altBase。
     if (ctx.artifactSubject) {
-      try {
-        const raw = await this.deps.broker!.invoke<{ url: string }, HttpGetOutput>(
-          'http.get',
-          { url: base },
-          { ...this.toolCtx(ctx, 'contact.find_decision_makers'), purpose: ['discovery', 'enrichment'] },
-        );
-        if (raw.data.finalUrl) {
+      const htmlFetched = await this.fetchHomeRawHtml(anchorBase, altBase, ctx, toolCtx);
+      if (htmlFetched) {
+        anchorBase = htmlFetched.usedBase;
+        fixedHost = new URL(htmlFetched.usedBase).host;
+        if (htmlFetched.raw.finalUrl) {
           try {
-            const finalHost = new URL(raw.data.finalUrl).host;
-            // 仅当最终主机与原域同一可注册域才采纳（过期/停放域名的跨站跳转不跟）。
+            const finalHost = new URL(htmlFetched.raw.finalUrl).host;
             if (sameRegistrableHost(finalHost, domain)) {
               fixedHost = finalHost;
-              anchorBase = raw.data.finalUrl;
+              anchorBase = htmlFetched.raw.finalUrl;
             }
           } catch {
-            /* keep stored domain */
+            /* keep resolved host */
           }
         }
-        for (const s of extractAnchorsFromHtml(raw.data.text ?? '', anchorBase)
+        for (const s of extractAnchorsFromHtml(htmlFetched.raw.text ?? '', anchorBase)
           .map((l) => ({ l, w: scorePeoplePageUrl(l) }))
           .filter((s) => s.w > 0)) {
-          addPicked(s.l, s.w);
+          addPicked(s.l, s.w, false);
         }
-      } catch (err) {
-        if (isExecutionControlError(err)) throw err;
       }
     }
     // 两路候选合并后统一按权重排序（稳定排序，同分保持 markdown 先、锚点后的原次序）：
-    // 锚点里的 Impressum(100) 不能因为追加在 markdown 链接之后而被预抓名额挤掉。
     picked.sort((a, b) => b.w - a.w);
-    for (const p of FIXED_PATHS) {
-      addPicked(`https://${fixedHost}${p}`, 0);
+    for (const p of fixedPathsForCompany(domain, country)) {
+      addPicked(`https://${fixedHost}${p}`, 0, true);
     }
     return {
-      pages: picked.slice(0, MAX_DECISION_MAKER_PAGES + 2).map((p) => p.url),
-      homeUrl: base,
+      pages: picked.slice(0, MAX_DECISION_MAKER_PAGES + 2).map((p) => ({ url: p.url, guessed: p.guessed })),
+      homeUrl: homeFetched.url,
       homeText,
     };
   }
@@ -427,7 +480,7 @@ export class DecisionMakerContactAdapter implements ContactDiscoveryAdapter {
   ): Promise<ContactDiscoveryResult> {
     if (!company.domain) return { contacts: [], costCents: 0 };
     const people = await this.inner.findDecisionMakers(
-      { domain: company.domain, name: company.name },
+      { domain: company.domain, name: company.name, country: company.country },
       ctx,
       sellerCtx
         ? {
