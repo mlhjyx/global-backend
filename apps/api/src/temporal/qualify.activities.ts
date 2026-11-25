@@ -12,6 +12,7 @@ import {
 import type { ScreenMatch } from '../sanctions/sanctions-matcher';
 import { syntheticDiscoveryEntityIds } from '../discovery/evidence-license';
 import { reachableCompanyContactPoints } from '../discovery/company-contact-points';
+import { loadCompanyContactChannelsByCompany, reachableChannelsForCompany } from '../discovery/company-channels';
 import {
   appendRunEvent,
   QUALIFICATION_BATCH_SCORED_EVENT,
@@ -184,9 +185,13 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
           const batchScoredItems: Array<Record<string, unknown>> = [];
           // 一批一次：公司 / 域名禁联事实，用于联系路径的读时过滤（公司被禁联 → 无点；被禁联域名覆盖的点剔除）。
           const suppressions = await tx.suppressionRecord.findMany({
-            where: { type: { in: ['domain', 'company_name'] } },
+            where: { type: { in: ['domain', 'company_name', 'email'] } },
             select: { type: true, value: true },
           });
+          const channelsByCompany = await loadCompanyContactChannelsByCompany(
+            tx,
+            companies.map((company) => company.id),
+          );
           const evidenceEntityOwners = new Map<string, string>();
           for (const company of companies) {
             evidenceEntityOwners.set(company.id, company.id);
@@ -238,6 +243,7 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
                 id: true,
                 status: true,
                 fitVerdict: true,
+                fitReasons: true,
                 decisions: { where: { action: 'reject' }, select: { id: true }, take: 1 },
               },
             });
@@ -284,11 +290,12 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
                 companyContactPoints: reachableCompanyContactPoints(c.companyContactPoints, suppressions, c).map(
                   (p) => ({ kind: p.kind, status: p.status }),
                 ),
+                companyContactChannels: reachableChannelsForCompany(channelsByCompany, c, suppressions),
               },
               icpForScoring,
               // ICP 资格门（LLM 四门）作为权威 Fit 传入：只覆盖 Fit 维，队列归属由六维总分 +
               // Reachability 硬底决定（此前 match 直接盖整个队列 → 推荐里大半联系不上）。
-              { authoritativeFit, sanctionsHold },
+              { authoritativeFit, fitReasons: existing?.fitReasons, sanctionsHold },
             );
             // ch08 §3.1.12：陈旧名单不得自动放行——熔断档全进 sanctions_hold（禁联优先级更高，保留，
             // suppressed 是更强的法律状态）；降级档不得进 recommended。

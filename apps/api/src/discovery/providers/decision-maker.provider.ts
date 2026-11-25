@@ -5,6 +5,7 @@ import {
   ExtractedPerson,
   extractPeopleFromPage,
 } from './contact-extraction';
+import { isJunkContactCandidate } from './contact-quality-filter';
 import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
 import type { CrawlResult } from '../../adapters/web-crawler';
 import type { HttpGetOutput } from '../../tools/source-tools';
@@ -251,6 +252,13 @@ export class DecisionMakerProvider {
     for (const p of people) {
       const name = p.full_name?.trim();
       if (!name) continue;
+      if (isJunkContactCandidate({
+        fullName: name,
+        title: p.title,
+        email: p.email,
+        phone: p.phone,
+        requireSignalOrTitle: true,
+      })) continue;
       const key = name.toLowerCase().replace(/\s+/g, ' ');
       if (dedup.has(key)) {
         const ex = dedup.get(key)!;

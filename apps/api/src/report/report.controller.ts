@@ -114,6 +114,12 @@ export class ReportController {
     description: '是否脱敏触达邮箱前缀（true 适用于对外汇报/审计，默认 false 供内部外贸团队作战导入）',
     schema: { type: 'boolean' },
   })
+  @ApiQuery({
+    name: 'scope',
+    required: false,
+    description: '导出范围：delivered（默认，仅已核准交付线索）或 reviewable（含待复核的 match 线索）',
+    schema: { type: 'string', enum: ['delivered', 'reviewable'] },
+  })
   @ApiResponse({
     status: 200,
     description: 'UTF-8（带 BOM）19 列作战 CSV，带 CWE-1236 公式注入防护',
@@ -144,8 +150,14 @@ export class ReportController {
     @Query('week') week: string | undefined,
     @Query('maskEmails') maskEmails: string | undefined,
     @Res({ passthrough: true }) response: Response,
+    @Query('scope') scope?: string,
   ): Promise<string> {
-    const report = await this.reports.battleCsv(ctx, { icpId, week, maskEmails });
+    const report = await this.reports.battleCsv(ctx, {
+      icpId,
+      week,
+      maskEmails,
+      ...(scope !== undefined ? { scope } : {}),
+    });
     response.setHeader('Content-Type', 'text/csv; charset=utf-8');
     response.setHeader('Content-Disposition', `attachment; filename="battle-report-${report.week}-${report.icpId}.csv"`);
     response.setHeader('Cache-Control', 'no-store');

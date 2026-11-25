@@ -15,6 +15,11 @@ import {
   suggestedContactPath,
   type SuggestedContactPath,
 } from './suggested-contact-path';
+import {
+  extractCompanySocialProfiles,
+  type LeadPackageCompanyChannel,
+  type LeadPackageSocialProfile,
+} from '../discovery/company-channels';
 
 export interface LeadPackageLead {
   readonly id: string;
@@ -72,6 +77,9 @@ export interface LeadPackageInput {
   readonly lead: LeadPackageLead;
   readonly company: LeadPackageCompany;
   readonly contactPoints: readonly LeadPackageContactPoint[];
+  readonly companyChannels?: readonly LeadPackageCompanyChannel[];
+  /** 禁联或未清制裁命中时为 true：隐藏社媒与渠道链接，避免误导运营触达受限主体。 */
+  readonly omitSocials?: boolean;
   readonly evidence: readonly LeadPackageEvidence[];
   readonly sanctions: { readonly status: LeadPackageSanctionsStatus; readonly screened_at: string | null };
   readonly validUntil: string | null;
@@ -107,6 +115,8 @@ export interface LeadPackage {
     readonly url: string;
     readonly status: string;
   }[];
+  readonly company_channels: readonly LeadPackageCompanyChannel[];
+  readonly social_profiles: readonly LeadPackageSocialProfile[];
   readonly suggested_contact_path: SuggestedContactPath | null;
   readonly signals: readonly {
     readonly type: string;
@@ -267,6 +277,13 @@ export function buildLeadPackage(input: LeadPackageInput): LeadPackage {
   const profileSourceUrl = text(profile.source_url);
   const { lei, fda_reg: fdaReg } = extractIdentifiers(attributes);
 
+  const companyChannels = (input.companyChannels ?? [])
+    .filter((ch) => ch.status !== 'INVALID' && ch.value.trim().length > 0)
+    .map((ch) => Object.freeze({ ...ch }));
+  const socialProfiles = input.omitSocials
+    ? []
+    : extractCompanySocialProfiles(input.contactPoints, input.company.attributes);
+
   return Object.freeze({
     lead_id: input.lead.id,
     status: input.lead.status,
@@ -286,6 +303,8 @@ export function buildLeadPackage(input: LeadPackageInput): LeadPackage {
       fda_reg: fdaReg,
     }),
     contact_points: Object.freeze(contactPoints),
+    company_channels: Object.freeze(companyChannels),
+    social_profiles: Object.freeze(socialProfiles),
     suggested_contact_path: suggestedContactPath(input.contactPoints),
     signals: Object.freeze([...leadSignals(attributes)]),
     scores: Object.freeze({

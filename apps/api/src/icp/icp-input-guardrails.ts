@@ -1,6 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { targetCountryCodes } from '../discovery/search-localization';
 import { COUNTRY_NAME_BY_ISO } from '../discovery/vocab';
+import { ICP_GENERATION_QUALITY_RULES } from './icp-output-sanitizer';
 
 export type OfferingForSelection = {
   id?: string;
@@ -174,7 +175,7 @@ function buildLegacyIcpPrompt(
   const sellerAuthority = sellerProfile.length
     ? `\n卖方档案（权威输入）：\n${sellerProfile.join('\n')}\n目标市场以卖方档案为权威：输出的 target_markets 必须覆盖以上市场（可追加其他市场，但不得替换；追加请在 value_props 或说明中给出理由）。`
     : '';
-  return `卖方企业：${company.name}${company.website ? ` (${company.website})` : ''}\n已确认的企业事实：\n${facts}${products}${sellerAuthority}\n\n请据此设计其理想客户画像(ICP)、买家委员会与机器可评估的验证规则，输出中文。`;
+  return `卖方企业：${company.name}${company.website ? ` (${company.website})` : ''}\n已确认的企业事实：\n${facts}${products}${sellerAuthority}\n\n请据此设计其理想客户画像(ICP)、买家委员会与机器可评估的验证规则，输出中文。${ICP_GENERATION_QUALITY_RULES}`;
 }
 
 export function buildIcpGenerationPrompt(input: IcpGenerationPromptInput): string {
@@ -214,7 +215,7 @@ export function buildIcpGenerationPrompt(input: IcpGenerationPromptInput): strin
     : sellerProfile.length
       ? `\n卖方档案（参考）：\n${sellerProfile.join('\n')}`
       : '';
-  return `卖方企业：${company.name}${company.website ? ` (${company.website})` : ''}\n已确认的企业事实：\n${facts}${products}${sellerAuthority}\n\n请据此设计其理想客户画像(ICP)、买家委员会与机器可评估的验证规则，输出中文。`;
+  return `卖方企业：${company.name}${company.website ? ` (${company.website})` : ''}\n已确认的企业事实：\n${facts}${products}${sellerAuthority}\n\n请据此设计其理想客户画像(ICP)、买家委员会与机器可评估的验证规则，输出中文。${ICP_GENERATION_QUALITY_RULES}`;
 }
 
 export type IcpInputLineageInput = {

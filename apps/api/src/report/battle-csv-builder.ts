@@ -16,6 +16,8 @@ import {
   prioritizeBuyingCommitteeContacts,
 } from '../enrichment/buying-committee';
 import { evaluateMultiChannelOutreachPolicy } from '../outreach/multi-channel-playbook';
+import { isGenericSwitchboardContact } from '../discovery/providers/contact-quality-filter';
+import { extractCompanySocialProfiles } from '../discovery/company-channels';
 import { renderBattleCsv, type BattleCsvRow } from './battle-csv';
 export type { BattleCsvRow } from './battle-csv';
 
@@ -24,6 +26,8 @@ export interface BattleContactPoint {
   readonly value: string;
   readonly status: string;
   readonly verificationState?: string | null;
+  readonly sourceType?: string | null;
+  readonly verificationMethod?: string | null;
 }
 
 export interface BattleDecisionMaker {
@@ -50,10 +54,17 @@ export interface BattleLeadFact {
   readonly scoreDetail: Prisma.JsonValue;
 }
 
+export interface BattleCompanyChannel {
+  readonly channel: string;
+  readonly value: string;
+  readonly status?: string;
+}
+
 export interface BattleRowBuildInput {
   readonly lead: BattleLeadFact;
   readonly company: BattleCompanyFact;
-  readonly companyContactPoints: readonly { kind: string; value: string }[];
+  readonly companyContactPoints: readonly { kind: string; value: string; status?: string }[];
+  readonly companyContactChannels?: readonly BattleCompanyChannel[];
   readonly decisionMakers: readonly BattleDecisionMaker[];
   readonly draft: { subject: string; body: string } | null;
   readonly article14StatusByContactId?: ReadonlyMap<string, string>;
@@ -95,7 +106,13 @@ function languageForCountry(country: string | null): string {
 }
 
 function pickBestEmailPoint(points: readonly BattleContactPoint[]): BattleContactPoint | null {
-  const emails = points.filter((p) => p.type === 'email');
+  // 禁止把未证实的 pattern_guess 盲猜邮箱选为作战清表首选触达邮箱，防止外贸团队对假地址退信。
+  const emails = points.filter((p) => {
+    if (p.type !== 'email' || p.status === 'INVALID' || p.verificationState === 'INVALID') return false;
+    const isPatternGuess = p.sourceType === 'pattern_guess' || p.verificationMethod === 'pattern_guess';
+    const isConfirmedValid = p.verificationState === 'VALID' || p.status === 'VALID';
+    return !isPatternGuess || isConfirmedValid;
+  });
   if (emails.length === 0) return null;
   const rank = (state?: string | null): number =>
     state === 'VALID' ? 4 : state === 'CATCH_ALL_RISKY' ? 3 : state === 'UNKNOWN' ? 2 : 1;
@@ -105,22 +122,58 @@ function pickBestEmailPoint(points: readonly BattleContactPoint[]): BattleContac
 type EmailVerificationStateLike = 'VALID' | 'CATCH_ALL_RISKY' | 'UNKNOWN' | 'INVALID' | null;
 
 function resolveBattleChannels(
-  companyContactPoints: readonly { kind: string; value: string }[],
+  companyContactPoints: readonly { kind: string; value: string; status?: string }[],
+  companyContactChannels: readonly BattleCompanyChannel[],
+  companyAttributes: Prisma.JsonValue,
+  switchboardContacts: readonly BattleDecisionMaker[],
   leadContact: BattleDecisionMaker | null,
 ) {
   const contactEmailPoint = leadContact ? pickBestEmailPoint(leadContact.points) : null;
   const contactLinkedin = leadContact?.points.find((p) => p.type === 'linkedin')?.value ?? null;
-  const companyEmails = companyContactPoints.filter((p) => p.kind === 'email').map((p) => p.value);
+  const socials = extractCompanySocialProfiles(
+    companyContactPoints.map((p) => ({ kind: p.kind, value: p.value, status: p.status ?? 'UNVERIFIED' })),
+    companyAttributes,
+  );
+  const companyLinkedin = socials.find((s) => s.platform === 'linkedin')?.url ?? null;
+  const socialWhatsapp = socials.find((s) => s.platform === 'whatsapp')?.url ?? null;
+  const extraSocials = socials
+    .filter((s) => s.platform !== 'linkedin' && s.platform !== 'whatsapp')
+    .slice(0, 3)
+    .map((s) => `${s.platform.toUpperCase()}:${s.url}`);
+  const switchboardEmails = switchboardContacts.flatMap((c) =>
+    c.points.filter((p) => p.type === 'email').map((p) => p.value),
+  );
+  const switchboardPhones = switchboardContacts.flatMap((c) =>
+    c.points.filter((p) => p.type === 'phone').map((p) => p.value),
+  );
+  const companyEmails = [
+    ...companyContactChannels.filter((c) => c.channel === 'email' && c.status !== 'INVALID').map((c) => c.value),
+    ...companyContactPoints.filter((p) => p.kind === 'email').map((p) => p.value),
+    ...switchboardEmails,
+  ];
+  const companyPhone =
+    companyContactChannels.find((c) => c.channel === 'phone' && c.status !== 'INVALID')?.value ??
+    switchboardPhones[0] ??
+    null;
   const functionalCompanyEmail =
     companyEmails.find((e) => classifyContactEmail(e).emailType !== 'role') ?? null;
   const chosenEmail = contactEmailPoint?.value ?? functionalCompanyEmail ?? companyEmails[0] ?? null;
   const chosenVerificationState =
     (contactEmailPoint?.verificationState as EmailVerificationStateLike) ?? null;
   const emailClass = chosenEmail ? classifyContactEmail(chosenEmail).emailType : null;
+  const vendorPortal =
+    companyContactPoints.find((p) => p.kind === 'supplier_page')?.value ??
+    companyContactPoints.find((p) => p.kind === 'contact_form')?.value ??
+    companyContactChannels.find((c) => c.channel === 'form_url' && c.status !== 'INVALID')?.value ??
+    companyContactPoints.find((p) => p.kind === 'contact_page')?.value ??
+    null;
   return {
     contactLinkedin,
-    vendorPortal: companyContactPoints.find((p) => p.kind === 'contact_form')?.value ?? null,
-    publicWhatsapp: companyContactPoints.find((p) => p.kind === 'whatsapp')?.value ?? null,
+    displayLinkedin: contactLinkedin ?? companyLinkedin,
+    vendorPortal,
+    companyPhone,
+    publicWhatsapp: companyContactPoints.find((p) => p.kind === 'whatsapp')?.value ?? socialWhatsapp,
+    extraSocials,
     chosenEmail,
     chosenVerificationState,
     emailClass,
@@ -202,9 +255,11 @@ function formatBattleComplianceAndAltChannels(args: {
   leadContact: BattleDecisionMaker | null;
   d3: ReturnType<typeof evaluateMultiChannelOutreachPolicy>;
   vendorPortal: string | null;
+  companyPhone: string | null;
   publicWhatsapp: string | null;
+  extraSocials: readonly string[];
 }): { legalNoticeStatus: string; vendorPortalOrWhatsapp: string | null } {
-  const { input, leadContact, d3, vendorPortal, publicWhatsapp } = args;
+  const { input, leadContact, d3, vendorPortal, companyPhone, publicWhatsapp, extraSocials } = args;
   const recordedArt14 = leadContact?.id ? input.article14StatusByContactId?.get(leadContact.id) : undefined;
   const art14Status = recordedArt14
     ? `Art.14:${recordedArt14}`
@@ -218,7 +273,9 @@ function formatBattleComplianceAndAltChannels(args: {
     : 'LIA:N/A';
   const portalOrWa = [
     vendorPortal ? `Portal:${vendorPortal}` : null,
+    companyPhone ? `Tel:${companyPhone}` : null,
     d3.manualOutboundWhatsappAllowed && publicWhatsapp ? `WA:${publicWhatsapp}` : null,
+    ...extraSocials,
   ]
     .filter(Boolean)
     .join(' | ');
@@ -230,9 +287,17 @@ function formatBattleComplianceAndAltChannels(args: {
 
 /** 将单条已核准线索转换为 19 列作战表行。 */
 export function buildBattleCsvRow(input: BattleRowBuildInput): BattleCsvRow {
-  const { lead, company, companyContactPoints, decisionMakers } = input;
-  const leadContact = prioritizeBuyingCommitteeContacts(decisionMakers, 1)[0] ?? null;
-  const channels = resolveBattleChannels(companyContactPoints, leadContact);
+  const { lead, company, companyContactPoints, companyContactChannels = [], decisionMakers } = input;
+  const namedDecisionMakers = decisionMakers.filter((dm) => !isGenericSwitchboardContact(dm));
+  const switchboardContacts = decisionMakers.filter((dm) => isGenericSwitchboardContact(dm));
+  const leadContact = prioritizeBuyingCommitteeContacts(namedDecisionMakers, 1)[0] ?? null;
+  const channels = resolveBattleChannels(
+    companyContactPoints,
+    companyContactChannels,
+    company.attributes,
+    switchboardContacts,
+    leadContact,
+  );
   const track = classifyBuyingCommitteeTrack(leadContact?.title ?? null);
   const channelTier = classifyContactChannelTier({
     fullName: leadContact?.fullName ?? null,
@@ -272,7 +337,9 @@ export function buildBattleCsvRow(input: BattleRowBuildInput): BattleCsvRow {
     leadContact,
     d3,
     vendorPortal: channels.vendorPortal,
+    companyPhone: channels.companyPhone,
     publicWhatsapp: channels.publicWhatsapp,
+    extraSocials: channels.extraSocials,
   });
   return {
     companyName: company.name,
@@ -286,7 +353,7 @@ export function buildBattleCsvRow(input: BattleRowBuildInput): BattleCsvRow {
     committeeTrack: track.label,
     contactEmail: channels.chosenEmail,
     emailVerificationState: channels.chosenVerificationState,
-    linkedinUrl: channels.contactLinkedin,
+    linkedinUrl: channels.displayLinkedin,
     triggerHook: input.draft?.subject ?? null,
     linkedinNote: copy.linkedinNote,
     referralInfoDraft: copy.referralInfoDraft,
