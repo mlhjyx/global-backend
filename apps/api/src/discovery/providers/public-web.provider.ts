@@ -677,7 +677,9 @@ export function mapPublicWebCompanyToRecord(args: {
     externalId: domain,
     name,
     domain,
-    country: countryIso(args.extracted.country) ?? inferCountryFromCcTld(domain),
+    country: args.extracted.country?.trim()
+      ? countryIso(args.extracted.country)
+      : inferCountryFromCcTld(domain),
     industry: args.extracted.industry || undefined,
     employeeCount:
       typeof employeeCount === 'number' && Number.isSafeInteger(employeeCount) && employeeCount >= 0

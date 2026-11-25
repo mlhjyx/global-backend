@@ -10,6 +10,7 @@
  * 探测（400/404/410 立刻跳过，200 且正文充足直接免开浏览器），并支持同可注册域的 `www.` 互切。
  */
 import { inferCountryFromCcTld } from '../domain-country';
+import { stripHtml } from '../impressum/impressum-extract';
 import { isExecutionControlError } from '../../execution-budget/execution-control-error';
 import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
 
@@ -51,14 +52,7 @@ export function toggleWwwHost(host: string): string {
 }
 
 export function stripHtmlToVisibleText(html: string): string {
-  return html
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/giu, ' ')
-    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/giu, ' ')
-    .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/giu, ' ')
-    .replace(/<[^>]+>/gu, ' ')
-    .replace(/&nbsp;/giu, ' ')
-    .replace(/\s+/gu, ' ')
-    .trim();
+  return stripHtml(html).trim();
 }
 
 export function httpFirstMinChars(env: NodeJS.ProcessEnv = process.env): number {

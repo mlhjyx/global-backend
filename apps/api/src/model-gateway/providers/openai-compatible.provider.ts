@@ -1192,7 +1192,6 @@ export class OpenAICompatibleProvider implements ModelProvider {
   ): Promise<never> {
     if (!ctx?.paidCost) {
       const upstreamChannelExhausted = await detectUpstreamChannelExhausted(response);
-      await response.body?.cancel().catch(() => undefined);
       throw new ProviderHttpError({
         status: response.status,
         provider: this.id,
@@ -1839,7 +1838,6 @@ export class OpenAICompatibleProvider implements ModelProvider {
     );
     if (!res.ok) {
       const upstreamChannelExhausted = await detectUpstreamChannelExhausted(res);
-      await res.body?.cancel().catch(() => undefined);
       throw new ProviderHttpError({
         status: res.status,
         provider: this.id,
