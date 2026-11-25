@@ -98,7 +98,11 @@ export function formatContentDisposition(filename: string): string {
     })
     .join('');
   const safe = withoutControls.replace(/[/\\]/g, '_').trim();
-  const base = safe.length > 0 ? safe : 'document';
+  const rawBase = safe.length > 0 ? safe : 'document';
+  const base = rawBase.replace(
+    /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g,
+    '_',
+  );
   const asciiFallback = base.replace(/[^\x20-\x7e]/g, '_').replace(/["\\;]/g, '_');
   const utf8Encoded = encodeURIComponent(base).replace(
     /['()*!]/g,

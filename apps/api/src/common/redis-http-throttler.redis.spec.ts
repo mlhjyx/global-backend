@@ -11,7 +11,6 @@ import {
   Get,
   Injectable,
   Module,
-  UnauthorizedException,
   UseGuards,
 } from "@nestjs/common";
 import { APP_GUARD, NestFactory } from "@nestjs/core";
@@ -23,13 +22,18 @@ import { AuthGuard } from "../auth/auth.guard";
 import { AuthModule } from "../auth/auth.module";
 import { Ctx } from "../auth/ctx.decorator";
 import type { RequestContext } from "../auth/request-context";
-import { TokenVerifier, UnavailableTokenVerifier } from "../auth/token-verifier";
+import { TokenVerifier } from "../auth/token-verifier";
 import {
   RedisHttpThrottlerStorage,
   httpThrottlerOptions,
 } from "./redis-http-throttler.storage";
-import { WsThrottlerGuard } from "./ws-throttler.guard";
+import {
+  WS_THROTTLER_WORKSPACE_RESOLVER,
+  WsThrottlerGuard,
+  type WsThrottlerWorkspaceResolver,
+} from "./ws-throttler.guard";
 import { GlobalHttpExceptionFilter } from "./http-exception.filter";
+import { candidateWorkspaceAllowed } from "../runtime/development-candidate";
 
 @Controller("probe")
 class ProbeController {
@@ -93,26 +97,17 @@ it("preserves authenticated-context/IP fallback and resolves verified Bearer wor
   ).toBe("ip:127.0.0.3");
   expect(await tracker.tracker({})).toBe("ip:unknown");
 
-  const validVerifier: TokenVerifier = {
-    async verify(token: string): Promise<RequestContext> {
-      if (token === "token-tenant-a") {
-        return {
-          userId: "user-1",
-          workspaceId: "tenant-a",
-          roles: ["MEMBER"],
-          scopes: [],
-        };
-      }
-      throw new UnauthorizedException({
-        error: { code: "TOKEN_INVALID", message: "invalid bearer token" },
-      });
-    },
+  const validResolver: WsThrottlerWorkspaceResolver = async (token: string) => {
+    if (token === "token-tenant-a") {
+      return "tenant-a";
+    }
+    throw new Error("TOKEN_INVALID");
   };
   const verifiedTracker = new InspectTracker(
     [],
     {} as never,
     {} as never,
-    validVerifier,
+    validResolver,
   );
   const reqWithValidToken: Record<string, unknown> = {
     headers: { authorization: "Bearer token-tenant-a" },
@@ -132,7 +127,7 @@ it("preserves authenticated-context/IP fallback and resolves verified Bearer wor
     [],
     {} as never,
     {} as never,
-    new UnavailableTokenVerifier(),
+    async () => undefined,
   );
   expect(
     await unavailableTracker.tracker({
@@ -140,6 +135,19 @@ it("preserves authenticated-context/IP fallback and resolves verified Bearer wor
       ip: "127.0.0.5",
     }),
   ).toBe("ip:127.0.0.5");
+
+  const emptyWsTracker = new InspectTracker(
+    [],
+    {} as never,
+    {} as never,
+    async () => "",
+  );
+  expect(
+    await emptyWsTracker.tracker({
+      headers: { authorization: "Bearer token-tenant-a" },
+      ip: "127.0.0.6",
+    }),
+  ).toBe("ip:127.0.0.6");
 });
 
 describe.skipIf(process.env.RUN_HTTP_THROTTLE_REDIS_TEST !== "1")(
@@ -428,6 +436,20 @@ describe.skipIf(process.env.RUN_HTTP_THROTTLE_REDIS_TEST !== "1")(
         controllers: [IntegrationController],
         providers: [
           StubServiceTokenGuard,
+          {
+            provide: WS_THROTTLER_WORKSPACE_RESOLVER,
+            inject: [TokenVerifier],
+            useFactory:
+              (tokenVerifier: TokenVerifier): WsThrottlerWorkspaceResolver =>
+              async (token: string): Promise<string | undefined> => {
+                const verified = await tokenVerifier.verify(token);
+                return typeof verified.workspaceId === "string" &&
+                  verified.workspaceId.length > 0 &&
+                  candidateWorkspaceAllowed(verified.workspaceId)
+                  ? verified.workspaceId
+                  : undefined;
+              },
+          },
           { provide: APP_GUARD, useClass: WsThrottlerGuard },
         ],
       })

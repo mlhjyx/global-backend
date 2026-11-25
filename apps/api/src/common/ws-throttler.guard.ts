@@ -7,15 +7,21 @@ import {
   type ThrottlerModuleOptions,
   type ThrottlerStorage,
 } from '@nestjs/throttler';
-import { TokenVerifier } from '../auth/token-verifier';
-import { candidateWorkspaceAllowed } from '../runtime/development-candidate';
 
 const MAX_BEARER_TOKEN_BYTES = 16_384;
 
+export const WS_THROTTLER_WORKSPACE_RESOLVER = Symbol(
+  'WS_THROTTLER_WORKSPACE_RESOLVER',
+);
+
+export type WsThrottlerWorkspaceResolver = (
+  token: string,
+) => Promise<string | undefined>;
+
 /**
  * 按 workspace 维度限流（多租户公平性）：优先使用已挂载的 req.requestContext.workspaceId，
- * 否则在 Bearer JWT 校验通过且所属 workspace 获准时取 verified.workspaceId 作为限流键
- * （不提前写 req.requestContext，保持 AuthGuard 为唯一上下文写入方）；
+ * 否则在 Bearer JWT 经注入的 WS_THROTTLER_WORKSPACE_RESOLVER 校验通过且所属 workspace 获准时取
+ * workspaceId 作为限流键（不提前写 req.requestContext，保持 AuthGuard 为唯一上下文写入方）；
  * 未鉴权/无效令牌/服务令牌请求回落到 IP。避免单租户打满影响其他租户。
  */
 @Injectable()
@@ -24,7 +30,9 @@ export class WsThrottlerGuard extends ThrottlerGuard {
     @InjectThrottlerOptions() options: ThrottlerModuleOptions,
     @InjectThrottlerStorage() storageService: ThrottlerStorage,
     @Inject(Reflector) reflector: Reflector,
-    @Optional() @Inject(TokenVerifier) private readonly tokenVerifier?: TokenVerifier,
+    @Optional()
+    @Inject(WS_THROTTLER_WORKSPACE_RESOLVER)
+    private readonly resolveWorkspaceId?: WsThrottlerWorkspaceResolver,
   ) {
     super(options, storageService, reflector);
   }
@@ -35,20 +43,16 @@ export class WsThrottlerGuard extends ThrottlerGuard {
       return `ws:${requestContext.workspaceId}`;
     }
 
-    if (this.tokenVerifier) {
+    if (this.resolveWorkspaceId) {
       const headers = req.headers as Record<string, unknown> | undefined;
       const auth = headers?.['authorization'];
       if (typeof auth === 'string' && auth.startsWith('Bearer ')) {
         const token = auth.slice('Bearer '.length);
         if (token.length > 0 && Buffer.byteLength(token, 'utf8') <= MAX_BEARER_TOKEN_BYTES) {
           try {
-            const verified = await this.tokenVerifier.verify(token);
-            if (
-              typeof verified.workspaceId === 'string' &&
-              verified.workspaceId.length > 0 &&
-              candidateWorkspaceAllowed(verified.workspaceId)
-            ) {
-              return `ws:${verified.workspaceId}`;
+            const workspaceId = await this.resolveWorkspaceId(token);
+            if (typeof workspaceId === 'string' && workspaceId.length > 0) {
+              return `ws:${workspaceId}`;
             }
           } catch {
             // Fail-open to IP so public, x-service-token, and invalid-JWT requests reach their own guards.

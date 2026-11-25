@@ -341,6 +341,11 @@ describe('formatContentDisposition & SellerDocumentsService.openContentStream', 
     expect(formatContentDisposition('\x00\r\n')).toBe(
       `attachment; filename="document"; filename*=UTF-8''document`,
     );
+
+    const loneSurrogate = formatContentDisposition('bad-\uD800-and-\uDC00-ok-\uD83D\uDE00.pdf');
+    expect(loneSurrogate).toBe(
+      `attachment; filename="bad-_-and-_-ok-__.pdf"; filename*=UTF-8''bad-_-and-_-ok-${encodeURIComponent('\uD83D\uDE00')}.pdf`,
+    );
   });
 
   function streamFixture(

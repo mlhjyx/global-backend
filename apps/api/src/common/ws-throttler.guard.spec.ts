@@ -10,16 +10,24 @@ import {
   UnauthorizedException,
   UseGuards,
 } from "@nestjs/common";
+import { MODULE_METADATA } from "@nestjs/common/constants";
 import { APP_GUARD, NestFactory } from "@nestjs/core";
 import { SkipThrottle, ThrottlerModule } from "@nestjs/throttler";
 import { SignJWT, exportJWK, generateKeyPair } from "jose";
 import { describe, expect, it } from "vitest";
+import { AppModule } from "../app.module";
 import { AuthGuard } from "../auth/auth.guard";
 import { AuthModule } from "../auth/auth.module";
 import { Ctx } from "../auth/ctx.decorator";
 import type { RequestContext } from "../auth/request-context";
+import { TokenVerifier } from "../auth/token-verifier";
+import { candidateWorkspaceAllowed } from "../runtime/development-candidate";
 import { GlobalHttpExceptionFilter } from "./http-exception.filter";
-import { WsThrottlerGuard } from "./ws-throttler.guard";
+import {
+  WS_THROTTLER_WORKSPACE_RESOLVER,
+  WsThrottlerGuard,
+  type WsThrottlerWorkspaceResolver,
+} from "./ws-throttler.guard";
 
 describe("WsThrottlerGuard end-to-end HTTP tenant isolation & fail-open routing", () => {
   it("isolates tenants behind 127.0.0.1, preserves /health/* & service-token routes, and passes invalid JWTs to AuthGuard 401 before IP 429", async () => {
@@ -127,6 +135,20 @@ describe("WsThrottlerGuard end-to-end HTTP tenant isolation & fail-open routing"
       providers: [
         StubServiceTokenGuard,
         StubServiceBearerGuard,
+        {
+          provide: WS_THROTTLER_WORKSPACE_RESOLVER,
+          inject: [TokenVerifier],
+          useFactory:
+            (tokenVerifier: TokenVerifier): WsThrottlerWorkspaceResolver =>
+            async (token: string): Promise<string | undefined> => {
+              const verified = await tokenVerifier.verify(token);
+              return typeof verified.workspaceId === "string" &&
+                verified.workspaceId.length > 0 &&
+                candidateWorkspaceAllowed(verified.workspaceId)
+                ? verified.workspaceId
+                : undefined;
+            },
+        },
         { provide: APP_GUARD, useClass: WsThrottlerGuard },
       ],
     })
@@ -240,6 +262,20 @@ describe("WsThrottlerGuard end-to-end HTTP tenant isolation & fail-open routing"
       controllers: [TestRoutes2Controller],
       providers: [
         StubServiceBearerGuard,
+        {
+          provide: WS_THROTTLER_WORKSPACE_RESOLVER,
+          inject: [TokenVerifier],
+          useFactory:
+            (tokenVerifier: TokenVerifier): WsThrottlerWorkspaceResolver =>
+            async (token: string): Promise<string | undefined> => {
+              const verified = await tokenVerifier.verify(token);
+              return typeof verified.workspaceId === "string" &&
+                verified.workspaceId.length > 0 &&
+                candidateWorkspaceAllowed(verified.workspaceId)
+                ? verified.workspaceId
+                : undefined;
+            },
+        },
         { provide: APP_GUARD, useClass: WsThrottlerGuard },
       ],
     })
@@ -281,5 +317,74 @@ describe("WsThrottlerGuard end-to-end HTTP tenant isolation & fail-open routing"
         else process.env[k] = v;
       }
     }
+  });
+
+  it("wires WS_THROTTLER_WORKSPACE_RESOLVER in AppModule with TokenVerifier + candidateWorkspaceAllowed", async () => {
+    const providers = Reflect.getMetadata(
+      MODULE_METADATA.PROVIDERS,
+      AppModule,
+    ) as readonly {
+      provide?: unknown;
+      inject?: unknown[];
+      useFactory?: (tokenVerifier: TokenVerifier) => WsThrottlerWorkspaceResolver;
+    }[];
+
+    const resolverProvider = providers.find(
+      (provider) => provider.provide === WS_THROTTLER_WORKSPACE_RESOLVER,
+    );
+    expect(resolverProvider).toBeDefined();
+    expect(resolverProvider?.inject).toEqual([TokenVerifier]);
+    expect(typeof resolverProvider?.useFactory).toBe("function");
+
+    const wsAllowed = "33333333-3333-4333-8333-333333333333";
+    const stubVerifier: TokenVerifier = {
+      async verify(token: string): Promise<RequestContext> {
+        if (token === "valid-token") {
+          return {
+            userId: "user-1",
+            workspaceId: wsAllowed,
+            roles: ["MEMBER"],
+            scopes: [],
+          };
+        }
+        if (token === "empty-ws-token") {
+          return {
+            userId: "user-1",
+            workspaceId: "",
+            roles: ["MEMBER"],
+            scopes: [],
+          };
+        }
+        throw new UnauthorizedException({
+          error: { code: "TOKEN_INVALID", message: "invalid bearer token" },
+        });
+      },
+    };
+
+    const resolver = resolverProvider!.useFactory!(stubVerifier);
+
+    // 1. Admitted workspace resolves to workspaceId
+    await expect(resolver("valid-token")).resolves.toBe(wsAllowed);
+
+    // 2. Unadmitted candidate workspace returns undefined
+    const prevCandidateId = process.env.RUNTIME_CANDIDATE_INSTANCE_ID;
+    process.env.RUNTIME_CANDIDATE_INSTANCE_ID = "candidate-unadmitted";
+    try {
+      await expect(resolver("valid-token")).resolves.toBeUndefined();
+    } finally {
+      if (prevCandidateId === undefined) {
+        delete process.env.RUNTIME_CANDIDATE_INSTANCE_ID;
+      } else {
+        process.env.RUNTIME_CANDIDATE_INSTANCE_ID = prevCandidateId;
+      }
+    }
+
+    // 3. Empty workspaceId returns undefined
+    await expect(resolver("empty-ws-token")).resolves.toBeUndefined();
+
+    // 4. Invalid token rejects so WsThrottlerGuard fails open to IP
+    await expect(resolver("invalid-token")).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
   });
 });
