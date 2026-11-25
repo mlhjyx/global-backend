@@ -253,6 +253,8 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
   // ── Reports ───────────────────────────────────────────────────────────────
   'GET /api/v1/reports/weekly':
     '导出周报 CSV：该 ICP 下、指定 ISO 周（UTC，周一起）accept 的线索。每行写一条 EXPORT 判定到 policy_decision_log，被拒或被拦的行不导出；超过单次上限整份拒绝而不截断。需要 acquisition:export。',
+  'GET /api/v1/reports/battle-csv':
+    '导出 19 列受审计多通道作战清表 CSV：按 ICP 与可选 ISO 周汇总已交付线索的买方决策委员会轨道、S/A/B/C 通道分层、D3 法域合规标签、GDPR Art.14/LIA 告知状态与 C 级转交话术，支持 maskEmails 前缀脱敏；每行复用 DataRights EXPORT 审计、制裁拦截、合成隔离与抑制过滤。需要 acquisition:export。',
   'POST /api/v1/reports/weekly/feedback':
     '上传客户填写后的周报 CSV 原文：按「线索 ID」列匹配、逐行校验，只追加写 lead_outcome，返回接受 / 拒绝 / 跳过计数与带文件行号的拒绝原因。',
 

@@ -16895,7 +16895,8 @@
         "x-required-scopes": [
           "acquisition:read",
           "acquisition:export"
-        ]
+        ],
+        "description": "导出 19 列受审计多通道作战清表 CSV：按 ICP 与可选 ISO 周汇总已交付线索的买方决策委员会轨道、S/A/B/C 通道分层、D3 法域合规标签、GDPR Art.14/LIA 告知状态与 C 级转交话术，支持 maskEmails 前缀脱敏；每行复用 DataRights EXPORT 审计、制裁拦截、合成隔离与抑制过滤。需要 acquisition:export。"
       }
     },
     "/api/v1/reports/weekly/feedback": {
