@@ -99,6 +99,7 @@ describe('Phase 1: scoreCandidates does not resurrect eliminated companies and r
         { id: 'c-deep-mismatch', name: 'Deep Mismatch Ltd' },
         { id: 'c-gate-blocked', name: 'Gate Blocked Ltd' },
         { id: 'c-not-fit', name: 'Not Fit Judgment Ltd' },
+        { id: 'c-deep-stopped', name: 'Deep Stopped Resumable Ltd' },
         { id: 'c-valid-match', name: 'Real Solar Buyer Srl' },
       ],
       jobs: [
@@ -106,6 +107,7 @@ describe('Phase 1: scoreCandidates does not resurrect eliminated companies and r
         { canonicalCompanyId: 'c-quick-mismatch', stage: 'quick_judged', verdictQuick: 'mismatch', verdictDeep: null, lastErrorCode: null, createdAt: t },
         { canonicalCompanyId: 'c-deep-mismatch', stage: 'done', verdictQuick: 'weak', verdictDeep: 'mismatch', lastErrorCode: null, createdAt: t },
         { canonicalCompanyId: 'c-gate-blocked', stage: 'skipped', verdictQuick: null, verdictDeep: null, lastErrorCode: 'GATE_SANCTIONS_FAIL', createdAt: t },
+        { canonicalCompanyId: 'c-deep-stopped', stage: 'skipped', verdictQuick: 'match', verdictDeep: null, lastErrorCode: 'DEEP_STOPPED', createdAt: t },
         { canonicalCompanyId: 'c-valid-match', stage: 'done', verdictQuick: 'match', verdictDeep: 'match', lastErrorCode: null, createdAt: t },
       ],
       judgments: [
@@ -118,12 +120,12 @@ describe('Phase 1: scoreCandidates does not resurrect eliminated companies and r
 
     const res = await h.activities.scoreCandidates({ workspaceId: WS, icpId: ICP });
 
-    expect(res.scored).toBe(1);
-    expect(h.leadUpsert).toHaveBeenCalledTimes(1);
+    expect(res.scored).toBe(2);
+    expect(h.leadUpsert).toHaveBeenCalledTimes(2);
     const upsertedIds = h.leadUpsert.mock.calls.map(
       (call) => (call[0] as { create: { canonicalCompanyId: string } }).create.canonicalCompanyId,
     );
-    expect(upsertedIds).toEqual(['c-valid-match']);
+    expect(upsertedIds).toEqual(['c-deep-stopped', 'c-valid-match']);
   });
 
   it('passes sourceType/verificationMethod into scoreLead so blind pattern_guess/RISKY contact points score 0 reachability', async () => {

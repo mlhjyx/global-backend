@@ -63,7 +63,7 @@ export async function loadEliminatedCompanyIdsForIcp(
         job.stage === 'prefiltered_out' ||
         job.verdictQuick === 'mismatch' ||
         job.verdictDeep === 'mismatch' ||
-        (job.stage === 'skipped' && Boolean(job.lastErrorCode))
+        (job.stage === 'skipped' && Boolean(job.lastErrorCode) && job.lastErrorCode !== 'DEEP_STOPPED')
       ) {
         eliminated.add(companyId);
       }
