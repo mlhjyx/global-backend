@@ -862,6 +862,11 @@ export function sourceRouteRejections(input: {
     }));
 }
 
+function logRejectedDiscoveryProvider(reason: unknown): void {
+  const detail = reason instanceof Error ? `${reason.name}: ${reason.message}` : String(reason);
+  console.warn(`[discovery] executeQuery provider rejected (non-control): ${detail.slice(0, 240)}`);
+}
+
 export function createDiscoveryActivities(deps: {
   prisma: PrismaService;
   providers: DiscoveryProviderRegistry;
@@ -1333,7 +1338,10 @@ export function createDiscoveryActivities(deps: {
           // past the query deadline when the lease cannot hold the wait.
           throw withLeaseAwareQueryRetryDelay(result.reason, lease);
         }
-        if (result.status !== 'fulfilled') continue;
+        if (result.status !== 'fulfilled') {
+          logRejectedDiscoveryProvider(result.reason);
+          continue;
+        }
         assertProductDiscoveryProvenance({ providerKey: result.value.key });
         for (const record of result.value.r.records) {
           assertProductDiscoveryProvenance({
