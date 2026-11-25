@@ -77,4 +77,13 @@ export class CreateCompanyDto {
   @IsOptional()
   @IsEmail()
   businessEmail?: string;
+
+  @ApiPropertyOptional({
+    example: '专业生产 HJT 700W+ 光伏组件与工商业储能系统，通过 IEC 61215 与 TÜV 认证，主要出口欧洲与拉美。',
+    description: '可选：简短产品与工厂描述（1~2000 字；无官网冷启动或补充说明时落入档案简介并生成待审事实草稿）',
+  })
+  @IsOptional()
+  @IsString()
+  @Length(1, 2000)
+  productDescription?: string;
 }

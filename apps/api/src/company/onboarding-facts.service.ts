@@ -83,6 +83,7 @@ export class OnboardingFactsService {
       }
       if (dto.targetMarkets !== undefined) data.targetMarkets = dto.targetMarkets;
       if (dto.businessEmail !== undefined) data.businessEmail = dto.businessEmail.trim();
+      if (dto.productDescription !== undefined) data.summary = dto.productDescription.trim();
 
       // withWorkspace 是交互式事务，行锁由随后的 update 持有；理解回填路径在本状态门
       // 之外（ENRICHING 才会写 industry），REVIEW/DRAFT 没有并发写者。
@@ -155,6 +156,7 @@ export class OnboardingFactsService {
         industry: updated.industry,
         targetMarkets: updated.targetMarkets,
         offeringNames,
+        ...(dto.productDescription !== undefined ? { summary: updated.summary } : {}),
       });
       if (draftSpecs.length > 0) {
         await synthesizeProfileClaimDrafts(tx, {

@@ -163,6 +163,12 @@ export class CompanyController {
       companyId: { type: 'string', format: 'uuid' },
       name: { type: 'string' },
       website: { type: 'string', nullable: true },
+      websiteChannel: {
+        type: 'string',
+        enum: ['official_website', 'alibaba_1688', 'alibaba_intl'],
+        nullable: true,
+      },
+      summary: { type: 'string', nullable: true },
       status: { type: 'string', enum: ['DRAFT', 'ENRICHING', 'REVIEW', 'ACTIVE'] },
       state: {
         type: 'string',
@@ -227,6 +233,44 @@ export class CompanyController {
             labels: { type: 'object', additionalProperties: { type: 'string' } },
             evidence: { type: 'string' },
             sourceUrl: { type: 'string', nullable: true },
+          },
+        },
+      },
+      documents: {
+        type: 'object',
+        required: ['total', 'ready', 'processing', 'failed', 'items', 'extractedClaims'],
+        properties: {
+          total: { type: 'integer' },
+          ready: { type: 'integer' },
+          processing: { type: 'integer' },
+          failed: { type: 'integer' },
+          items: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string', format: 'uuid' },
+                filename: { type: 'string' },
+                status: { type: 'string' },
+                mime: { type: 'string' },
+                chunkCount: { type: 'integer' },
+                createdAt: { type: 'string', format: 'date-time' },
+              },
+            },
+          },
+          extractedClaims: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                claimId: { type: 'string', format: 'uuid' },
+                type: { type: 'string' },
+                statement: { type: 'string' },
+                status: { type: 'string' },
+                documentId: { type: 'string', format: 'uuid', nullable: true },
+                filename: { type: 'string', nullable: true },
+              },
+            },
           },
         },
       },

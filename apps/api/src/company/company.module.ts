@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { CompanyController } from './company.controller';
+import { MarketRecommendationsController } from './market-recommendations.controller';
 import { CompanyService } from './company.service';
+import { ComtradeMarketRecommendationService } from './comtrade-market-recommendation.service';
 import { OnboardingFactsService } from './onboarding-facts.service';
 import { UnderstandingPreviewService } from './understanding-preview.service';
 import { CompanyUnderstandingRecomputeService } from './company-understanding-recompute.service';
@@ -20,9 +22,10 @@ import { TOOL_BUDGET_STORE, type BudgetStore } from '../tools/budget-store';
 
 @Module({
   imports: [ExecutionBudgetModule, SellerKnowledgeModule],
-  controllers: [CompanyController],
+  controllers: [CompanyController, MarketRecommendationsController],
   providers: [
     CompanyService,
+    ComtradeMarketRecommendationService,
     WebsiteCandidatesService,
     UnderstandingPreviewService,
     OnboardingFactsService,

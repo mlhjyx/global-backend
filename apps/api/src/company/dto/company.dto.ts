@@ -1,4 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  classifySellerWebsiteChannel,
+  type SellerWebsiteChannel,
+} from '../seller-source-allowlist';
 
 export class PublicContactDto {
   @ApiProperty({ enum: ['email', 'phone', 'social'] })
@@ -20,6 +24,13 @@ export class CompanyDto {
 
   @ApiProperty({ type: String, nullable: true, example: 'https://acme-tech.com' })
   website!: string | null;
+
+  @ApiPropertyOptional({
+    enum: ['official_website', 'alibaba_1688', 'alibaba_intl'],
+    nullable: true,
+    description: '卖家网站渠道类型（由 website 派生；仅卖家建档允许 1688 / 阿里国际站店铺链接）',
+  })
+  websiteChannel?: SellerWebsiteChannel | null;
 
   @ApiProperty({ enum: ['DRAFT', 'ENRICHING', 'REVIEW', 'ACTIVE'] })
   status!: string;
@@ -105,6 +116,7 @@ export class CompanyDto {
       id: c.id,
       name: c.name,
       website: c.website,
+      websiteChannel: classifySellerWebsiteChannel(c.website),
       status: c.status,
       industry: c.industry ?? null,
       industryCode: c.industryCode ?? null,

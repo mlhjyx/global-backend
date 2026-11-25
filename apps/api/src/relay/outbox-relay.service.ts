@@ -1,4 +1,4 @@
-import { discoveryManufacturerCommandArguments, NonRetryableOutboxCommandError } from './discovery-run-command';
+import { discoveryManufacturerCommandArguments, NonRetryableOutboxCommandError, resolveDiscoveryWorkflowType } from './discovery-run-command';
 import { assertCandidateWorkspaceAllowed, assertRuntimeCandidateOperational, candidateWorkspaceWhere } from '../runtime/development-candidate';
 import { createHmac } from "node:crypto";
 import {
@@ -951,7 +951,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       }
       const manufacturerArgs = discoveryManufacturerCommandArguments(payload.manufacturerNetworkExecution, executionBudget, payload.planId);
       await this.startWorkflowIdempotent(
-        DISCOVERY_WORKFLOW,
+        resolveDiscoveryWorkflowType(),
         {
           taskQueue: UNDERSTANDING_TASK_QUEUE,
           workflowId: `discovery-${ev.aggregateId}`,

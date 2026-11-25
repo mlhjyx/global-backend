@@ -1,5 +1,18 @@
 import { assertManufacturerNetworkAuthority } from "../discovery/manufacturer-network-authority";
 import type { ExecutionBudgetBinding } from "../execution-budget/execution-budget-binding";
+import {
+  DISCOVERY_STREAMING_WORKFLOW,
+  DISCOVERY_WORKFLOW,
+} from "../temporal/understanding.constants";
+
+/** Plan B rollout switch: DISCOVERY_STREAMING_WORKFLOW=on routes new runs to discoveryStreamingWorkflow. */
+export function resolveDiscoveryWorkflowType(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): string {
+  return /^(1|true|on|yes)$/i.test(env.DISCOVERY_STREAMING_WORKFLOW ?? "")
+    ? DISCOVERY_STREAMING_WORKFLOW
+    : DISCOVERY_WORKFLOW;
+}
 
 export class NonRetryableOutboxCommandError extends Error {
   constructor(message: string) {

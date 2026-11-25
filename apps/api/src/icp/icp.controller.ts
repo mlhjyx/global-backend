@@ -12,7 +12,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiBody, ApiOperation, ApiPropertyOptional, ApiQuery, ApiTags } from '@nestjs/swagger';
-import { ArrayMaxSize, IsArray, IsOptional, IsUUID, Matches } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsOptional, IsString, IsUUID, Length, Matches } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 import { Ctx } from '../auth/ctx.decorator';
 import { RequireScopes } from '../auth/require-scopes.decorator';
@@ -50,7 +50,7 @@ class GenerateWithAttemptDto {
   attemptId?: string;
 }
 
-/** ICP 生成专用：用户显式确认的目标市场只对 ICP 生成有意义（查询计划不使用）。 */
+/** ICP 生成专用：用户显式确认的目标市场与多 ICP 专项聚焦参数（不影响 Grant 哈希）。 */
 class GenerateIcpDto extends GenerateWithAttemptDto {
   @ApiPropertyOptional({
     type: [String],
@@ -62,6 +62,54 @@ class GenerateIcpDto extends GenerateWithAttemptDto {
   @ArrayMaxSize(20)
   @Matches(/^[A-Z]{2}$/, { each: true, message: 'confirmedTargetMarkets 必须是 ISO 3166-1 alpha-2 大写' })
   confirmedTargetMarkets?: string[];
+
+  @ApiPropertyOptional({ maxLength: 120, description: '可选自定义 ICP 名称（1 公司多 ICP 场景）' })
+  @IsOptional()
+  @IsString()
+  @Length(1, 120)
+  name?: string;
+
+  @ApiPropertyOptional({ type: [String], maxItems: 10, description: '可选：本 ICP 绑定的卖方产品线子集' })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10)
+  @IsString({ each: true })
+  @Length(1, 120, { each: true })
+  productLines?: string[];
+
+  @ApiPropertyOptional({ type: [String], maxItems: 5, description: '可选：本 ICP 聚焦的下游买家角色（如 distributor / epc_integrator）' })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(5)
+  @IsString({ each: true })
+  @Length(1, 60, { each: true })
+  buyerRoles?: string[];
+
+  @ApiPropertyOptional({
+    enum: ['distribution', 'factory_direct', 'equipment_integration'],
+    description: '可选：预选采购场景',
+  })
+  @IsOptional()
+  @IsIn(['distribution', 'factory_direct', 'equipment_integration'])
+  procurementScenario?: 'distribution' | 'factory_direct' | 'equipment_integration';
+
+  @ApiPropertyOptional({ type: [String], maxItems: 20, description: '可选：卖方补充的同行/竞品排除说明' })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsString({ each: true })
+  @Length(1, 200, { each: true })
+  peerExclusionNotes?: string[];
+}
+
+class ActivateIcpDto {
+  @ApiPropertyOptional({
+    default: false,
+    description: '为 true 时保留同公司其他已激活 ICP（支持 1 公司多 ICP 并行）；默认 false 保持旧单活语义。',
+  })
+  @IsOptional()
+  @IsBoolean()
+  keepExistingActive?: boolean;
 }
 
 @ApiTags('ICP')
@@ -93,17 +141,40 @@ export class IcpController {
     @Body() dto?: GenerateIcpDto,
     @ExecutionBudgetGrant() compactJws?: string,
   ): Promise<Enveloped<IcpDto>> {
+    const hasOverrides = Boolean(
+      dto &&
+        (dto.name !== undefined ||
+          dto.productLines !== undefined ||
+          dto.buyerRoles !== undefined ||
+          dto.procurementScenario !== undefined ||
+          dto.peerExclusionNotes !== undefined),
+    );
     return envelope(
       IcpDto.from(
         await asExecutionBudgetHttpBoundary(() =>
           asModelUpstreamHttpBoundary(() =>
-            this.icps.generateFromCompany(
-              ctx,
-              companyId,
-              compactJws,
-              dto?.attemptId,
-              dto?.confirmedTargetMarkets,
-            ),
+            hasOverrides
+              ? this.icps.generateFromCompany(
+                  ctx,
+                  companyId,
+                  compactJws,
+                  dto?.attemptId,
+                  dto?.confirmedTargetMarkets,
+                  {
+                    name: dto?.name,
+                    productLines: dto?.productLines,
+                    buyerRoles: dto?.buyerRoles,
+                    procurementScenario: dto?.procurementScenario,
+                    peerExclusionNotes: dto?.peerExclusionNotes,
+                  },
+                )
+              : this.icps.generateFromCompany(
+                  ctx,
+                  companyId,
+                  compactJws,
+                  dto?.attemptId,
+                  dto?.confirmedTargetMarkets,
+                ),
           ),
         ),
       ),
@@ -135,13 +206,21 @@ export class IcpController {
   @Post('icps/:icpId/activate')
   @RequireScopes('acquisition:review')
   @HttpCode(200)
-  @ApiOperation({ summary: '激活 ICP（→ ACTIVE，同企业旧 ACTIVE → SUPERSEDED），发 ICPActivated 事件' })
+  @ApiOperation({ summary: '激活 ICP（→ ACTIVE；默认同企业旧 ACTIVE → SUPERSEDED，keepExistingActive=true 支持多 ICP 并行），发 ICPActivated 事件' })
+  @ApiBody({ type: ActivateIcpDto, required: false })
   @ApiEnvelope(IcpDto)
   async activate(
     @Ctx() ctx: RequestContext,
     @Param('icpId', ParseUUIDPipe) icpId: string,
+    @Body() dto?: ActivateIcpDto,
   ): Promise<Enveloped<IcpDto>> {
-    return envelope(IcpDto.from(await this.icps.activate(ctx, icpId)));
+    return envelope(
+      IcpDto.from(
+        dto?.keepExistingActive !== undefined
+          ? await this.icps.activate(ctx, icpId, { keepExistingActive: dto.keepExistingActive })
+          : await this.icps.activate(ctx, icpId),
+      ),
+    );
   }
 
   @Patch('icps/:icpId')

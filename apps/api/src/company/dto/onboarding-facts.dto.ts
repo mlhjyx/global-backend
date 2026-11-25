@@ -75,4 +75,12 @@ export class OnboardingFactsDto {
   @IsEmail()
   @MaxLength(320)
   businessEmail?: string;
+
+  @ApiPropertyOptional({
+    description: '简短产品与工厂描述（1~2000 字；落入企业简介并生成待审 Claim 草稿）',
+  })
+  @IsOptional()
+  @IsString()
+  @Length(1, 2000)
+  productDescription?: string;
 }

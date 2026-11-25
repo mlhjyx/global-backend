@@ -62,4 +62,13 @@ export class UpdateCompanyDto {
   @IsEmail()
   @Length(1, 320)
   businessEmail?: string;
+
+  @ApiPropertyOptional({
+    maxLength: 2000,
+    description: '简短产品与工厂描述（1~2000 字；写回企业简介）',
+  })
+  @IsOptional()
+  @IsString()
+  @Length(1, 2000)
+  productDescription?: string;
 }

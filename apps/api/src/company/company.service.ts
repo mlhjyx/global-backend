@@ -18,6 +18,7 @@ import {
   synthesizeProfileClaimDrafts,
 } from '../claim/profile-claim-drafts';
 import { resolveIndustrySelection } from './industry-selection';
+import { assertSellerWebsiteAllowed, buildCompanySummaryPatch } from './seller-source-allowlist';
 
 type CompanyRow = Prisma.CompanyProfileGetPayload<Record<string, never>>;
 
@@ -159,6 +160,7 @@ export class CompanyService {
     }
 
     if (dto.website) {
+      assertSellerWebsiteAllowed(dto.website);
       await assertPublicHttpUrl(dto.website);
     }
     const companyId = randomUUID();
@@ -212,6 +214,7 @@ export class CompanyService {
           ...(dto.businessEmail !== undefined
             ? { businessEmail: dto.businessEmail }
             : {}),
+          ...buildCompanySummaryPatch(dto.productDescription),
           status: 'DRAFT',
         },
       });
@@ -236,6 +239,7 @@ export class CompanyService {
         industry: dto.industry,
         targetMarkets: dto.targetMarkets,
         offeringNames: dto.products ?? [],
+        summary: dto.productDescription,
       });
       if (draftSpecs.length > 0) {
         await synthesizeProfileClaimDrafts(tx, {
@@ -370,6 +374,7 @@ export class CompanyService {
    */
   async update(ctx: RequestContext, id: string, dto: UpdateCompanyDto) {
     if (dto.website !== undefined) {
+      assertSellerWebsiteAllowed(dto.website);
       await assertPublicHttpUrl(dto.website);
     }
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
@@ -399,6 +404,7 @@ export class CompanyService {
       }
       if (dto.targetMarkets !== undefined) data.targetMarkets = dto.targetMarkets;
       if (dto.businessEmail !== undefined) data.businessEmail = dto.businessEmail.trim();
+      if (dto.productDescription !== undefined) data.summary = dto.productDescription.trim();
       return tx.companyProfile.update({ where: { id }, data });
     });
   }
