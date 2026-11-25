@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import type { ExecutionBroker } from '../tools/tool-contract';
 import { PageFetcher } from '../intent/page-fetcher';
@@ -36,7 +36,12 @@ export function createIntentActivities(deps: {
   platformEgressFence?: PlatformEgressFence;
 }) {
   const budgets = deps.budgetStore ?? new UnavailableBudgetStore('intent activities require an authoritative BudgetStore');
-  const projSvc = new IntentProjectionService({ prisma: deps.prisma, broker: deps.broker, budgetStore: budgets });
+  const projSvc = new IntentProjectionService({
+    prisma: deps.prisma,
+    broker: deps.broker,
+    budgetStore: budgets,
+    platformWriter: deps.platformWriter,
+  });
   const attest = (args: PlatformScheduleAuthorityActivityInput) =>
     attestPlatformScheduleActivity({ args, budgetStore: budgets, scheduleId: INTENT_SWEEP_SCHEDULE_ID, activityRunId: deps.activityRunId });
   return {
@@ -109,8 +114,14 @@ export function createIntentActivities(deps: {
       eventsProjected: number;
     }> {
       await attest(args);
-      if (!deps.ownerDb) return { workspaces: 0, companiesTouched: 0, eventsProjected: 0 };
-      const workspaces = await deps.ownerDb.workspace.findMany({ select: { id: true } });
+      const workspaces = deps.platformWriter
+        ? await deps.platformWriter.$queryRaw<Array<{ id: string }>>(
+            Prisma.sql`SELECT id::text AS id FROM public.list_platform_workspace_ids_v1()`,
+          )
+        : deps.ownerDb
+          ? await deps.ownerDb.workspace.findMany({ select: { id: true } })
+          : [];
+      if (workspaces.length === 0) return { workspaces: 0, companiesTouched: 0, eventsProjected: 0 };
       let companiesTouched = 0;
       let eventsProjected = 0;
       for (const ws of workspaces) {
@@ -128,8 +139,11 @@ export function createIntentActivities(deps: {
     /** 保留期清理：删除超期的 web_watch 变更事件（GDPR 存储限制）。sweep 每轮起始调一次。 */
     async purgeStaleIntentEvents(args: ({ olderThanMs?: number } & PlatformScheduleAuthorityActivityInput) = {}): Promise<{ deleted: number }> {
       await attest(args);
-      return new WebsiteWatchService({ prisma: deps.prisma, fetcher: deps.fetcher })
-        .purgeStaleEvents(args?.olderThanMs ?? DEFAULT_RETENTION_MS);
+      return new WebsiteWatchService({
+        prisma: deps.prisma,
+        fetcher: deps.fetcher,
+        platformWriter: deps.platformWriter,
+      }).purgeStaleEvents(args?.olderThanMs ?? DEFAULT_RETENTION_MS);
     },
   };
 }

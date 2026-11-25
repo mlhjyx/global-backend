@@ -70,6 +70,22 @@ describe('ingestExternalSignals — durable workflow budget scope', () => {
     });
     expect(open).not.toHaveBeenCalled();
   });
+
+  it('expireStaleSignals fails closed when platformWriter is absent (even with ownerDb)', async () => {
+    const ownerDb = {
+      sourceSignal: { updateMany: vi.fn(async () => ({ count: 1 })) },
+    } as unknown as PrismaClient;
+    const acts = createExternalIntentActivities({
+      prisma: {} as PrismaService,
+      taxonomy: {} as TaxonomyResolver,
+      ownerDb,
+    });
+
+    await expect(acts.expireStaleSignals()).rejects.toThrow(
+      'DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE',
+    );
+    expect((ownerDb.sourceSignal.updateMany as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+  });
 });
 
 /** 构造只喂投影路径所需依赖的活动集：sourceSignal.findMany 探针 + DataProvider live 状态（findProviders 探针=owner-DB 读计数）。 */

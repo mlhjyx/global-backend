@@ -77,7 +77,10 @@ describe('intent activities — platform authority lifecycle', () => {
       close: vi.fn(),
     };
     const activities = createIntentActivities({
-      prisma: prisma as never, fetcher: { fetch } as never, budgetStore: budgetStore as never,
+      prisma: prisma as never,
+      platformWriter: prisma as never,
+      fetcher: { fetch } as never,
+      budgetStore: budgetStore as never,
       activityRunId: () => 'workflow-run-1',
     });
 
@@ -110,6 +113,9 @@ describe('intent activities — platform authority lifecycle', () => {
         sourcePolicy: { findFirst: vi.fn(async () => null) },
         sourceFetch: { create: sourceFetchCreate },
         sourceEntity: { findMany: vi.fn(async () => []) },
+      } as never,
+      platformWriter: {
+        sourceFetch: { create: sourceFetchCreate },
       } as never,
       fetcher: {
         fetch: vi.fn(async (_url, context) => {

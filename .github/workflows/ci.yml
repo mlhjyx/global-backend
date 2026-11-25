@@ -799,6 +799,16 @@ jobs:
           bash infra/postgres/provision-execution-budget-platform-writer.sh
           bash infra/postgres/provision-execution-budget-platform-writer.sh
           bash infra/postgres/verify-execution-budget-platform-writer.sh
+          export RUNTIME_SERVICE_PROVISION_DATABASE_URL="${DATABASE_URL}"
+          export OUTBOX_RELAY_DATABASE_URL="postgresql://ci_outbox_relay_worker:$(openssl rand -hex 24)@127.0.0.1:5432/global_test"
+          export MEMORY_OUTBOX_DATABASE_URL="postgresql://ci_memory_outbox_reader:$(openssl rand -hex 24)@127.0.0.1:5432/global_test"
+          export CUSTOMER_WORKER_OPS_DATABASE_URL="postgresql://ci_customer_worker_ops:$(openssl rand -hex 24)@127.0.0.1:5432/global_test"
+          bash infra/postgres/provision-runtime-service-principals.sh
+          bash infra/postgres/provision-runtime-service-principals.sh
+          bash infra/postgres/verify-runtime-service-principals.sh
+          pnpm --filter @global/api seed:platform-catalogs
+          SCOPED_RUNTIME_PRINCIPALS_TEST=1 \
+            pnpm --filter @global/api exec vitest run src/prisma/scoped-runtime-principals.postgres.spec.ts
           EXECUTION_BUDGET_PLATFORM_WRITER_DISPOSABLE_TEST=1 \
             bash infra/postgres/verify-execution-budget-platform-writer-provision-safety-disposable.sh
           EXECUTION_BUDGET_PLATFORM_WRITER_DISPOSABLE_TEST=1 \

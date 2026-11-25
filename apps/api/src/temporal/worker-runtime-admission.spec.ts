@@ -52,19 +52,20 @@ describe("worker runtime admission wiring", () => {
     expect(imageIsolation).toBeLessThan(poll);
   });
 
-  it("holds without polling when owner database and required seeds are unavailable", () => {
+  it("holds without polling when scoped worker-ops database and required catalogs are unavailable", () => {
     const poll = source.indexOf("worker.run()");
     for (const code of [
-      "OWNER_DATABASE_UNAVAILABLE",
+      "CUSTOMER_WORKER_OPS_DATABASE_UNAVAILABLE",
       "RUNTIME_PROCESS_LEASE_PUBLISH_UNAVAILABLE",
-      "PROVIDER_REGISTRY_SEED_UNAVAILABLE",
-      "JURISDICTION_POLICY_SEED_UNAVAILABLE",
-      "SANCTIONS_SEED_UNAVAILABLE",
+      "PLATFORM_CATALOG_NOT_SEEDED",
       "SANCTIONS_INDEX_UNAVAILABLE",
     ]) {
       expect(source).toContain(`"${code}"`);
       expect(source.indexOf(`"${code}"`)).toBeLessThan(poll);
     }
+    expect(source).toContain("verifyPlatformCatalogsReadOnly(");
+    expect(source).toContain("assertScopedDatabasePrincipal(");
+    expect(source).not.toContain("process.env.DATABASE_URL");
   });
 
   it("shuts polling down when the durable READY lease is lost", () => {

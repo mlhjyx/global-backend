@@ -83,7 +83,7 @@ const env = {
   RUNTIME_CANDIDATE_INSTANCE_ID: marker.instanceId,
   APP_DATABASE_URL:
     "postgresql://app_user@127.0.0.1:15432/global_candidate_pump_ab",
-  DATABASE_URL: "postgresql://global@127.0.0.1:15432/global_candidate_pump_ab",
+  DATABASE_URL: "",
   RUNTIME_API_LEASE_DATABASE_URL:
     "postgresql://runtime_api@127.0.0.1:15432/global_candidate_pump_ab",
   TEMPORAL_ADDRESS: instance.temporal.address,
@@ -121,7 +121,19 @@ describe("development candidate runtime admission", () => {
     { RUNTIME_CANDIDATE_INSTANCE_ID: "other" },
     { RUNTIME_IMAGE_REFERENCE: IMAGE.replace(/a{64}/u, "f".repeat(64)) },
     { APP_DATABASE_URL: "postgresql://app_user@127.0.0.1:5432/global_dev" },
-    { DATABASE_URL: "postgresql://global@127.0.0.1:5432/global_dev" },
+    { DATABASE_URL: "postgresql://global@127.0.0.1:15432/global_candidate_pump_ab" },
+    {
+      OUTBOX_RELAY_DATABASE_URL:
+        "postgresql://global@127.0.0.1:15432/global_candidate_pump_ab",
+    },
+    {
+      OUTBOX_RELAY_DATABASE_URL:
+        "postgresql://postgres@127.0.0.1:15432/global_candidate_pump_ab",
+    },
+    {
+      EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL:
+        "postgresql://postgres@127.0.0.1:15432/global_candidate_pump_ab",
+    },
     {
       RUNTIME_API_LEASE_DATABASE_URL:
         "postgresql://runtime_api@127.0.0.1:5432/global_dev",

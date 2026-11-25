@@ -772,6 +772,10 @@
       "to": "prisma"
     },
     {
+      "from": "memory",
+      "to": "runtime"
+    },
+    {
       "from": "model-gateway",
       "to": "ai-tasks"
     },
@@ -834,6 +838,10 @@
     {
       "from": "outreach",
       "to": "enrichment"
+    },
+    {
+      "from": "outreach",
+      "to": "execution-budget"
     },
     {
       "from": "outreach",

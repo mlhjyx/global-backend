@@ -59,6 +59,7 @@ function harness(existing: Record<string, unknown>[] = []) {
   return {
     service: new AcquisitionService({
       prisma: prisma as never,
+      platformWriter: prisma as never,
       registry: registry as never,
     }),
     creates,

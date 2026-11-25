@@ -54,8 +54,8 @@ describe('source channels migration (M1)', () => {
     const manifest = JSON.parse(readFileSync(PRIVILEGES, 'utf8')) as {
       tables: Record<string, string[]>;
     };
-    expect(manifest.tables.source_channel).toEqual(['INSERT', 'SELECT', 'UPDATE']);
-    expect(manifest.tables.source_channel_run).toEqual(['INSERT', 'SELECT', 'UPDATE']);
+    expect(manifest.tables.source_channel).toEqual(['SELECT']);
+    expect(manifest.tables.source_channel_run).toEqual(['SELECT']);
     expect(manifest.tables.source_channel_enablement).toEqual(['DELETE', 'INSERT', 'SELECT']);
     expect(manifest.tables.imported_buyer).toEqual(['DELETE', 'INSERT', 'SELECT', 'UPDATE']);
   });

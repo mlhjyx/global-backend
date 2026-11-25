@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { join } from 'node:path';
+import { ExecutionBudgetPlatformWriterDatabaseModule } from '../execution-budget/execution-budget-platform-writer.database';
 import { ChannelHealthSweepService } from './channel-health-sweep.service';
 import { ChannelProbeService } from './channel-probe.service';
 import { ChannelService } from './channel.service';
@@ -29,6 +30,7 @@ export const channelSecretResolverProvider = {
  * probe 端点 fail-closed 503，等 CH-5 在平台 worker 里接 Grant/fence 后注入。
  */
 @Module({
+  imports: [ExecutionBudgetPlatformWriterDatabaseModule],
   controllers: [ChannelsController],
   providers: [ChannelService, ChannelProbeService, ChannelHealthSweepService, channelSecretResolverProvider],
   exports: [ChannelService, ChannelProbeService],

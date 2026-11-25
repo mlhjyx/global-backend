@@ -1,6 +1,5 @@
-import { Prisma } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
 
-import type { PrismaService } from '../prisma/prisma.service';
 import type { ChannelRecordRow, ChannelRecordWriter } from './channel-records';
 
 /**
@@ -8,7 +7,7 @@ import type { ChannelRecordRow, ChannelRecordWriter } from './channel-records';
  * upsert 键 (channelId, dedupeKey)：跨轮合并、last_seen 前移；首次插入记 firstSeenAt=crawlRunId 轮次。
  */
 export function createPrismaChannelRecordWriter(
-  prisma: PrismaService,
+  prisma: Pick<PrismaClient, 'sourceChannelRecord'>,
 ): ChannelRecordWriter {
   return {
     async upsertByChannelAndDedupe(row: ChannelRecordRow, seenAt: Date): Promise<void> {

@@ -7,8 +7,11 @@ import {
   Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import type { PrismaClient } from '@prisma/client';
 import type { ChannelManifestDocument } from '@global/contracts';
+import { EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE } from '../execution-budget/execution-budget-platform-writer.database';
 import { PrismaService } from '../prisma/prisma.service';
+import { requireChannelPlatformWriter } from './channel-platform-writer';
 import { RequestContext } from '../auth/request-context';
 import { ChannelCircuitBreaker } from './connector/circuit-breaker';
 import { ManifestChannelConnector } from './connector/channel-connector';
@@ -100,9 +103,11 @@ export class ChannelProbeService {
     @Optional() @Inject(CHANNEL_SECRET_RESOLVER) private readonly secrets?: ChannelSecretResolver,
     @Optional() @Inject(CHANNEL_HTTP_CLIENT) private readonly httpClient?: ChannelHttpClient,
     @Optional() private readonly now: () => Date = () => new Date(),
+    @Optional() @Inject(EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE) private readonly platformWriter?: PrismaClient | null,
   ) {}
 
   async probeChannel(ctx: RequestContext, channelId: string): Promise<ChannelProbeResult> {
+    const writer = await requireChannelPlatformWriter(this.platformWriter);
     const channel = (await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
       tx.sourceChannel.findUnique({ where: { id: channelId } }),
     )) as ProbeChannelRow | null;
@@ -162,7 +167,7 @@ export class ChannelProbeService {
     const sample = sanitizeProbeSample(run.records.map((record) => record.fields));
     const snapshot = breaker.snapshot();
 
-    const probeId = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+    const probeId = await writer.$transaction(async (tx) => {
       const probe = await tx.sourceChannelProbe.create({
         data: {
           channelId: channel.id,

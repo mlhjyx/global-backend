@@ -8,6 +8,11 @@ import {
 import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
+  assertScopedDatabasePrincipal,
+  inspectScopedDatabaseUrl,
+  MEMORY_OUTBOX_DATABASE_ROLE,
+} from '../runtime/scoped-database-principal';
+import {
   buildProvenance,
   MEMORY_EVENT_TYPES,
   MEMORY_WORKFLOW_DISCOVERY,
@@ -56,6 +61,7 @@ export class MemoryEpisodeConsumer implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger('MemoryEpisodeConsumer');
   private owner?: PrismaClient;
   private ownsOwnerClient = false;
+  private principalVerified = false;
   private readonly config: MemoryConsumerConfig;
   private timer?: NodeJS.Timeout;
   private inFlight = false;
@@ -69,12 +75,23 @@ export class MemoryEpisodeConsumer implements OnModuleInit, OnModuleDestroy {
     this.config = config ?? readMemoryConsumerConfig();
     if (ownerDb) {
       this.owner = ownerDb;
-    } else if (this.config.enabled && process.env.DATABASE_URL) {
-      // Construct only when enabled: AppModule tests must not need DATABASE_URL.
-      this.owner = new PrismaClient({
-        datasourceUrl: process.env.DATABASE_URL,
-      });
-      this.ownsOwnerClient = true;
+      this.principalVerified = true;
+    } else if (this.config.enabled && process.env.MEMORY_OUTBOX_DATABASE_URL) {
+      const check = inspectScopedDatabaseUrl(
+        'MEMORY_OUTBOX_DATABASE_URL',
+        process.env.MEMORY_OUTBOX_DATABASE_URL,
+      );
+      if (check.status === 'ok') {
+        // Construct only when enabled: AppModule tests must not need MEMORY_OUTBOX_DATABASE_URL.
+        this.owner = new PrismaClient({
+          datasourceUrl: process.env.MEMORY_OUTBOX_DATABASE_URL,
+        });
+        this.ownsOwnerClient = true;
+      } else {
+        this.logger.error(
+          `memory episode consumer rejected MEMORY_OUTBOX_DATABASE_URL (${check.code}); staying off`,
+        );
+      }
     }
   }
 
@@ -87,7 +104,7 @@ export class MemoryEpisodeConsumer implements OnModuleInit, OnModuleDestroy {
     }
     if (!this.owner) {
       this.logger.error(
-        'memory episode consumer requires DATABASE_URL for the cross-tenant outbox scan; staying off',
+        'memory episode consumer requires MEMORY_OUTBOX_DATABASE_URL (runtime_memory_outbox_reader) for the cross-tenant outbox scan; staying off',
       );
       return;
     }
@@ -126,6 +143,14 @@ export class MemoryEpisodeConsumer implements OnModuleInit, OnModuleDestroy {
   async runOnce(now: Date = new Date()): Promise<MemoryConsumerTickResult> {
     if (this.shuttingDown || !this.owner) {
       return { scanned: 0, inserted: 0, failed: 0 };
+    }
+    if (this.ownsOwnerClient && !this.principalVerified) {
+      await assertScopedDatabasePrincipal(
+        this.owner,
+        MEMORY_OUTBOX_DATABASE_ROLE,
+        'MemoryEpisodeConsumer',
+      );
+      this.principalVerified = true;
     }
     const since = new Date(
       now.getTime() - this.config.lookbackDays * DAY_MS,

@@ -18,7 +18,7 @@
  * 🔴 全程不改 google_patents seed 的**持久**态（末尾复位 DISABLED）、不启用功能（PATENT_SOURCE_MODE 不设）。
  */
 import { readFileSync } from 'node:fs';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { DiscoveryProviderRegistry } from '../src/discovery/provider.registry';
 import {
@@ -122,7 +122,7 @@ async function main() {
   // ══════════ A · P1-1 kill-switch：DISABLED → 不扫、不物化 ══════════
   console.log('\n══ A · P1-1 kill-switch（provider DISABLED）══');
   await setProvider('DISABLED');
-  await enqueuePatentLookup(ownerDb, { companyName: 'Codexkill GmbH', country: 'DE' });
+  await enqueuePatentLookup(prisma, { companyName: 'Codexkill GmbH', country: 'DE' });
   const scanA = mockScanner([{ assigneeName: 'Codexkill GmbH', assigneeCountry: 'de', inventorName: 'SHOULD, NOTLAND' }]);
   const rA = await refreshPatentCache({ db, bq: scanA });
   ok(rA.status === 'DISABLED', `A：status=DISABLED（实得 ${rA.status}）`);
@@ -136,16 +136,14 @@ async function main() {
   await setProvider('ENABLED');
 
   // ══════════ B · P2-5 墓碑（eraseSubject 同款写 + 跨拼写 skip）══════════
-  console.log('\n══ B · P2-5 Art.17 墓碑（eraseSubject 同款 app_user createMany + 跨拼写刷新跳过）══');
-  // 🔴 复刻 eraseSubject 的**确切**写墓碑调用：app_user withWorkspace 事务 + createMany(inventorErasureKeys(fullName)) +
-  //   skipDuplicates——证 patent_inventor_tombstone 的 INSERT grant + no-RLS 平台表在 withWorkspace 事务内 createMany 可行（复审 Q5）。
+  console.log('\n══ B · P2-5 Art.17 墓碑（eraseSubject 同款 app_user RPC + 跨拼写刷新跳过）══');
   const erasureKeys = inventorErasureKeys(ERASED_FULLNAME); // = eraseSubject 的 erasureKeys 派生（over-suppress 变体集）
   await prisma.withWorkspace(WS, (tx) =>
-    tx.patentInventorTombstone.createMany({ data: erasureKeys.map((inventorNameKey) => ({ inventorNameKey })), skipDuplicates: true }),
+    tx.$queryRaw(Prisma.sql`SELECT public.record_patent_inventor_tombstones_v1(${erasureKeys}::text[])`),
   );
   const tombCount = await ownerDb.patentInventorTombstone.count({ where: { inventorNameKey: { in: erasureKeys } } });
-  ok(tombCount === erasureKeys.length && tombCount > 0, `B：app_user withWorkspace createMany 写 ${tombCount}/${erasureKeys.length} 墓碑（INSERT grant + no-RLS tx 生效）`);
-  await enqueuePatentLookup(ownerDb, { companyName: 'Codextomb GmbH', country: 'DE' });
+  ok(tombCount === erasureKeys.length && tombCount > 0, `B：app_user withWorkspace RPC 写 ${tombCount}/${erasureKeys.length} 墓碑（SECURITY DEFINER + no-RLS tx 生效）`);
+  await enqueuePatentLookup(prisma, { companyName: 'Codextomb GmbH', country: 'DE' });
   // 🔴 扫描行用**不同拼写**（surname-comma + umlaut 展开）——证跨格式盲键收敛：inventorErasureKeys(ERASED_FULLNAME) ∋ inventorBlindKey(ERASED_VARIANT)。
   const scanB = mockScanner([
     { assigneeName: 'Codextomb GmbH', assigneeCountry: 'de', inventorName: ERASED_VARIANT }, // 被擦除（异拼写）→ 跳过
@@ -160,7 +158,7 @@ async function main() {
 
   // ══════════ C · P1-2 过滤 + P2-6 cap ══════════
   console.log('\n══ C · P1-2 无关 assignee 过滤 + P2-6 每 assignee cap 25 ══');
-  await enqueuePatentLookup(ownerDb, { companyName: 'Codexfilter GmbH', country: 'DE' });
+  await enqueuePatentLookup(prisma, { companyName: 'Codexfilter GmbH', country: 'DE' });
   const many = Array.from({ length: MAX_INVENTORS_PER_ASSIGNEE + 8 }, (_, i) => ({
     assigneeName: 'Codexfilter GmbH',
     assigneeCountry: 'de',
@@ -179,7 +177,7 @@ async function main() {
 
   // ══════════ D · P2-3 TTL 夹到 180d ══════════
   console.log('\n══ D · P2-3 TTL 夹顶 180d（env=365）══');
-  await enqueuePatentLookup(ownerDb, { companyName: 'Codexttl GmbH', country: 'DE' });
+  await enqueuePatentLookup(prisma, { companyName: 'Codexttl GmbH', country: 'DE' });
   process.env.PATENT_CACHE_TTL_DAYS = '365';
   const before = Date.now();
   const rD = await refreshPatentCache({ db, bq: mockScanner([{ assigneeName: 'Codexttl GmbH', assigneeCountry: 'de', inventorName: 'TTL, TEST' }]) });
@@ -193,7 +191,7 @@ async function main() {
 
   // ══════════ E · P2-4 未扫 → SKIPPED_NOSCAN ══════════
   console.log('\n══ E · P2-4 BQ 未扫 → 队列留 PENDING ══');
-  await enqueuePatentLookup(ownerDb, { companyName: 'Codexnoscan GmbH', country: 'DE' });
+  await enqueuePatentLookup(prisma, { companyName: 'Codexnoscan GmbH', country: 'DE' });
   const rE = await refreshPatentCache({ db, bq: mockScanner([], false) });
   ok(rE.status === 'SKIPPED_NOSCAN', `E：status=SKIPPED_NOSCAN（实得 ${rE.status}）`);
   const eQueue = await ownerDb.patentLookupRequest.findFirst({ where: { assigneeNorm: 'codexnoscan' } });

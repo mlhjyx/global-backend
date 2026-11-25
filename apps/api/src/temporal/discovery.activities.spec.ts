@@ -6941,11 +6941,9 @@ describe("enqueuePatentLookupsForRun · P1-1 kill-switch", () => {
         _ws: string,
         fn: (tx: unknown) => Promise<T>,
       ): Promise<T> => fn(tx),
-      patentLookupRequest: {
-        upsert: async ({ create }: { create: unknown }) => {
-          upserts.push(create);
-          return {};
-        },
+      $queryRaw: async (sql: { values?: unknown[] }) => {
+        upserts.push(sql.values ?? sql);
+        return [{ enqueue_patent_lookup_v1: true }];
       },
     };
     const deps = {

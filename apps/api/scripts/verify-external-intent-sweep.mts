@@ -65,7 +65,7 @@ if (process.argv.includes('--use-test-model-fixture')) {
 const gateway = new RouterModelGateway(new ModelRouter(reg), new AiTraceSink(prisma));
 const taxonomy = new TaxonomyResolver(prisma, gateway);
 const broker = buildToolBroker({ sourcePolicyReader: sourcePolicyReaderFrom(prisma) });
-const acts = createExternalIntentActivities({ prisma, taxonomy, ownerDb, broker });
+const acts = createExternalIntentActivities({ prisma, taxonomy, ownerDb, platformWriter: ownerDb, broker });
 
 const POLICY_DOMAINS = ['api.ted.europa.eu', 'api.fda.gov'];
 let pumpIcpId = '';

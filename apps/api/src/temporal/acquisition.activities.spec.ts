@@ -116,7 +116,10 @@ describe('acquisition activities — platform authority lifecycle', () => {
       close: vi.fn(),
     };
     const activities = createAcquisitionActivities({
-      prisma: prisma as never, registry, budgetStore: budgetStore as never,
+      prisma: prisma as never,
+      platformWriter: prisma as never,
+      registry,
+      budgetStore: budgetStore as never,
       activityRunId: () => 'workflow-run-1',
     });
 
@@ -170,6 +173,7 @@ describe('acquisition activities — platform authority lifecycle', () => {
       sourceFetch: { create: vi.fn(async () => ({ id: 'fetch-1' })) },
     };
     const platformWriter = {
+      sourceFetch: prisma.sourceFetch,
       $transaction: vi.fn(async (callback: (transaction: typeof tx) => Promise<unknown>) =>
         callback(tx)),
     };
@@ -256,6 +260,7 @@ describe('acquisition activities — platform authority lifecycle', () => {
       registry,
       budgetStore: { attestAuthorized: vi.fn(async () => undefined) } as never,
       platformWriter: {
+        sourceFetch: { create: vi.fn(async () => ({ id: 'fetch-2' })) },
         $transaction: vi.fn(async (callback: (transaction: typeof tx) => Promise<unknown>) =>
           callback(tx)),
       } as never,
@@ -305,6 +310,12 @@ describe('acquisition activities — platform authority lifecycle', () => {
           id: 'source-1', providerKey: 'mapyourshow', sourceKey: 'messe',
           status: 'ACTIVE', config: {}, cadence: {},
         })) },
+        sourceFetch: {
+          create: vi.fn(async () => ({ id: 'fetch-3' })),
+          update: sourceFetchUpdate,
+        },
+      } as never,
+      platformWriter: {
         sourceFetch: {
           create: vi.fn(async () => ({ id: 'fetch-3' })),
           update: sourceFetchUpdate,

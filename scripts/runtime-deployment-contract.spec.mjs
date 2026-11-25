@@ -1009,3 +1009,23 @@ test('GHCR publication contract rejects removed main recheck and job-level permi
   const withoutPrepushConfigAttestation = workflow.replace('name: Attest the local image config before publication', 'name: Removed local config attestation');
   assert.throws(() => assertGhcrPublicationContract(withoutPrepushConfigAttestation));
 });
+
+test('managed runtime compose clears owner DATABASE_URL and provisions scoped runtime principals safely', async () => {
+  const [compose, provision, verify] = await Promise.all([
+    repositoryFile('infra/backend-runtime.compose.yml'),
+    repositoryFile('infra/postgres/provision-runtime-service-principals.sh'),
+    repositoryFile('infra/postgres/verify-runtime-service-principals.sh'),
+  ]);
+  assert.equal(compose.match(/DATABASE_URL: ""/g)?.length, 2);
+  for (const script of [provision, verify]) {
+    assert.match(script, /^#!\/usr\/bin\/env bash\nset -euo pipefail/m);
+    assert.doesNotMatch(script, /set -x/);
+    assert.doesNotMatch(script, /DROP ROLE/);
+    assert.doesNotMatch(script, /psql\s+"\$/);
+  }
+  assert.match(provision, /\\getenv outbox_pw OUTBOX_RELAY_PASSWORD/);
+  assert.match(provision, /runtime_outbox_relay_worker/);
+  assert.match(provision, /runtime_memory_outbox_reader/);
+  assert.match(provision, /runtime_customer_worker_ops/);
+  assert.match(verify, /APP_USER_FORBIDDEN_WRITE_PRIVILEGE/);
+});

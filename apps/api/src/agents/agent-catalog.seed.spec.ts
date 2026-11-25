@@ -32,6 +32,8 @@ describe("agent catalog", () => {
   });
 });
 
+const SEED_CLI = readFileSync(join(API, "scripts/seed-platform-catalogs.mts"), "utf8");
+
 describe("agent catalog seed", () => {
   it("inserts idempotently on the agent key", () => {
     expect(SEED).toContain('ON CONFLICT ("agent_key") DO NOTHING');
@@ -47,10 +49,12 @@ describe("agent catalog seed", () => {
     expect(setClause).toContain('"loop_policy"');
   });
 
-  it("is wired into both startup paths, loudly in the managed worker", () => {
-    expect(WORKER).toContain("seedAgentCatalog(ownerDb)");
-    expect(WORKER).toContain("AGENT_CATALOG_SEED_UNAVAILABLE");
-    expect(RELAY).toContain("seedAgentCatalog(this.db)");
+  it("seeds at deploy time and verifies read-only in worker and relay startups", () => {
+    expect(SEED_CLI).toContain("seedAgentCatalog(ownerDb)");
+    expect(WORKER).not.toContain("seedAgentCatalog(");
+    expect(WORKER).toContain("verifyPlatformCatalogsReadOnly(");
+    expect(RELAY).not.toContain("seedAgentCatalog(");
+    expect(RELAY).toContain("verifyPlatformCatalogsReadOnly(");
     expect(FAST_LANE).not.toContain("seedAgentCatalog");
   });
 });

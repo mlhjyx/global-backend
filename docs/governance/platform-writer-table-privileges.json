@@ -3,15 +3,25 @@
   "role": "execution_budget_platform_writer",
   "schema": "public",
   "tables": {
-    "monitored_source": ["SELECT", "UPDATE"],
-    "patent_cache_refresh_audit": ["SELECT", "UPDATE"],
+    "data_provider": ["SELECT"],
+    "monitored_source": ["INSERT", "SELECT", "UPDATE"],
+    "outreach_global_suppression": ["INSERT", "SELECT", "UPDATE"],
+    "patent_cache_refresh_audit": ["INSERT", "SELECT", "UPDATE"],
     "patent_inventor_cache": ["DELETE", "INSERT", "SELECT", "UPDATE"],
     "patent_inventor_tombstone": ["SELECT"],
     "patent_lookup_request": ["SELECT", "UPDATE"],
     "sanctions_entity": ["INSERT", "SELECT", "UPDATE"],
     "sanctions_source": ["SELECT", "UPDATE"],
+    "signal_ingest": ["INSERT", "SELECT", "UPDATE"],
+    "source_channel": ["INSERT", "SELECT", "UPDATE"],
+    "source_channel_health_event": ["INSERT", "SELECT"],
+    "source_channel_probe": ["INSERT", "SELECT"],
+    "source_channel_record": ["INSERT", "SELECT", "UPDATE"],
+    "source_channel_run": ["INSERT", "SELECT", "UPDATE"],
     "source_entity": ["INSERT", "SELECT", "UPDATE"],
-    "source_entity_change": ["INSERT"],
-    "source_fetch": ["SELECT", "UPDATE"]
+    "source_entity_change": ["DELETE", "INSERT", "SELECT"],
+    "source_fetch": ["INSERT", "SELECT", "UPDATE"],
+    "source_policy": ["SELECT"],
+    "source_signal": ["INSERT", "SELECT", "UPDATE"]
   }
 }

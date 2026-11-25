@@ -7,6 +7,7 @@ function harness(fetchLimit: unknown) {
   const fetch = vi.fn(async () => {
     throw new Error("bounded test stop");
   });
+  const sourceFetchCreate = vi.fn(async () => ({ id: "fetch-1" }));
   const sourceFetchUpdate = vi.fn(async () => ({}));
   const service = new AcquisitionService({
     prisma: {
@@ -20,7 +21,13 @@ function harness(fetchLimit: unknown) {
         })),
       },
       sourceFetch: {
-        create: vi.fn(async () => ({ id: "fetch-1" })),
+        create: sourceFetchCreate,
+        update: sourceFetchUpdate,
+      },
+    } as never,
+    platformWriter: {
+      sourceFetch: {
+        create: sourceFetchCreate,
         update: sourceFetchUpdate,
       },
     } as never,

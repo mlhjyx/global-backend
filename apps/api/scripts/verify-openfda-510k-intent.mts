@@ -65,7 +65,7 @@ const ownerDb = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
 await ownerDb.$connect();
 // §8.8（收口⑤）：出网收敛在**摄取层**——SignalIngestService 经 ToolBroker 过 source_policy 门（无 broker =
 // fail-closed 不出网）；投影 service 只收 prisma（只读 source_signal 平台表，零出网）。
-const ingest = new SignalIngestService({ prisma, broker: buildToolBroker({ sourcePolicyReader: sourcePolicyReaderFrom(prisma) }) });
+const ingest = new SignalIngestService({ prisma, broker: buildToolBroker({ sourcePolicyReader: sourcePolicyReaderFrom(prisma) }), platformWriter: ownerDb });
 const svc = new OpenFdaIntentProjectionService({ prisma });
 
 const evidenceCount = () =>

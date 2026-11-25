@@ -49,6 +49,6 @@ describe('CH-7：渠道记录观察名单迁移', () => {
     }
     expect(schema).toContain('@@index([channelId, reviewStatus])');
     const manifest = JSON.parse(readFileSync(PRIVILEGES, 'utf8')) as { tables: Record<string, string[]> };
-    expect(manifest.tables.source_channel_record).toEqual(['INSERT', 'SELECT', 'UPDATE']);
+    expect(manifest.tables.source_channel_record).toEqual(['SELECT']);
   });
 });

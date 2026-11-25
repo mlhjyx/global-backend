@@ -93,9 +93,24 @@ function makeService(
   const prisma = {
     withWorkspace: async <T>(_ws: string, fn: (client: typeof tx) => Promise<T>): Promise<T> => fn(tx),
     $transaction: async <T>(fn: (client: typeof tx) => Promise<T>): Promise<T> => fn(tx),
+    $queryRaw: async () => [
+      {
+        currentUser: 'execution_budget_platform_writer_login',
+        sessionUser: 'execution_budget_platform_writer_login',
+        sessionRole: 'none',
+        rolCanLogin: true,
+        rolInherit: true,
+        rolSuper: false,
+        rolBypassRls: false,
+        rolCreateDb: false,
+        rolCreateRole: false,
+        rolReplication: false,
+        memberships: ['execution_budget_platform_writer'],
+      },
+    ],
   };
   return {
-    service: new ChannelService(prisma as never, options.platformTemporal as never),
+    service: new ChannelService(prisma as never, options.platformTemporal as never, undefined, prisma as never),
     writes,
     tx,
   };

@@ -35,7 +35,11 @@ describe("AcquisitionService execution-control propagation", () => {
         providerKey: "controlled",
         fetch: vi.fn(async () => Promise.reject(failure)),
       });
-      const service = new AcquisitionService({ prisma, registry });
+      const service = new AcquisitionService({
+        prisma,
+        registry,
+        platformWriter: prisma as never,
+      });
 
       await expect(service.acquire("source-1")).rejects.toBe(failure);
       expect(findMany).not.toHaveBeenCalled();

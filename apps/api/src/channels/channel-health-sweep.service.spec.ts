@@ -36,6 +36,21 @@ function makePrisma(rows: Array<Record<string, unknown>>, existingWarning = fals
   };
   const prisma = {
     $transaction: vi.fn(async (cb: (t: typeof tx) => unknown) => cb(tx)),
+    $queryRaw: vi.fn(async () => [
+      {
+        currentUser: 'execution_budget_platform_writer_login',
+        sessionUser: 'execution_budget_platform_writer_login',
+        sessionRole: 'none',
+        rolCanLogin: true,
+        rolInherit: true,
+        rolSuper: false,
+        rolBypassRls: false,
+        rolCreateDb: false,
+        rolCreateRole: false,
+        rolReplication: false,
+        memberships: ['execution_budget_platform_writer'],
+      },
+    ]),
     sourceChannel: { findMany: tx.sourceChannel.findMany },
   };
   return { prisma, writes };
@@ -46,7 +61,7 @@ describe('渠道健康扫描（20/4 预警、30/7 自动停用）', () => {
     const { prisma, writes } = makePrisma([
       row({ consecutiveFailures: 30, lastSuccessAt: new Date(NOW.getTime() - 8 * DAY) }),
     ]);
-    const service = new ChannelHealthSweepService(prisma as never);
+    const service = new ChannelHealthSweepService(prisma as never, () => NOW, prisma as never);
     const result = await service.sweep(NOW);
     expect(result).toMatchObject({ scanned: 1, autoDisabled: 1 });
     expect(writes.updates[0]).toMatchObject({ status: 'AUTO_DISABLED', disabledReason: 'AUTO_STREAK' });
@@ -55,12 +70,12 @@ describe('渠道健康扫描（20/4 预警、30/7 自动停用）', () => {
 
   it('20 次且 4 天无成功 → WARNING 事件；已有未清的 WARNING 不重复写', async () => {
     const fresh = makePrisma([row()]);
-    const service = new ChannelHealthSweepService(fresh.prisma as never);
+    const service = new ChannelHealthSweepService(fresh.prisma as never, () => NOW, fresh.prisma as never);
     await expect(service.sweep(NOW)).resolves.toMatchObject({ scanned: 1, warned: 1, autoDisabled: 0 });
     expect(fresh.writes.events[0]).toMatchObject({ event: 'WARNING_20_4D' });
 
     const deduped = makePrisma([row()], true);
-    const service2 = new ChannelHealthSweepService(deduped.prisma as never);
+    const service2 = new ChannelHealthSweepService(deduped.prisma as never, () => NOW, deduped.prisma as never);
     await expect(service2.sweep(NOW)).resolves.toMatchObject({ scanned: 1, warned: 0 });
     expect(deduped.writes.events).toHaveLength(0);
   });
@@ -69,7 +84,7 @@ describe('渠道健康扫描（20/4 预警、30/7 自动停用）', () => {
     const { prisma, writes } = makePrisma([
       row({ consecutiveFailures: 25, lastSuccessAt: new Date(NOW.getTime() - 2 * DAY) }),
     ]);
-    const service = new ChannelHealthSweepService(prisma as never);
+    const service = new ChannelHealthSweepService(prisma as never, () => NOW, prisma as never);
     await expect(service.sweep(NOW)).resolves.toMatchObject({ scanned: 1, warned: 0, autoDisabled: 0 });
     expect(writes.updates).toHaveLength(0);
     expect(writes.events).toHaveLength(0);

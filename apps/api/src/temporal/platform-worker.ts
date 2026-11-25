@@ -1,7 +1,6 @@
 import "reflect-metadata";
 import "dotenv/config";
 import { resolve } from "node:path";
-import { PrismaClient } from "@prisma/client";
 import { Runtime, Worker } from "@temporalio/worker";
 import { DETERMINISTIC_LEDGER_FAILURE_INTERCEPTORS } from "./deterministic-ledger-failure.interceptor";
 import { PrismaService } from "../prisma/prisma.service";
@@ -19,6 +18,10 @@ import { startCapabilityRuntime, type CapabilityRuntime } from "../platform-auth
 import { resolveRuntimeSettings } from "../runtime/runtime-environment";
 import { loadRuntimeReleaseIdentity } from "../runtime/runtime-release-identity";
 import { inspectRuntimeAdmission } from "../runtime/runtime-admission";
+import {
+  assertScopedDatabasePrincipal,
+  EXECUTION_BUDGET_PLATFORM_WRITER_ROLE,
+} from "../runtime/scoped-database-principal";
 import {
   assertMigrationCompatible,
   PrismaRuntimeProcessLeaseStore,
@@ -115,7 +118,6 @@ async function main(): Promise<void> {
     identity,
     workerRole: "PLATFORM_WORKER",
   });
-  const ownerDb = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
   const writer = createExecutionBudgetPlatformWriterClient(process.env);
   if (!writer)
     throw new ExecutionControlError(
@@ -127,7 +129,6 @@ async function main(): Promise<void> {
     capability?.stop();
     await Promise.all([
       prisma.$disconnect(),
-      ownerDb.$disconnect(),
       writer.$disconnect(),
       store.disconnectWriters(),
     ]);
@@ -185,8 +186,12 @@ async function main(): Promise<void> {
       );
     }
     try {
-      await ownerDb.$connect();
       await writer.$connect();
+      await assertScopedDatabasePrincipal(
+        writer,
+        EXECUTION_BUDGET_PLATFORM_WRITER_ROLE,
+        "platform-worker",
+      );
     } catch {
       return {
         status: "failed",
@@ -255,21 +260,20 @@ async function main(): Promise<void> {
       ...createIntentActivities({
         prisma,
         fetcher: new Crawl4aiPageFetcher(broker),
-        ownerDb,
         broker,
         budgetStore,
         platformWriter: writer,
         platformEgressFence,
       }),
       ...createPatentsCacheActivities({
-        ownerDb,
+        ownerDb: writer,
         broker,
         budgetStore,
         platformWriter: writer,
         platformEgressFence,
       }),
       ...createSanctionsRefreshActivities({
-        ownerDb,
+        ownerDb: writer,
         broker,
         sanctionsScreening,
         budgetStore,
@@ -279,7 +283,7 @@ async function main(): Promise<void> {
       ...createChannelCrawlActivities({
         prisma,
         recordRun: (input) =>
-          prisma.$transaction((tx) =>
+          writer.$transaction((tx) =>
             recordChannelRunInTransaction(tx as never, input),
           ),
         grantClient: new PlatformCrawlGrantClient(process.env),
@@ -296,7 +300,7 @@ async function main(): Promise<void> {
           (process.env.CHANNEL_CRAWL_MATERIALIZE ?? "").trim() === "off"
             ? async () => 0
             : (input) =>
-                materializeChannelRecords(createPrismaChannelRecordWriter(prisma), input),
+                materializeChannelRecords(createPrismaChannelRecordWriter(writer), input),
       }),
     },
   });

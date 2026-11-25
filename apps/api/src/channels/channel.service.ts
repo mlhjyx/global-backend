@@ -35,7 +35,10 @@ import {
   ChannelConfigError,
   parseChannelConfig,
 } from './channel-config';
+import type { PrismaClient } from '@prisma/client';
 import { Inject, Optional as OptionalDep } from '@nestjs/common';
+import { EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE } from '../execution-budget/execution-budget-platform-writer.database';
+import { requireChannelPlatformWriter } from './channel-platform-writer';
 import {
   CHANNEL_MANIFEST_VERSION,
   ChannelManifestError,
@@ -151,6 +154,9 @@ export class ChannelService {
     @OptionalDep()
     @Inject(CHANNEL_SECRET_RESOLVER)
     private readonly secrets?: ChannelSecretResolver,
+    @OptionalDep()
+    @Inject(EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE)
+    private readonly platformWriter?: PrismaClient | null,
   ) {}
 
   async listChannels(ctx: RequestContext) {
@@ -221,7 +227,7 @@ export class ChannelService {
       throw new BadRequestException({ error: { code: 'VALIDATION_ERROR', message: 'robotsPolicy must be A, B or C' } });
     }
 
-    const row = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+    const row = await (await requireChannelPlatformWriter(this.platformWriter)).$transaction((tx) =>
       tx.sourceChannel.create({
         data: {
           name,
@@ -304,7 +310,7 @@ export class ChannelService {
       typeof input.name === 'string' && input.name.trim()
         ? input.name.trim().slice(0, 200)
         : columns.displayName.slice(0, 200);
-    const row = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+    const row = await (await requireChannelPlatformWriter(this.platformWriter)).$transaction((tx) =>
       tx.sourceChannel.create({
         data: {
           name,
@@ -342,7 +348,7 @@ export class ChannelService {
   }
 
   async patchChannel(ctx: RequestContext, channelId: string, patch: Record<string, unknown>) {
-    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+    return (await requireChannelPlatformWriter(this.platformWriter)).$transaction(async (tx) => {
       const current = (await tx.sourceChannel.findUnique({ where: { id: channelId } })) as ChannelRow | null;
       if (!current) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'channel not found' } });
 
@@ -846,14 +852,7 @@ export class ChannelService {
         ...(input.circuitState === undefined ? {} : { circuitState: input.circuitState }),
         ...(input.operatorNote === undefined ? {} : { operatorNote: input.operatorNote }),
       });
-    if (input.platform) {
-      return this.prisma.$transaction(body as never) as unknown as Promise<{
-        runId: string;
-        autoDisabled: boolean;
-        failureStreak: number;
-      }>;
-    }
-    if (!input.workspaceId) {
+    if (!input.platform && !input.workspaceId) {
       throw new ServiceUnavailableException({
         error: {
           code: 'CHANNEL_RUN_CONTEXT_MISSING',
@@ -861,7 +860,7 @@ export class ChannelService {
         },
       });
     }
-    return this.prisma.withWorkspace(input.workspaceId, body as never) as Promise<{
+    return (await requireChannelPlatformWriter(this.platformWriter)).$transaction(body as never) as unknown as Promise<{
       runId: string;
       autoDisabled: boolean;
       failureStreak: number;
@@ -959,7 +958,7 @@ export class ChannelService {
       });
     }
     const verdict = input.verdict;
-    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+    return (await requireChannelPlatformWriter(this.platformWriter)).$transaction(async (tx) => {
       const channel = await tx.sourceChannel.findUnique({
         where: { id: channelId },
         select: { id: true, status: true },

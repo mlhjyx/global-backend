@@ -178,6 +178,16 @@ describe('SignalIngestService.ingestTed —— ingest-once（收口⑤核心验�
     expect(prisma.signals.size).toBe(0);
   });
 
+  it('requires platformWriter for unreceipted ingest writes (no signalWriter fallback)', async () => {
+    const prisma = fakePrisma();
+    const broker = fakeBroker();
+    const svc = new SignalIngestService({ prisma, broker });
+    await expect(svc.ingestTed(tedParams, { nowMs: NOW }))
+      .rejects.toThrow('DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE');
+    expect(prisma.signals.size).toBe(0);
+    expect(prisma.ledger.size).toBe(0);
+  });
+
   it('persists signals, ledger and receipt ACK on the same platform transaction', async () => {
     signalAckMock.mockClear();
     const prisma = fakePrisma();
@@ -280,7 +290,7 @@ describe('SignalIngestService.ingestTed —— ingest-once（收口⑤核心验�
   it('同 provider+指纹+窗口第二次摄取 → 账本命中不出网（跨 workspace 只拉取一次的机制）', async () => {
     const prisma = fakePrisma();
     const broker = fakeBroker();
-    const svc = new SignalIngestService({ prisma, broker });
+    const svc = new SignalIngestService({ prisma, broker, platformWriter: prisma as never });
 
     const r1 = await svc.ingestTed(tedParams, { nowMs: NOW });
     expect(r1.ledgerHit).toBe(false);
@@ -302,7 +312,7 @@ describe('SignalIngestService.ingestTed —— ingest-once（收口⑤核心验�
   it('跨窗口 → 重新拉取；同窗不同参数 → 各自拉取', async () => {
     const prisma = fakePrisma();
     const broker = fakeBroker();
-    const svc = new SignalIngestService({ prisma, broker });
+    const svc = new SignalIngestService({ prisma, broker, platformWriter: prisma as never });
 
     await svc.ingestTed(tedParams, { nowMs: NOW });
     await svc.ingestTed(tedParams, { nowMs: NOW + WINDOW_MS }); // 下一窗
@@ -315,7 +325,7 @@ describe('SignalIngestService.ingestTed —— ingest-once（收口⑤核心验�
     const prisma = fakePrisma();
     let fail = true;
     const broker = fakeBroker(() => (fail ? new Error('ted 500') : { notices: [TED_NOTICE] }));
-    const svc = new SignalIngestService({ prisma, broker });
+    const svc = new SignalIngestService({ prisma, broker, platformWriter: prisma as never });
 
     const r1 = await svc.ingestTed(tedParams, { nowMs: NOW });
     expect(r1.error).toContain('ted 500');
@@ -340,7 +350,7 @@ describe('SignalIngestService.ingestTed —— ingest-once（收口⑤核心验�
   it('空码/空国别 → 不启动（绝不裸拉全库），不记账不出网', async () => {
     const prisma = fakePrisma();
     const broker = fakeBroker();
-    const svc = new SignalIngestService({ prisma, broker });
+    const svc = new SignalIngestService({ prisma, broker, platformWriter: prisma as never });
     expect((await svc.ingestTed({ cpvCodes: [], buyerCountries: ['DEU'] }, { nowMs: NOW })).error).toBe('empty_query');
     expect((await svc.ingestTed({ cpvCodes: ['42122000'], buyerCountries: [] }, { nowMs: NOW })).error).toBe('empty_query');
     expect(broker.calls.length).toBe(0);
@@ -349,7 +359,7 @@ describe('SignalIngestService.ingestTed —— ingest-once（收口⑤核心验�
   it('BudgetExceededError 透传（预算真拦截不被吞成 ERROR 账本行）', async () => {
     const prisma = fakePrisma();
     const broker = fakeBroker(() => new BudgetExceededError('sweep:external-intent', 1, 0));
-    const svc = new SignalIngestService({ prisma, broker });
+    const svc = new SignalIngestService({ prisma, broker, platformWriter: prisma as never });
     await expect(svc.ingestTed(tedParams, { nowMs: NOW, budgetKey: 'sweep:external-intent' })).rejects.toBeInstanceOf(BudgetExceededError);
     expect([...prisma.ledger.values()].filter((r) => r.status === 'OK').length).toBe(0);
   });
@@ -357,7 +367,7 @@ describe('SignalIngestService.ingestTed —— ingest-once（收口⑤核心验�
   it('durable replay failure propagates instead of becoming a successful empty ingest ledger', async () => {
     const prisma = fakePrisma();
     const broker = fakeBroker(() => new BudgetOperationReplayError('openfda-op'));
-    const svc = new SignalIngestService({ prisma, broker });
+    const svc = new SignalIngestService({ prisma, broker, platformWriter: prisma as never });
 
     await expect(
       svc.ingestFda({ productCodes: ['LLZ'] }, { nowMs: NOW, budgetKey: 'sweep:external-intent' }),
@@ -370,7 +380,7 @@ describe('SignalIngestService.ingestTed —— ingest-once（收口⑤核心验�
       cause: { code: 'DURABLE_EXECUTION_RECEIPT_LEDGER_MISMATCH' },
     });
     const broker = fakeBroker(() => control);
-    const svc = new SignalIngestService({ prisma, broker });
+    const svc = new SignalIngestService({ prisma, broker, platformWriter: prisma as never });
 
     await expect(svc.ingestTed(tedParams, { nowMs: NOW }))
       .rejects.toBe(control);
@@ -381,7 +391,7 @@ describe('SignalIngestService.ingestTed —— ingest-once（收口⑤核心验�
   it('摄取幂等：同 externalId 复现 → 单行、observedAt 前移、status 绝不复活（EXPIRED 保持）', async () => {
     const prisma = fakePrisma();
     const broker = fakeBroker();
-    const svc = new SignalIngestService({ prisma, broker });
+    const svc = new SignalIngestService({ prisma, broker, platformWriter: prisma as never });
 
     await svc.ingestTed(tedParams, { nowMs: NOW });
     const first = [...prisma.signals.values()][0];
@@ -400,7 +410,7 @@ describe('SignalIngestService.ingestFda —— openFDA 同构 + §6 个体户摄
   it('清关落 Signal；个体户自然人计入 skipped 不落库', async () => {
     const prisma = fakePrisma();
     const broker = fakeBroker(() => ({ clearances: [FDA_CLEARANCE_REC, { ...FDA_CLEARANCE_REC, kNumber: 'K269999', applicant: 'Smith, John' }] }));
-    const svc = new SignalIngestService({ prisma, broker });
+    const svc = new SignalIngestService({ prisma, broker, platformWriter: prisma as never });
     const r = await svc.ingestFda({ productCodes: ['LLZ'] }, { nowMs: NOW });
     expect(r.recordsFetched).toBe(2);
     expect(r.signalsUpserted).toBe(1);
@@ -412,7 +422,7 @@ describe('SignalIngestService.ingestFda —— openFDA 同构 + §6 个体户摄
 describe('状态机：expireStale / revoke', () => {
   it('expireStale：ACTIVE 且 expiresAt<now → EXPIRED（REVOKED/EXPIRED 不动）', async () => {
     const prisma = fakePrisma();
-    const svc = new SignalIngestService({ prisma });
+    const svc = new SignalIngestService({ prisma, platformWriter: prisma as never });
     const put = (id: string, status: string, expiresAt: Date) =>
       prisma.signals.set(id, { id, status, expiresAt });
     put('a', 'ACTIVE', new Date(NOW - 1)); // 过期
@@ -425,9 +435,26 @@ describe('状态机：expireStale / revoke', () => {
     expect(prisma.signals.get('c')!.status).toBe('REVOKED');
   });
 
-  it('revoke：置 REVOKED + revokedAt 且**撤即脱敏**（subjectName 占位、payload 清空——Art.17 擦除路径）', async () => {
+  it('expireStale / revoke / unreceipted writes fail closed without platformWriter', async () => {
     const prisma = fakePrisma();
     const svc = new SignalIngestService({ prisma });
+    await expect(svc.expireStale(new Date(NOW))).rejects.toThrow(
+      'DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE',
+    );
+    await expect(svc.revoke('sig-x')).rejects.toThrow(
+      'DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE',
+    );
+    await expect(svc.revokeBySubjectKey('k-1')).rejects.toThrow(
+      'DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE',
+    );
+    await expect(svc.revokeByProvider('ted')).rejects.toThrow(
+      'DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE',
+    );
+  });
+
+  it('revoke：置 REVOKED + revokedAt 且**撤即脱敏**（subjectName 占位、payload 清空——Art.17 擦除路径）', async () => {
+    const prisma = fakePrisma();
+    const svc = new SignalIngestService({ prisma, platformWriter: prisma as never });
     prisma.signals.set('x', { id: 'sig-x', status: 'ACTIVE', expiresAt: new Date(NOW + 1), subjectName: 'Smith, John', payload: { device: 'X' } });
     await svc.revoke('sig-x');
     const row = prisma.signals.get('x')!;
@@ -439,7 +466,7 @@ describe('状态机：expireStale / revoke', () => {
 
   it('revokeBySubjectKey / revokeByProvider：批量撤回（已 REVOKED 的不重复计数）', async () => {
     const prisma = fakePrisma();
-    const svc = new SignalIngestService({ prisma });
+    const svc = new SignalIngestService({ prisma, platformWriter: prisma as never });
     const put = (id: string, over: Record<string, unknown>) =>
       prisma.signals.set(id, { id, status: 'ACTIVE', expiresAt: new Date(NOW + 1), subjectName: 'X', payload: {}, providerKey: 'ted', subjectKey: 'k-1', ...over });
     put('a', { subjectKey: 'k-1' });
@@ -469,7 +496,7 @@ describe('TOCTOU 护栏（对抗复审 MEDIUM）：失败方 ERROR 绝不覆盖�
         return { ok: true, data: { notices: [TED_NOTICE] } as O, meta: {} } as never;
       },
     } as unknown as ExecutionBroker;
-    const svc = new SignalIngestService({ prisma, broker });
+    const svc = new SignalIngestService({ prisma, broker, platformWriter: prisma as never });
 
     const p1 = svc.ingestTed(tedParams, { nowMs: NOW }); // 通过账本检查进入 fetch 后挂起
     await new Promise((r) => setTimeout(r, 5));

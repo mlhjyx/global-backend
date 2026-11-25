@@ -17,8 +17,6 @@ import {
   companyContactObservation,
   persistCompanyContactPoints,
 } from '../discovery/company-contact-points';
-import { WebsiteWatchService } from '../intent/website-watch.service';
-import { SignalIngestService } from '../signals/signal-ingest.service';
 import type { PrismaService } from './prisma.service';
 
 // Explicitly opted-in, disposable and migrated PostgreSQL only. The owner connection reads the
@@ -334,211 +332,159 @@ describe.runIf(Boolean(ownerUrl && appUrl))('app_user table privileges on Postgr
     ]);
   }, 30_000);
 
-  // Positive: each write the app_user code paths perform on the ten platform tables they write,
-  // with the same Prisma calls (or the production function itself), as app_user.
-  it('lets app_user register, fetch, diff and purge website-watch and acquisition sources', async () => {
-    const suffix = randomUUID();
-    const now = new Date();
+  // Positive: app_user retains SELECT on platform tables and exercises the four narrow
+  // SECURITY DEFINER RPCs for taxonomy alias write-back, patent lookup enqueue, and Art.17 erasure.
+  it('lets app_user read platform tables without direct write privileges', async () => {
     await rolledBack(app, async (tx) => {
-      const sourceKey = `web_watch:privileges-${suffix}.example`;
-      // intent-projection.service.ts registerWatch: look up, create, merge pages.
-      expect(await tx.monitoredSource.findUnique({ where: { sourceKey }, select: { id: true } }))
-        .toBeNull();
-      const source = await tx.monitoredSource.create({
-        data: {
-          providerKey: 'web_watch',
-          sourceKey,
-          label: 'privileges probe',
-          config: { company: { name: 'Privileges Probe', domain: 'privileges.example' }, pages: [] },
-          cadence: { kind: 'fixed', everyMs: 86_400_000 },
-          region: 'DE',
-          status: 'ACTIVE',
-        },
-      });
-      await tx.monitoredSource.update({
-        where: { id: source.id },
-        data: {
-          config: {
-            company: { name: 'Privileges Probe', domain: 'privileges.example' },
-            pages: [{ url: 'https://privileges.example/', kind: 'home' }],
-          },
-        },
-      });
-      // website-watch.service.ts watch / acquisition.service.ts acquire: open a fetch, write the
-      // snapshot and its changes, close the fetch, move the schedule.
-      const fetch = await tx.sourceFetch.create({
-        data: { sourceId: source.id, status: 'RUNNING', parserVersion: 'web-watch/v1' },
-      });
-      expect(await tx.sourceEntity.findMany({ where: { sourceId: source.id } })).toEqual([]);
-      await tx.sourceEntity.createMany({
-        data: [{
-          sourceId: source.id,
-          externalId: 'privileges-company',
-          entityKind: 'company',
-          name: 'Privileges Probe',
-          domain: 'privileges.example',
-          country: 'DE',
-          cleaned: {},
-          contentHash: 'hash-1',
-          firstSeenAt: now,
-          lastSeenAt: now,
-          lastSeenFetchId: fetch.id,
-        }],
-        skipDuplicates: true,
-      });
-      const page = await tx.sourceEntity.create({
-        data: {
-          sourceId: source.id,
-          externalId: 'https://privileges.example/',
-          entityKind: 'web_page',
-          name: 'Privileges Probe',
-          domain: 'privileges.example',
-          country: 'DE',
-          cleaned: { page_kind: 'home' },
-          contentHash: 'hash-2',
-          firstSeenAt: now,
-          lastSeenAt: now,
-        },
-      });
-      await tx.sourceEntity.update({
-        where: { id: page.id },
-        data: { lastSeenAt: now, missCount: 0, lastSeenFetchId: fetch.id },
-      });
-      await tx.sourceEntityChange.createMany({
-        data: [{
-          sourceId: source.id,
-          fetchId: fetch.id,
-          externalId: page.externalId,
-          changeType: 'ADDED',
-          detail: { page_kind: 'home' },
-        }],
-      });
-      await tx.sourceFetch.update({
-        where: { id: fetch.id },
-        data: { status: 'DONE', total: 1, added: 1, updated: 0, finishedAt: now },
-      });
-      await tx.monitoredSource.update({
-        where: { id: source.id },
-        data: { lastFetchAt: now, nextFetchAt: new Date(now.getTime() + 86_400_000) },
-      });
-      // website-watch.service.ts purgeStaleEvents: the 90-day retention delete. A cutoff one minute
-      // ahead reaches the change written above.
-      const purged = await new WebsiteWatchService({
-        prisma: tx as unknown as PrismaService,
-        fetcher: { fetch: async () => null },
-      }).purgeStaleEvents(-60_000);
-      expect(purged.deleted).toBeGreaterThanOrEqual(1);
+      await expect(tx.monitoredSource.findMany({ take: 1 })).resolves.toBeInstanceOf(Array);
+      await expect(tx.sourceFetch.findMany({ take: 1 })).resolves.toBeInstanceOf(Array);
+      await expect(tx.sourceEntity.findMany({ take: 1 })).resolves.toBeInstanceOf(Array);
+      await expect(tx.sourceEntityChange.findMany({ take: 1 })).resolves.toBeInstanceOf(Array);
+      await expect(tx.signalIngest.findMany({ take: 1 })).resolves.toBeInstanceOf(Array);
+      await expect(tx.sourceSignal.findMany({ take: 1 })).resolves.toBeInstanceOf(Array);
+      await expect(tx.outreachGlobalSuppression.findMany({ take: 1 })).resolves.toBeInstanceOf(Array);
+      await expect(tx.sourceChannel.findMany({ take: 1 })).resolves.toBeInstanceOf(Array);
+      await expect(tx.sourceChannelRecord.findMany({ take: 1 })).resolves.toBeInstanceOf(Array);
+      await expect(tx.sourceChannelRun.findMany({ take: 1 })).resolves.toBeInstanceOf(Array);
+      await expect(tx.sourceChannelProbe.findMany({ take: 1 })).resolves.toBeInstanceOf(Array);
+      await expect(tx.sourceChannelHealthEvent.findMany({ take: 1 })).resolves.toBeInstanceOf(Array);
     });
   }, 60_000);
 
-  it('lets app_user ingest, re-observe and expire source signals and keep the ingest ledger', async () => {
-    const suffix = randomUUID();
-    const now = new Date();
-    await rolledBack(app, async (tx) => {
-      const ledgerKey = { providerKey: 'ted', queryFingerprint: `privileges-${suffix}`, windowKey: now.toISOString() };
-      // signal-ingest.service.ts ingest: ledger gate, idempotent signal upsert, ledger upsert.
-      expect(await tx.signalIngest.findUnique({
-        where: { providerKey_queryFingerprint_windowKey: ledgerKey },
-      })).toBeNull();
-      const signalKey = {
-        providerKey: 'ted',
-        externalId: `privileges-${suffix}`,
-        signalType: 'TENDER_PUBLISHED',
-        subjectKey: `privileges-${suffix}`,
-      };
-      for (const observedAt of [now, new Date(now.getTime() + 1_000)]) {
-        await tx.sourceSignal.upsert({
-          where: { providerKey_externalId_signalType_subjectKey: signalKey },
-          create: {
-            ...signalKey,
-            subjectName: 'Privileges Probe',
-            subjectCountry: 'DE',
-            taxonomyKeys: ['cpv:42122000'],
-            strength: 0.5,
-            occurredAt: new Date(now.getTime() - 86_400_000),
-            observedAt,
-            payload: {},
-            license: 'CC BY 4.0',
-            jurisdiction: 'EU',
-            expiresAt: new Date(now.getTime() - 1_000),
-          },
-          update: { observedAt },
-        });
-        await tx.signalIngest.upsert({
-          where: { providerKey_queryFingerprint_windowKey: ledgerKey },
-          create: {
-            ...ledgerKey,
-            querySpec: {},
-            recordsFetched: 1,
-            signalsUpserted: 1,
-            status: 'OK',
-            error: null,
-            fetchedAt: observedAt,
-          },
-          update: { recordsFetched: 1, signalsUpserted: 1, status: 'OK', error: null, fetchedAt: observedAt },
-        });
-      }
-      // writeLedgerError: never overwrite an OK row; otherwise record the error.
-      const errorKey = { ...ledgerKey, queryFingerprint: `privileges-error-${suffix}` };
-      const updated = await tx.signalIngest.updateMany({
-        where: { ...errorKey, status: { not: 'OK' } },
-        data: { status: 'ERROR', error: 'probe', recordsFetched: 0, signalsUpserted: 0, fetchedAt: now },
-      });
-      expect(updated.count).toBe(0);
-      await tx.signalIngest.create({
-        data: {
-          ...errorKey,
-          querySpec: {},
-          recordsFetched: 0,
-          signalsUpserted: 0,
-          status: 'ERROR',
-          error: 'probe',
-          fetchedAt: now,
-        },
-      });
-      // external-intent.activities.ts expireStale: ACTIVE past expiresAt becomes EXPIRED.
-      const expired = await new SignalIngestService({
-        prisma: tx as unknown as PrismaService,
-      }).expireStale(now);
-      expect(expired).toBeGreaterThanOrEqual(1);
-    });
-  }, 60_000);
-
-  it('lets app_user add and refine taxonomy aliases', async () => {
+  it('lets app_user add and refine taxonomy aliases only via upsert_term_alias_v1', async () => {
     const term = `privileges probe ${randomUUID()}`;
-    await rolledBack(app, async (tx) => {
-      // taxonomy-resolver.ts: alias lookup, then the cold-path write-back (create, then refine).
-      expect(await tx.termAlias.findUnique({ where: { kind_term: { kind: 'cpv', term } } })).toBeNull();
-      for (const code of ['42122000', '42122130']) {
-        await tx.termAlias.upsert({
-          where: { kind_term: { kind: 'cpv', term } },
-          update: { code, source: 'llm' },
-          create: { kind: 'cpv', term, code, source: 'llm' },
+    const seedTerm = `seed probe ${randomUUID()}`;
+    const manualTerm = `manual probe ${randomUUID()}`;
+    await owner.$executeRaw`
+      INSERT INTO public."canonical_taxonomy" ("id", "kind", "scheme", "code", "label_en", "labels")
+      VALUES
+        (gen_random_uuid(), 'cpv', 'cpv', '42122000', 'Pumps', '{}'::jsonb),
+        (gen_random_uuid(), 'cpv', 'cpv', '42122130', 'Water pumps', '{}'::jsonb)
+      ON CONFLICT ("kind", "code") DO NOTHING
+    `;
+    await owner.$executeRaw`
+      INSERT INTO public."term_alias" ("id", "kind", "term", "code", "source")
+      VALUES
+        (gen_random_uuid(), 'cpv', ${seedTerm}, '42122000', 'seed'),
+        (gen_random_uuid(), 'cpv', ${manualTerm}, '42122000', 'manual')
+      ON CONFLICT ("kind", "term") DO NOTHING
+    `;
+    try {
+      await expect(
+        rolledBack(app, async (tx) => {
+          await tx.$queryRaw(
+            Prisma.sql`SELECT public.upsert_term_alias_v1(${'cpv'}, ${term}, ${'42122000'})::text AS ok`,
+          );
+        }),
+      ).rejects.toThrow(/TAXONOMY_ALIAS_WORKSPACE_REQUIRED|42501/);
+
+      await rolledBack(app, async (tx) => {
+        await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${randomUUID()}, true)`;
+        expect(await tx.termAlias.findUnique({ where: { kind_term: { kind: 'cpv', term } } })).toBeNull();
+        for (const code of ['42122000', '42122130']) {
+          await tx.$queryRaw(
+            Prisma.sql`SELECT public.upsert_term_alias_v1(${'cpv'}, ${term}, ${code})::text AS ok`,
+          );
+        }
+        const saved = await tx.termAlias.findUnique({ where: { kind_term: { kind: 'cpv', term } } });
+        expect(saved?.code).toBe('42122130');
+        expect(saved?.source).toBe('llm');
+
+        for (const protectedTerm of [seedTerm, manualTerm]) {
+          await tx.$queryRaw(
+            Prisma.sql`SELECT public.upsert_term_alias_v1(${'cpv'}, ${protectedTerm}, ${'42122130'})::text AS ok`,
+          );
+        }
+        const preservedSeed = await tx.termAlias.findUnique({
+          where: { kind_term: { kind: 'cpv', term: seedTerm } },
         });
-      }
-    });
+        const preservedManual = await tx.termAlias.findUnique({
+          where: { kind_term: { kind: 'cpv', term: manualTerm } },
+        });
+        expect(preservedSeed).toMatchObject({ code: '42122000', source: 'seed' });
+        expect(preservedManual).toMatchObject({ code: '42122000', source: 'manual' });
+      });
+    } finally {
+      await owner.$executeRaw`
+        DELETE FROM public."term_alias"
+        WHERE "kind" = 'cpv' AND "term" IN (${seedTerm}, ${manualTerm})
+      `;
+    }
   }, 60_000);
 
-  it('lets app_user queue patent lookups, read the cache and record an Art.17 erasure', async () => {
+  it('lets app_user queue patent lookups, read the cache and record Art.17 erasure via RPCs', async () => {
     const companyName = `Privilegesprobe${randomUUID().slice(0, 8)} GmbH`;
     const erasureKeys = inventorErasureKeys('Privilegesprobe Testperson');
     expect(erasureKeys.length).toBeGreaterThan(0);
+    await expect(
+      rolledBack(app, async (tx) => {
+        await tx.$queryRaw(
+          Prisma.sql`SELECT public.record_patent_inventor_tombstones_v1(${erasureKeys}::text[])`,
+        );
+      }),
+    ).rejects.toThrow(/PATENT_TOMBSTONE_WORKSPACE_REQUIRED|42501/);
+    await expect(
+      rolledBack(app, async (tx) => {
+        await tx.$queryRaw(
+          Prisma.sql`SELECT public.purge_patent_inventor_cache_by_keys_v1(${erasureKeys}::text[]) AS deleted`,
+        );
+      }),
+    ).rejects.toThrow(/PATENT_CACHE_PURGE_WORKSPACE_REQUIRED|42501/);
+
     await rolledBack(app, async (tx) => {
-      // discovery.activities.ts / provider.registry.ts: queue the lookup, then re-request it.
       for (let request = 0; request < 2; request += 1) {
         expect(await enqueuePatentLookup(tx, { companyName, country: 'DE' })).toEqual({ enqueued: true });
       }
-      // provider.registry.ts: read the cache (no egress).
       expect(await readPatentCache(tx, companyName, { fromYear: 2021, toYear: 2026 })).toEqual([]);
-      // deletion.activities.ts eraseSubject: tombstones first (idempotent), then the cache rows.
+      await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${randomUUID()}, true)`;
       for (let erasure = 0; erasure < 2; erasure += 1) {
-        await tx.patentInventorTombstone.createMany({
-          data: erasureKeys.map((inventorNameKey) => ({ inventorNameKey })),
-          skipDuplicates: true,
-        });
+        await tx.$queryRaw(
+          Prisma.sql`SELECT public.record_patent_inventor_tombstones_v1(${erasureKeys}::text[])`,
+        );
       }
-      await tx.patentInventorCache.deleteMany({ where: { inventorNameKey: { in: erasureKeys } } });
+      const purged = await tx.$queryRaw<Array<{ deleted: number | bigint }>>(
+        Prisma.sql`SELECT public.purge_patent_inventor_cache_by_keys_v1(${erasureKeys}::text[]) AS deleted`,
+      );
+      expect(Number(purged[0]?.deleted ?? 0)).toBe(0);
     });
+
+    await expect(
+      rolledBack(app, async (tx) => {
+        await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${randomUUID()}, true)`;
+        await tx.$queryRaw(
+          Prisma.sql`SELECT public.record_patent_inventor_tombstones_v1(${['PLAINTEXT_NAME:John Doe']}::text[])`,
+        );
+      }),
+    ).rejects.toThrow(/PATENT_TOMBSTONE_KEY_INVALID|22023/);
+    await expect(
+      rolledBack(app, async (tx) => {
+        await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${randomUUID()}, true)`;
+        await tx.$queryRaw(
+          Prisma.sql`SELECT public.purge_patent_inventor_cache_by_keys_v1(${['PLAINTEXT_NAME:John Doe']}::text[]) AS deleted`,
+        );
+      }),
+    ).rejects.toThrow(/PATENT_CACHE_PURGE_KEY_INVALID|22023/);
+
+    const oversizedKeys = Array.from(
+      { length: 257 },
+      (_, index) => `bi:v1:${index.toString(16).padStart(64, '0')}`,
+    );
+    await expect(
+      rolledBack(app, async (tx) => {
+        await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${randomUUID()}, true)`;
+        await tx.$queryRaw(
+          Prisma.sql`SELECT public.record_patent_inventor_tombstones_v1(${oversizedKeys}::text[])`,
+        );
+      }),
+    ).rejects.toThrow(/PATENT_TOMBSTONE_BATCH_TOO_LARGE|22023/);
+    await expect(
+      rolledBack(app, async (tx) => {
+        await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${randomUUID()}, true)`;
+        await tx.$queryRaw(
+          Prisma.sql`SELECT public.purge_patent_inventor_cache_by_keys_v1(${oversizedKeys}::text[]) AS deleted`,
+        );
+      }),
+    ).rejects.toThrow(/PATENT_CACHE_PURGE_BATCH_TOO_LARGE|22023/);
   }, 60_000);
 
   // PR-B（2026-11-08）：url_content_cache / llm_extraction_cache 的租户隔离 + 过期清理函数。

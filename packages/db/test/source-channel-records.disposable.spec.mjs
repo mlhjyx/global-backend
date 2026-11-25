@@ -119,17 +119,25 @@ describe("source_channel_record (物化记录池)", () => {
     await insertNullRun();
   });
 
-  it("grants app_user the manifest privileges on the record pool", async () => {
+  it("restricts app_user to SELECT while granting execution_budget_platform_writer INSERT/SELECT/UPDATE", async () => {
     const rows = await db.$queryRaw`
       SELECT
-        has_table_privilege('app_user', 'public.source_channel_record', 'SELECT') AS sel,
-        has_table_privilege('app_user', 'public.source_channel_record', 'INSERT') AS ins,
-        has_table_privilege('app_user', 'public.source_channel_record', 'UPDATE') AS upd,
-        has_table_privilege('app_user', 'public.source_channel_record', 'DELETE') AS del
+        has_table_privilege('app_user', 'public.source_channel_record', 'SELECT') AS app_sel,
+        has_table_privilege('app_user', 'public.source_channel_record', 'INSERT') AS app_ins,
+        has_table_privilege('app_user', 'public.source_channel_record', 'UPDATE') AS app_upd,
+        has_table_privilege('app_user', 'public.source_channel_record', 'DELETE') AS app_del,
+        has_table_privilege('execution_budget_platform_writer', 'public.source_channel_record', 'SELECT') AS pw_sel,
+        has_table_privilege('execution_budget_platform_writer', 'public.source_channel_record', 'INSERT') AS pw_ins,
+        has_table_privilege('execution_budget_platform_writer', 'public.source_channel_record', 'UPDATE') AS pw_upd,
+        has_table_privilege('execution_budget_platform_writer', 'public.source_channel_record', 'DELETE') AS pw_del
     `;
-    assert.equal(rows[0].sel, true);
-    assert.equal(rows[0].ins, true);
-    assert.equal(rows[0].upd, true);
-    assert.equal(rows[0].del, false);
+    assert.equal(rows[0].app_sel, true);
+    assert.equal(rows[0].app_ins, false);
+    assert.equal(rows[0].app_upd, false);
+    assert.equal(rows[0].app_del, false);
+    assert.equal(rows[0].pw_sel, true);
+    assert.equal(rows[0].pw_ins, true);
+    assert.equal(rows[0].pw_upd, true);
+    assert.equal(rows[0].pw_del, false);
   });
 });

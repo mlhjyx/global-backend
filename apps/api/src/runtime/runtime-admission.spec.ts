@@ -57,6 +57,8 @@ describe("inspectRuntimeAdmission", () => {
         PII_ENCRYPTION_KEY: "a".repeat(64),
         APP_DATABASE_URL:
           "postgresql://app_user:secret@127.0.0.1:5432/global_dev",
+        OUTBOX_RELAY_DATABASE_URL:
+          "postgresql://outbox_relay_worker_login:secret@127.0.0.1:5432/global_dev",
         AUTH_JWKS_URI: "http://127.0.0.1:3100/.well-known/jwks.json",
         AUTH_ISSUER: "http://127.0.0.1:3100/",
         AUTH_AUDIENCE: "global-api",
@@ -195,6 +197,8 @@ describe("inspectRuntimeAdmission", () => {
         PII_ENCRYPTION_KEY: "a".repeat(64),
         APP_DATABASE_URL:
           "postgresql://app_user:secret@127.0.0.1:5432/global_dev",
+        OUTBOX_RELAY_DATABASE_URL:
+          "postgresql://outbox_relay_worker_login:secret@127.0.0.1:5432/global_dev",
         AUTH_JWKS_URI: "http://127.0.0.1:3100/.well-known/jwks.json",
         AUTH_ISSUER: "http://127.0.0.1:3100/",
         AUTH_AUDIENCE: "global-api",
@@ -224,6 +228,8 @@ describe("inspectRuntimeAdmission", () => {
         PII_ENCRYPTION_KEY: "a".repeat(64),
         APP_DATABASE_URL:
           "postgresql://app_user:secret@127.0.0.1:5432/global_dev",
+        OUTBOX_RELAY_DATABASE_URL:
+          "postgresql://outbox_relay_worker_login:secret@127.0.0.1:5432/global_dev",
         AUTH_JWKS_URI: "http://127.0.0.1:3100/.well-known/jwks.json",
         AUTH_ISSUER: "http://127.0.0.1:3100/",
         AUTH_AUDIENCE: "global-api",
@@ -249,6 +255,8 @@ describe("inspectRuntimeAdmission", () => {
         PII_ENCRYPTION_KEY: "a".repeat(64),
         APP_DATABASE_URL:
           "postgresql://app_user:secret@127.0.0.1:5432/global_dev",
+        OUTBOX_RELAY_DATABASE_URL:
+          "postgresql://outbox_relay_worker_login:secret@127.0.0.1:5432/global_dev",
         AUTH_JWKS_URI: "http://127.0.0.1:3100/.well-known/jwks.json",
         AUTH_ISSUER: "http://127.0.0.1:3100/",
         AUTH_AUDIENCE: "global-api",
@@ -277,6 +285,8 @@ describe("inspectRuntimeAdmission", () => {
         PII_ENCRYPTION_KEY: "a".repeat(64),
         APP_DATABASE_URL:
           "postgresql://app_user:secret@127.0.0.1:5432/global_dev",
+        OUTBOX_RELAY_DATABASE_URL:
+          "postgresql://outbox_relay_worker_login:secret@127.0.0.1:5432/global_dev",
         AUTH_JWKS_URI: "http://127.0.0.1:3100/.well-known/jwks.json",
         AUTH_ISSUER: "http://127.0.0.1:3100/",
         AUTH_AUDIENCE: "global-api",
@@ -304,6 +314,8 @@ describe("inspectRuntimeAdmission", () => {
         PII_ENCRYPTION_KEY: "a".repeat(64),
         APP_DATABASE_URL:
           "postgresql://app_user:secret@127.0.0.1:5432/global_dev",
+        OUTBOX_RELAY_DATABASE_URL:
+          "postgresql://outbox_relay_worker_login:secret@127.0.0.1:5432/global_dev",
         AUTH_JWKS_URI: "http://127.0.0.1:3100/.well-known/jwks.json",
         AUTH_ISSUER: "http://127.0.0.1:3100/",
         AUTH_AUDIENCE: "global-api",
@@ -330,6 +342,8 @@ describe("inspectRuntimeAdmission", () => {
         PII_ENCRYPTION_KEY: "a".repeat(64),
         APP_DATABASE_URL:
           "postgresql://app_user:secret@127.0.0.1:5432/global_dev",
+        OUTBOX_RELAY_DATABASE_URL:
+          "postgresql://outbox_relay_worker_login:secret@127.0.0.1:5432/global_dev",
         AUTH_JWKS_URI: "https://identity.example.test/.well-known/jwks.json",
         AUTH_ISSUER: "https://identity.example.test/",
         AUTH_AUDIENCE: "global-api",
@@ -470,6 +484,151 @@ describe("inspectRuntimeAdmission", () => {
         attestedBuild,
       ).checks.database,
     ).toEqual({ status: "failed", code: "APP_DATABASE_ROLE_INVALID" });
+    expect(
+      inspectRuntimeAdmission(
+        settings,
+        {
+          ...base,
+          DATABASE_URL: "postgresql://global:owner@127.0.0.1/global_dev",
+          APP_DATABASE_URL: "postgresql://app_user:secret@127.0.0.1/global_dev",
+          OUTBOX_RELAY_DATABASE_URL:
+            "postgresql://outbox_relay_worker_login:secret@127.0.0.1/global_dev",
+        },
+        attestedBuild,
+      ).checks.database,
+    ).toEqual({
+      status: "failed",
+      code: "RUNTIME_OWNER_DATABASE_URL_FORBIDDEN",
+    });
+    expect(
+      inspectRuntimeAdmission(
+        settings,
+        {
+          ...base,
+          DATABASE_URL: "",
+          APP_DATABASE_URL: "postgresql://app_user:secret@127.0.0.1/global_dev",
+          OUTBOX_RELAY_DATABASE_URL:
+            "postgresql://outbox_relay_worker_login:secret@127.0.0.1/global_dev",
+        },
+        attestedBuild,
+        "API",
+      ).checks.database,
+    ).toEqual({ status: "ok" });
+    expect(
+      inspectRuntimeAdmission(
+        settings,
+        {
+          ...base,
+          APP_DATABASE_URL: "postgresql://app_user:secret@127.0.0.1/global_dev",
+          OUTBOX_RELAY_DATABASE_URL:
+            "postgresql://outbox_relay_worker_login:secret@127.0.0.1/global_dev",
+          MEMORY_LAYER_V0_ENABLED: "true",
+        },
+        attestedBuild,
+        "API",
+      ).checks.database,
+    ).toEqual({ status: "failed", code: "MEMORY_OUTBOX_DATABASE_URL_REQUIRED" });
+    expect(
+      inspectRuntimeAdmission(
+        settings,
+        {
+          ...base,
+          APP_DATABASE_URL: "postgresql://app_user:secret@127.0.0.1/global_dev",
+        },
+        attestedBuild,
+        "WORKER",
+      ).checks.database,
+    ).toEqual({
+      status: "failed",
+      code: "CUSTOMER_WORKER_OPS_DATABASE_URL_REQUIRED",
+    });
+    expect(
+      inspectRuntimeAdmission(
+        settings,
+        {
+          ...base,
+          APP_DATABASE_URL: "postgresql://app_user:secret@127.0.0.1/global_dev",
+          CUSTOMER_WORKER_OPS_DATABASE_URL:
+            "postgresql://customer_worker_ops_login:secret@127.0.0.1/global_dev",
+          EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL:
+            "postgresql://platform_writer_login:secret@127.0.0.1/global_dev",
+        },
+        attestedBuild,
+        "WORKER",
+      ).checks.database,
+    ).toEqual({
+      status: "failed",
+      code: "RUNTIME_WORKER_PLATFORM_WRITER_FORBIDDEN",
+    });
+    expect(
+      inspectRuntimeAdmission(
+        settings,
+        {
+          ...base,
+          APP_DATABASE_URL: "postgresql://app_user:secret@127.0.0.1/global_dev",
+          EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL:
+            "postgresql://app_user:secret@127.0.0.1/global_dev",
+        },
+        attestedBuild,
+        "PLATFORM_WORKER",
+      ).checks.database,
+    ).toEqual({
+      status: "failed",
+      code: "EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL_ROLE_INVALID",
+    });
+    for (const [badWriterUrl, expectedCode] of [
+      [
+        "postgresql://global:owner@127.0.0.1/global_dev",
+        "EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL_ROLE_INVALID",
+      ],
+      [
+        "postgresql://postgres:owner@127.0.0.1/global_dev",
+        "EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL_ROLE_INVALID",
+      ],
+      [
+        "postgresql://app_user:secret@127.0.0.1/global_dev",
+        "EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL_ROLE_INVALID",
+      ],
+      [
+        "not-a-url",
+        "EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL_INVALID",
+      ],
+      [
+        "postgresql://execution_budget_platform_writer_login:secret@127.0.0.1/other_db",
+        "EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_TARGET_MISMATCH",
+      ],
+    ] as const) {
+      expect(
+        inspectRuntimeAdmission(
+          settings,
+          {
+            ...base,
+            APP_DATABASE_URL:
+              "postgresql://app_user:secret@127.0.0.1/global_dev",
+            OUTBOX_RELAY_DATABASE_URL:
+              "postgresql://outbox_relay_worker_login:secret@127.0.0.1/global_dev",
+            EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL: badWriterUrl,
+          },
+          attestedBuild,
+          "API",
+        ).checks.database,
+      ).toEqual({ status: "failed", code: expectedCode });
+    }
+    expect(
+      inspectRuntimeAdmission(
+        settings,
+        {
+          ...base,
+          APP_DATABASE_URL: "postgresql://app_user:secret@127.0.0.1/global_dev",
+          OUTBOX_RELAY_DATABASE_URL:
+            "postgresql://outbox_relay_worker_login:secret@127.0.0.1/global_dev",
+          EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL:
+            "postgresql://execution_budget_platform_writer_login:secret@127.0.0.1:5432/global_dev",
+        },
+        attestedBuild,
+        "API",
+      ).checks.database,
+    ).toEqual({ status: "ok" });
   });
 
   it("validates the same bounded role-to-scope policy used by the token verifier", () => {

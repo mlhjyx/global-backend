@@ -75,6 +75,13 @@ export class AcquisitionService {
     platformWriter?: PrismaClient;
   }) {}
 
+  private requirePlatformWriter(): PrismaClient {
+    if (!this.deps.platformWriter) {
+      throw new ExecutionControlError('DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE');
+    }
+    return this.deps.platformWriter;
+  }
+
   async acquire(sourceId: string, opts?: {
     limit?: number;
     context?: ToolContext;
@@ -91,8 +98,9 @@ export class AcquisitionService {
     }
     const adapter = registry.get(source.providerKey);
     if (!adapter) throw new Error(`no source adapter for providerKey=${source.providerKey}`);
+    const writer = this.requirePlatformWriter();
 
-    const fetch = await prisma.sourceFetch.create({
+    const fetch = await writer.sourceFetch.create({
       data: { sourceId, status: 'RUNNING', parserVersion: PARSER_VERSION },
     });
 
@@ -136,7 +144,7 @@ export class AcquisitionService {
       cleaned = [...byExt.values()];
     } catch (err) {
       if (err instanceof BudgetExceededError || isExecutionControlError(err)) throw err;
-      await prisma.sourceFetch.update({
+      await writer.sourceFetch.update({
         where: { id: fetch.id },
         data: { status: 'FAILED', error: String(err).slice(0, 300), finishedAt: new Date() },
       });
@@ -241,12 +249,9 @@ export class AcquisitionService {
     return result;
     };
     if (!durableReceipts.length) {
-      return persist(prisma as unknown as AcquisitionWriteDb);
+      return persist(writer as unknown as AcquisitionWriteDb);
     }
-    if (!this.deps.platformWriter) {
-      throw new ExecutionControlError('DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE');
-    }
-    return this.deps.platformWriter.$transaction(async (transaction) => {
+    return writer.$transaction(async (transaction) => {
       const result = await applyDomainAckConsumerTransactions({
         transaction,
         acknowledgements: durableReceipts.map(({ producerId, receipt }) => ({

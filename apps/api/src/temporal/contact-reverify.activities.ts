@@ -28,6 +28,8 @@ function envPositiveInt(name: string, fallback: number, min: number, max: number
 }
 
 export function createContactReverifyActivities(deps: {
+  /** app_user 连接，用于只读平台门控（data_provider / source_policy）；缺省回退 ownerDb 供单测/脚本兼容。 */
+  prisma?: PrismaClient;
   ownerDb: PrismaClient;
   /** 工具型验证器（SMTP 兜底票）的出网闸门；worker 组合根注入，缺省时兜底票不参与。 */
   broker?: ExecutionBroker;
@@ -35,6 +37,7 @@ export function createContactReverifyActivities(deps: {
   providers?: EmailVerificationProvider[];
   now?: () => Date;
 }) {
+  const catalogDb = deps.prisma ?? deps.ownerDb;
   return {
     async contactReverifySweepOnce(args: { limit?: number } = {}): Promise<ContactReverifySweepResult> {
       const now = deps.now ?? (() => new Date());
@@ -45,13 +48,13 @@ export function createContactReverifyActivities(deps: {
       const gated: EmailVerificationProvider[] = [];
       const closed: string[] = [];
       for (const candidate of configured) {
-        const gates = await checkProviderGates(deps.ownerDb, candidate);
+        const gates = await checkProviderGates(catalogDb, candidate);
         if (gates.ok) gated.push(candidate);
         else closed.push(`${candidate.key}: ${gates.reason}`);
       }
       // 门后可用票数 <2 时追加 SMTP 探测兜底票（零成本；开关/杀切/broker 缺省则不追加）。
       const fallback = await withSmtpProbeFallback(gated, {
-        prisma: deps.ownerDb,
+        prisma: catalogDb,
         ...(deps.broker ? { broker: deps.broker } : {}),
       });
       const usable = fallback.providers;

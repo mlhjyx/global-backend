@@ -15,6 +15,10 @@ import {
   gatewayCredentialsAreDistinct,
   parseModelGatewayRequestTimeout,
 } from "../model-gateway/gateway-credential-boundary";
+import {
+  inspectScopedDatabaseUrl,
+  scopedDatabaseTargetsAppDatabase,
+} from "./scoped-database-principal";
 
 type AdmissionStatus = "ok" | "optional" | "failed";
 export type RuntimeAdmissionRole =
@@ -67,11 +71,31 @@ function managed(mode: RuntimeSettings["mode"]): boolean {
   return mode !== "test";
 }
 
+function inspectScopedDatabase(
+  envVar: string,
+  rawUrl: string | undefined,
+  appUrl: string,
+): AdmissionCheck {
+  const urlCheck = inspectScopedDatabaseUrl(envVar, rawUrl);
+  if (urlCheck.status !== "ok") return urlCheck;
+  if (!scopedDatabaseTargetsAppDatabase(rawUrl, appUrl)) {
+    return {
+      status: "failed",
+      code: `${envVar.replace(/_URL$/u, "")}_TARGET_MISMATCH`,
+    };
+  }
+  return { status: "ok" };
+}
+
 function inspectDatabase(
   settings: RuntimeSettings,
   env: NodeJS.ProcessEnv,
+  role: RuntimeAdmissionRole,
 ): AdmissionCheck {
   if (!managed(settings.mode)) return { status: "optional" };
+  if (present(env.DATABASE_URL)) {
+    return { status: "failed", code: "RUNTIME_OWNER_DATABASE_URL_FORBIDDEN" };
+  }
   if (!present(env.APP_DATABASE_URL)) {
     return { status: "failed", code: "APP_DATABASE_URL_REQUIRED" };
   }
@@ -85,6 +109,55 @@ function inspectDatabase(
     }
   } catch {
     return { status: "failed", code: "APP_DATABASE_URL_INVALID" };
+  }
+  if (role === "API" || role === "OUTBOX_RELAY") {
+    const relayCheck = inspectScopedDatabase(
+      "OUTBOX_RELAY_DATABASE_URL",
+      env.OUTBOX_RELAY_DATABASE_URL,
+      env.APP_DATABASE_URL,
+    );
+    if (relayCheck.status !== "ok") return relayCheck;
+    if (role === "API" && env.MEMORY_LAYER_V0_ENABLED === "true") {
+      const memoryCheck = inspectScopedDatabase(
+        "MEMORY_OUTBOX_DATABASE_URL",
+        env.MEMORY_OUTBOX_DATABASE_URL,
+        env.APP_DATABASE_URL,
+      );
+      if (memoryCheck.status !== "ok") return memoryCheck;
+    }
+    if (
+      role === "API" &&
+      present(env.EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL)
+    ) {
+      const writerCheck = inspectScopedDatabase(
+        "EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL",
+        env.EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL,
+        env.APP_DATABASE_URL,
+      );
+      if (writerCheck.status !== "ok") return writerCheck;
+    }
+  }
+  if (role === "WORKER") {
+    if (present(env.EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL)) {
+      return {
+        status: "failed",
+        code: "RUNTIME_WORKER_PLATFORM_WRITER_FORBIDDEN",
+      };
+    }
+    const workerOpsCheck = inspectScopedDatabase(
+      "CUSTOMER_WORKER_OPS_DATABASE_URL",
+      env.CUSTOMER_WORKER_OPS_DATABASE_URL,
+      env.APP_DATABASE_URL,
+    );
+    if (workerOpsCheck.status !== "ok") return workerOpsCheck;
+  }
+  if (role === "PLATFORM_WORKER") {
+    const platformWriterCheck = inspectScopedDatabase(
+      "EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL",
+      env.EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL,
+      env.APP_DATABASE_URL,
+    );
+    if (platformWriterCheck.status !== "ok") return platformWriterCheck;
   }
   return { status: "ok" };
 }
@@ -280,7 +353,7 @@ export function inspectRuntimeAdmission(
   const checks = Object.freeze({
     build,
     environment: inspectEnvironment(settings, env),
-    database: inspectDatabase(settings, env),
+    database: inspectDatabase(settings, env, role),
     auth: inspectAuth(settings, env),
     gateway: inspectGateway(settings, env, role),
     pii: inspectPii(settings, env),
