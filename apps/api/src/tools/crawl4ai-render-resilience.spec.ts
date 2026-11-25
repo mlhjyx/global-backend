@@ -98,4 +98,47 @@ describe("crawl4ai.render timeout and non-HTML resilience (Batch 1.5-B)", () => 
       ),
     ).rejects.toMatchObject({ name: "TimeoutError" });
   });
+
+  it("never feeds .pdf URLs to crawlHtml and settles cleanly at $0 with degraded empty HTML", async () => {
+    const out = await crawl4aiRenderTool.execute(
+      { url: "https://solar-italy.it/wp-content/uploads/Brochure-2026.PDF?download=1#page=2" },
+      workspaceCtx,
+    );
+
+    expect(crawlHtml).not.toHaveBeenCalled();
+    expect(out).toEqual({
+      data: {
+        url: "https://solar-italy.it/wp-content/uploads/Brochure-2026.PDF?download=1#page=2",
+        html: CRAWL4AI_RENDER_DEGRADED_EMPTY_HTML,
+        headers: {},
+      },
+      costCents: 0,
+      degraded: true,
+    });
+    expect(isCrawl4aiHtmlBody(out.data.html)).toBe(true);
+    expect(isCrawl4aiRenderEmptyHtml(out.data.html)).toBe(true);
+  });
+
+  it("degrades application/pdf Content-Type responses cleanly at $0 even when wrapped in Chromium viewer HTML", async () => {
+    vi.mocked(crawlHtml).mockResolvedValueOnce({
+      url: "https://solar-italy.it/download?doc=42",
+      html: '<html><body><embed type="application/pdf" src="about:blank"></body></html>',
+      headers: { "Content-Type": "application/pdf; charset=binary" },
+    });
+
+    const out = await crawl4aiRenderTool.execute(
+      { url: "https://solar-italy.it/download?doc=42" },
+      workspaceCtx,
+    );
+
+    expect(out).toEqual({
+      data: {
+        url: "https://solar-italy.it/download?doc=42",
+        html: CRAWL4AI_RENDER_DEGRADED_EMPTY_HTML,
+        headers: { "Content-Type": "application/pdf; charset=binary" },
+      },
+      costCents: 0,
+      degraded: true,
+    });
+  });
 });

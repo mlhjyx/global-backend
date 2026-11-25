@@ -67,12 +67,46 @@ export const DISCOVERY_PROCUREMENT_SEARCH_PATCH = 'discovery-procurement-search-
 export const DISCOVERY_RUN2_SHADOW_PATCH = 'discovery-run2-shadow-v1';
 /** 巡检（2026-11-04）：深挖段失败/取消时 stats.failure.stage 记 'deep'，不再沿用 quickScan。 */
 export const DISCOVERY_DEEP_STAGE_LABEL_PATCH = 'discovery-deep-stage-label-v1';
+/** Phase 1（2026-11-25）：Run 2.0 深挖收尾补回网站监控注册（registerWatchesForRun），旧历史重放不调度。 */
+export const DISCOVERY_RUN2_WATCHES_PATCH = 'discovery-run2-watches-v1';
 export const DISCOVERY_QUERY_RECEIPT_MODE = QUERY_RECEIPT_MODE;
 const EXECUTION_CONTRACT_VERSION = 2 as const;
 
 interface DiscoveryRunOutcome {
   status: 'DONE' | 'PARTIAL' | 'FAILED' | 'CANCELLED';
   stats: Record<string, unknown>;
+}
+
+function summarizeRun2Outcome(input: {
+  quick: { judged: number; failed: number; skipped: number; ruleFallback: number };
+  deepSummary: { failed: number; skipped: number };
+  deepTargetCount: number;
+  elapsedMinutes: number;
+  discoveryBudgetTruncated: boolean;
+  prefilterCandidates: number;
+}): { status: DiscoveryRunOutcome['status']; alerts: string[] } {
+  const failureRate =
+    input.deepTargetCount > 0
+      ? (input.deepSummary.failed + input.deepSummary.skipped + input.quick.failed) / input.deepTargetCount
+      : 0;
+  const alerts: string[] = [];
+  if (input.discoveryBudgetTruncated) alerts.push('budget_exhausted');
+  if (failureRate > 0.3) alerts.push('failure_rate_high');
+  if (input.elapsedMinutes > 30) alerts.push('duration_exceeded');
+  let status: DiscoveryRunOutcome['status'] = 'DONE';
+  if (
+    input.quick.failed > 0 ||
+    input.quick.skipped > 0 ||
+    input.quick.ruleFallback > 0 ||
+    input.deepSummary.failed > 0 ||
+    input.deepSummary.skipped > 0
+  ) {
+    status = 'PARTIAL';
+  }
+  if (input.quick.judged === 0) {
+    status = input.prefilterCandidates === 0 ? 'PARTIAL' : 'FAILED';
+  }
+  return { status, alerts };
 }
 
 function invalidAuthorityInput(): never {
@@ -582,14 +616,10 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
         if (!isCancellation(error)) throw error;
         deepStopped = true;
       }
-      let deepSummary = await acts.deepStageSummary({ workspaceId, runId });
-      if (!deepStopped) {
-        await acts.markRunPhase({ workspaceId, runId, phase: 'deep_done' });
-      }
       if (deepStopped) {
         await CancellationScope.nonCancellable(async () => {
           await acts.skipUnfinishedDeepJobs({ workspaceId, runId, errorCode: 'DEEP_STOPPED' });
-          deepSummary = await acts.deepStageSummary({ workspaceId, runId });
+          const deepSummary = await acts.deepStageSummary({ workspaceId, runId });
           await finalize({
             status: 'CANCELLED',
             stats: {
@@ -613,29 +643,33 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
         });
         return;
       }
+      const deepSummary = await acts.deepStageSummary({ workspaceId, runId });
+      await acts.markRunPhase({ workspaceId, runId, phase: 'deep_done' });
+      // Phase 1：Run 2.0 深挖收尾补回持续信号监控注册（版本化 patch 保护旧历史重放，尽力而为不阻塞交付）。
+      let run2Watches: { candidates: number; registered: number } | undefined;
+      if (patched(DISCOVERY_RUN2_WATCHES_PATCH) && deepTargets.companyIds.length > 0) {
+        try {
+          const w = await signalActs.registerWatchesForRun({
+            workspaceId,
+            runId,
+            icpId: input.icpId,
+            ...authorityArgs,
+          });
+          run2Watches = { candidates: w.candidates, registered: w.registered };
+        } catch (error) {
+          if (isExecutionControlError(error)) throw error;
+        }
+      }
       // M0⑥ 告警：预算耗尽 / 失败率 >30% / 超过 30 分钟未完成 → stats.alerts（站内通知与运维共用）。
       const elapsed = await acts.runElapsedMinutes({ workspaceId, runId });
-      const deepTargetCount = deepTargets.companyIds.length;
-      const failureRate =
-        deepTargetCount > 0 ? (deepSummary.failed + deepSummary.skipped + quick.failed) / deepTargetCount : 0;
-      const alerts: string[] = [];
-      if (discoveryBudgetTruncated) alerts.push('budget_exhausted');
-      if (failureRate > 0.3) alerts.push('failure_rate_high');
-      if (elapsed.minutes > 30) alerts.push('duration_exceeded');
-      // 空池、或粗判全部失败 → FAILED（本次 run 没有可用名单）；有失败/跳过/规则兜底/深挖未完成 → PARTIAL。
-      let quickStatus: DiscoveryRunOutcome['status'] = 'DONE';
-      if (
-        quick.failed > 0 ||
-        quick.skipped > 0 ||
-        quick.ruleFallback > 0 ||
-        deepSummary.failed > 0 ||
-        deepSummary.skipped > 0
-      ) {
-        quickStatus = 'PARTIAL';
-      }
-      if (quick.judged === 0) {
-        quickStatus = (run2Prefilter?.candidates ?? 0) === 0 ? 'PARTIAL' : 'FAILED';
-      }
+      const { status: quickStatus, alerts } = summarizeRun2Outcome({
+        quick,
+        deepSummary,
+        deepTargetCount: deepTargets.companyIds.length,
+        elapsedMinutes: elapsed.minutes,
+        discoveryBudgetTruncated,
+        prefilterCandidates: run2Prefilter?.candidates ?? 0,
+      });
       outcome = {
         status: quickStatus,
         stats: {
@@ -650,6 +684,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
             leads: provisional.leads,
           },
           deep: { ...deepSummary, targets: deepTargets.companyIds.length, stopped: false },
+          ...(run2Watches ? { watches: { registered: run2Watches.registered, of: run2Watches.candidates } } : {}),
           ...(alerts.length ? { alerts } : {}),
         },
       };

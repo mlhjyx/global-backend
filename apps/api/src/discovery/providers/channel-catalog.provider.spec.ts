@@ -122,4 +122,42 @@ describe('ChannelCatalogDiscoveryProvider (本地已审渠道库 zero-egress)', 
       providerRecordCount: 0,
     });
   });
+
+  it('Phase 1: channel-level admission reads APPROVED and PENDING records from ENABLED channels (excluding REJECTED)', async () => {
+    const findMany = vi.fn(async () => [
+      {
+        id: REC_ID,
+        channelId: CH_ID,
+        dedupeKey: 'domain:propak-exhibitor.th',
+        name: 'ProPak Exhibitor Co., Ltd.',
+        website: 'https://propak-exhibitor.th',
+        country: 'TH',
+        industry: 'packaging machinery',
+        products: ['filling line'],
+        keywords: ['packaging'],
+        sourceUrl: 'https://www.propakasia.com/exhibitor/1',
+        contentHash: 'd'.repeat(64),
+        lastSeenAt: new Date('2026-11-25T00:00:00.000Z'),
+        channel: { name: 'ProPak Asia 2026', category: 'trade_fair', license: 'public' },
+      },
+    ]);
+    const provider = new ChannelCatalogDiscoveryProvider({
+      prisma: { sourceChannelRecord: { findMany } } as never,
+      lineageEnabled: true,
+    });
+    const res = await provider.discoverCompanies(
+      { sourceClass: 'industry_data', filters: { country: 'TH', industry: 'packaging' }, keywords: [], limit: 20 },
+      { workspaceId: WS, runId: RUN, durableBudgetAuthority: { authorityId: AUTH, accountId: ACC }, onDurableReceipt: vi.fn() },
+    );
+
+    expect(res.records).toHaveLength(1);
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          reviewStatus: { in: ['APPROVED', 'PENDING'] },
+          channel: { status: 'ENABLED' },
+        },
+      }),
+    );
+  });
 });

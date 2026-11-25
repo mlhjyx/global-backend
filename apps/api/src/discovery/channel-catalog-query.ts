@@ -152,17 +152,17 @@ export function mapChannelCatalogRowToRecord(row: ChannelCatalogRow): ProviderCo
   };
 }
 
-/** 读平台表 `source_channel_record`（仅 APPROVED 记录 + ENABLED 渠道；确定性排序）。 */
+/** 读平台表 `source_channel_record`（渠道级准入：ENABLED 渠道下的 APPROVED/PENDING 记录，排除 REJECTED；APPROVED 优先）。 */
 export async function queryChannelCatalogRecords(
   prisma: PrismaClient,
   input: ChannelCatalogQueryInput,
 ): Promise<ProviderCompanyRecord[]> {
   const rows = (await prisma.sourceChannelRecord.findMany({
     where: {
-      reviewStatus: 'APPROVED',
+      reviewStatus: { in: ['APPROVED', 'PENDING'] },
       channel: { status: 'ENABLED' },
     },
-    orderBy: [{ channelId: 'asc' }, { dedupeKey: 'asc' }],
+    orderBy: [{ reviewStatus: 'asc' }, { channelId: 'asc' }, { dedupeKey: 'asc' }],
     take: Math.min(2_000, input.limit * 4),
     select: {
       id: true,

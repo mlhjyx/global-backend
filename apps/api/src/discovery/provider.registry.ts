@@ -161,13 +161,13 @@ export class DiscoveryProviderRegistry {
         lineageEnabled: process.env.REGISTRY_FRAME_PROVIDER === 'on',
       }),
     );
-    // channel_catalog = 本地已审渠道库（source_channel_record）枚举（零出网零成本，Batch 1.4-B）。
-    // CHANNEL_CATALOG_PROVIDER=on 时声明 local_query 血缘并报送确定性回执（channel_catalog.query）；
-    // data_provider.channel_catalog 默认 DISABLED 是第二道 kill switch。
+    // channel_catalog = 本地渠道库（source_channel_record）枚举（零出网零成本，Batch 1.4-B / Phase 1 唤醒）。
+    // 默认声明 local_query 血缘（CHANNEL_CATALOG_PROVIDER=off 可紧急关停），
+    // data_provider.channel_catalog（seed 默认 DISABLED）作运行时主开关。
     this.discovery.push(
       new ChannelCatalogDiscoveryProvider({
         prisma,
-        lineageEnabled: process.env.CHANNEL_CATALOG_PROVIDER === 'on',
+        lineageEnabled: process.env.CHANNEL_CATALOG_PROVIDER !== 'off',
       }),
     );
     // UK Companies House 董事发现（待办 3 第一个身份源；官方注册处 API，Basic auth）——contact_discovery 类。

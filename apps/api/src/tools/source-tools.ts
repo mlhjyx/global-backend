@@ -143,6 +143,18 @@ function isWorkspaceRenderTimeout(error: unknown, ctx: ToolContext): boolean {
   return cause !== null && (cause.name === "TimeoutError" || cause.name === "AbortError" || (typeof cause.code === "string" && CRAWL4AI_RENDER_TIMEOUT_CODES.has(cause.code)));
 }
 
+function isPdfRenderUrl(rawUrl: string | null | undefined): boolean {
+  if (typeof rawUrl !== "string" || !rawUrl.trim()) return false;
+  try {
+    const u = new URL(rawUrl.trim());
+    const p = (() => { try { return decodeURIComponent(u.pathname); } catch { return u.pathname; } })();
+    return /\.pdf(?:$|\/)/iu.test(p) || [...u.searchParams.values()].some((v) => /\.pdf$/iu.test(v.trim()));
+  } catch { return /\.pdf(?:[?#].*)?$/iu.test(rawUrl.trim()); }
+}
+function isPdfRenderContentType(headers: Record<string, string> | null | undefined): boolean {
+  return Boolean(headers && typeof headers === "object" && Object.entries(headers).some(([k, v]) => k.toLowerCase() === "content-type" && typeof v === "string" && /^\s*application\/(?:x-)?pdf(?:\s*;|$)/iu.test(v)));
+}
+
 /** crawl4ai.render —— 渲染后原始 HTML（数字足迹/结构化收割/web_watch 用；robots 在内强制）。 */
 export const crawl4aiRenderTool: Tool<{ url: string }, CrawlHtmlResult & { robotsBlocked?: boolean }> = {
   id: platformCrawl4aiContract.toolId,
@@ -163,6 +175,10 @@ export const crawl4aiRenderTool: Tool<{ url: string }, CrawlHtmlResult & { robot
   // robots fetch and renderer dispatch both take ctx.beforePhysicalWire (D13).
   physicalWireObservation: "before_each_wire",
   execute: async (input, ctx) => {
+    // PDF 护栏：严禁把 .pdf 送给 Chromium 无头渲染（易触发 Crawl4AI 502 并锁死 30s 限流槽位）；以 $0 合规空 HTML 降级结算。
+    if (isPdfRenderUrl(input.url)) {
+      return { data: { url: input.url, html: CRAWL4AI_RENDER_EMPTY_HTML, headers: {} }, costCents: 0, degraded: true };
+    }
     if (
       !(await isAllowedByRobots(input.url, {
         authorizeExternalAction: ctx.authorizeExternalAction,
@@ -179,6 +195,9 @@ export const crawl4aiRenderTool: Tool<{ url: string }, CrawlHtmlResult & { robot
     } catch (error) {
       if (isWorkspaceRenderTimeout(error, ctx)) return { data: { url: input.url, html: CRAWL4AI_RENDER_EMPTY_HTML, headers: {} }, costCents: 0, degraded: true };
       throw error;
+    }
+    if (isPdfRenderContentType(r.headers)) {
+      return { data: { url: r.url, html: CRAWL4AI_RENDER_EMPTY_HTML, headers: r.headers }, costCents: 0, degraded: true };
     }
     if (!ctx.platformEgress && ctx.workspaceId !== "platform" && !/^\s*<(?:!doctype\s+html\b|[a-z][a-z0-9:-]*\b)/i.test(r.html)) {
       return { data: { url: r.url, html: CRAWL4AI_RENDER_EMPTY_HTML, headers: r.headers }, costCents: 0, degraded: true };

@@ -563,7 +563,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     maxOutputTokens: REASONING_TASK_MAX_OUTPUT_TOKENS,
     timeoutMs: 180000,
     description:
-      '批量粗筛：给定卖方 ICP 与一批候选公司（每家含名称、域名、国家、行业、产品/关键词），逐家判断是否为该卖方的真实目标客户。按四门粗判（与单家深判同一口径）：\n1) 材质门：候选的加工材质是否与 ICP 目标一致（如金属 vs 塑料/织物/粉体），ICP 未要求材质时视为通过。\n2) 角色门：候选是卖方产品的下游买家，还是同类产品制造商（竞品判 mismatch）；icp_trade_role 为 distributor 时，采购并转售的分销/批发/进口/经销商是下游买家。\n3) 工艺子集门：候选是否从事 ICP 核心工艺；仅相邻工艺判 weak。\n4) 商业模式门：分销商 ICP 下，转售型分销判通过，信息撮合平台判 weak。\n这是粗筛（provisional）：证据不足/边缘情况一律判 weak 交深判复核，绝不猜测。对每个 index 输出 verdict（match | weak | mismatch）与一句中文理由。',
+      '批量粗筛（L1 快扫，provisional）：给定卖方 ICP 与一批候选公司（每家含名称、域名、国家、行业、贸易角色、产品/关键词与简要证据），逐家按两层口径判断是否为该卖方的真实目标买家：\n1) 必过层（决定 match / weak / mismatch）：重点核对① 行业赛道是否一致 ② 商业角色是否匹配目标买家（如分销商、批发商、进口商、EPC、电站/工程开发商、系统集成商、终端采购方；竞品同行代工厂判 mismatch）③ 目标市场是否吻合。\n2) 加分层（卖方细分产品参数/型号/工艺卖点仅作加分参考，绝不作拒判门槛）：候选官网摘要通常只写大类业务，严禁仅因未提及卖方具体技术参数就把真实行业买家降判为 weak 或 mismatch。\n明确无关行业（软件/IT咨询、消费零售、公用垄断/政府监管等）、纯竞品制造商、非目标区域或明显无效页一律直接判 mismatch（不得放进 weak）；仅在行业看似相关但信息过少无法确认买家角色、或属于信息撮合平台时判 weak 交深判复核；其余符合行业与买家角色的判 match。对每个 index 输出 verdict（match | weak | mismatch）与一句中文理由。',
     outputSchema: closedObject({
       judgments: boundedArray(8, closedObject({
         index: boundedNumber(0, 7, true),

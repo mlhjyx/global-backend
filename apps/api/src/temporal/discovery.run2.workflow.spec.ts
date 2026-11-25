@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { CancelledFailure } from '@temporalio/common';
 
 const child = vi.hoisted(() => ({ executeChild: vi.fn() }));
 vi.mock('@temporalio/workflow', async () => ({
@@ -6,7 +7,7 @@ vi.mock('@temporalio/workflow', async () => ({
   executeChild: child.executeChild,
 }));
 
-import { TemporalFailure, acts, resetActivities } from './testing/temporal-workflow.mock';
+import { CancellationScope, TemporalFailure, acts, resetActivities, setPatched } from './testing/temporal-workflow.mock';
 import { discoveryWorkflow } from './discovery.workflow';
 
 const WORKSPACE_ID = '11111111-1111-4111-8111-111111111111';
@@ -273,21 +274,51 @@ describe('M0③ 快扫编排（patched + 启动开关）', () => {
     });
     acts.materializeProvisionalLeads.mockResolvedValue({ leads: 25 });
     acts.listDeepTargets.mockResolvedValue({ companyIds: ['c1', 'c2'] });
-    child.executeChild.mockRejectedValueOnce(
-      Object.assign(new Error('cancelled'), { name: 'CancelledFailure' }),
-    );
-    acts.deepStageSummary.mockResolvedValue({ done: 0, failed: 0, skipped: 2, remaining: 0 });
+    let workflowCancelled = false;
+    let insideNonCancellable = false;
+    const scopeSpy = vi
+      .spyOn(CancellationScope, 'nonCancellable')
+      .mockImplementation(async (fn) => {
+        insideNonCancellable = true;
+        try {
+          return await fn();
+        } finally {
+          insideNonCancellable = false;
+        }
+      });
+    child.executeChild.mockImplementationOnce(async () => {
+      workflowCancelled = true;
+      throw new CancelledFailure('cancelled');
+    });
+    // Real Temporal throws CancelledFailure for any activity scheduled outside
+    // CancellationScope.nonCancellable once the workflow scope is cancelled.
+    acts.deepStageSummary.mockImplementation(async () => {
+      if (workflowCancelled && !insideNonCancellable) {
+        throw new CancelledFailure('activity cancelled outside nonCancellable');
+      }
+      return { done: 0, failed: 0, skipped: 2, remaining: 0 };
+    });
 
-    await discoveryWorkflow(input(true));
+    try {
+      await discoveryWorkflow(input(true));
+    } finally {
+      scopeSpy.mockRestore();
+    }
 
     expect(acts.skipUnfinishedDeepJobs).toHaveBeenCalledWith(
       expect.objectContaining({ runId: RUN_ID, errorCode: 'DEEP_STOPPED' }),
     );
+    expect(acts.deepStageSummary).toHaveBeenCalledTimes(1);
+    expect(acts.markRunPhase).not.toHaveBeenCalledWith(
+      expect.objectContaining({ phase: 'deep_done' }),
+    );
+    expect(acts.finalizeRun).toHaveBeenCalledTimes(1);
     expect(acts.finalizeRun).toHaveBeenCalledWith(
       expect.objectContaining({
         status: 'CANCELLED',
         stats: expect.objectContaining({
-          deep: expect.objectContaining({ stopped: true }),
+          quickScan: expect.objectContaining({ judged: 25, leads: 25 }),
+          deep: expect.objectContaining({ stopped: true, skipped: 2, targets: 2 }),
         }),
       }),
     );
@@ -318,6 +349,46 @@ describe('M0③ 快扫编排（patched + 启动开关）', () => {
         }),
       }),
     );
+  });
+
+  it('Phase 1: registers watches for Run 2.0 completed deep targets and skips on pre-patch replay', async () => {
+    const { DISCOVERY_RUN2_WATCHES_PATCH } = await import('./discovery.workflow');
+    acts.prefilterPool.mockResolvedValue({ poolSize: 10, candidates: 5, prefilteredOut: 5 });
+    acts.quickJudgeBatch.mockResolvedValue({
+      judged: 5,
+      verdicts: { match: 2, weak: 3 },
+      fallbackPerCompany: 0,
+      ruleFallback: 0,
+      failed: 0,
+      skipped: 0,
+    });
+    acts.materializeProvisionalLeads.mockResolvedValue({ leads: 5 });
+    acts.listDeepTargets.mockResolvedValue({ companyIds: ['c1', 'c2'] });
+    acts.deepStageSummary.mockResolvedValue({ done: 2, failed: 0, skipped: 0, remaining: 0 });
+    acts.registerWatchesForRun.mockResolvedValue({ candidates: 2, registered: 2, skippedSubjects: 0, unreplayable: 0 });
+
+    await discoveryWorkflow(input(true));
+
+    expect(acts.registerWatchesForRun).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceId: WORKSPACE_ID, runId: RUN_ID, icpId: ICP_ID }),
+    );
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'DONE',
+        stats: expect.objectContaining({
+          watches: { registered: 2, of: 2 },
+        }),
+      }),
+    );
+
+    // Pre-patch replay must NOT schedule registerWatchesForRun
+    acts.registerWatchesForRun.mockClear();
+    acts.finalizeRun.mockClear();
+    setPatched((patchId) => patchId !== DISCOVERY_RUN2_WATCHES_PATCH);
+
+    await discoveryWorkflow(input(true));
+
+    expect(acts.registerWatchesForRun).not.toHaveBeenCalled();
   });
 });
 

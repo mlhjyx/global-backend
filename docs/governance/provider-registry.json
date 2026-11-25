@@ -694,7 +694,7 @@
       "source_classes": [
         "industry_data"
       ],
-      "purpose": "Zero-egress discovery over platform-approved trade fair, association, and directory enterprise records stored in source_channel_record (reviewStatus=APPROVED, channel.status=ENABLED). Maps company-level attributes only and excludes contact PII.",
+      "purpose": "Zero-egress discovery over platform-admitted trade fair, association, and directory enterprise records stored in source_channel_record (reviewStatus in APPROVED/PENDING, channel.status=ENABLED). Maps company-level attributes only and excludes contact PII.",
       "taxonomy": [
         "approved channel catalog",
         "trade fair exhibitor directory",

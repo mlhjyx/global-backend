@@ -29,6 +29,7 @@ import {
 } from '../discovery/icp-to-cpv';
 import { resolveIcpToFda, buildFdaQuery, FDA_QUERY_SOURCE } from '../discovery/icp-to-fda';
 import { withIcpTradeRole } from '../discovery/icp-trade-role';
+import { withIcpSniperAndSeedFilters } from '../discovery/ecosystem-sniper';
 import {
   addConfirmedBuyerScenarioDrafts,
   assertSupportedBuyerScenario,
@@ -766,6 +767,7 @@ export class IcpService {
     queries = withSourceCoverage(queries, icp, enabledSources, {
       registryFrameCountries: await loadRegistryFrameCountries(this.prisma),
     });
+    queries = withIcpSniperAndSeedFilters(queries, icp.companyAttributes);
 
     queries = prepareBuyerScenarioQueries(queries, scenario);
 

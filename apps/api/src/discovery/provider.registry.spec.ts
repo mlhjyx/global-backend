@@ -173,8 +173,8 @@ describe('DiscoveryProviderRegistry SourceClass governance', () => {
       // 公司血缘（零出网=无 durable 回执），执行面等 local_query 变体获批
       // （design: docs/superpowers/plans/2026-11-09-registry-frame-local-lineage.md）。
       { sourceClass: 'company_registry', providerKey: 'registry_frame', hasCompanyLineage: false },
-      // Batch 1.4-B：本地已审渠道库枚举（零出网零成本；CHANNEL_CATALOG_PROVIDER=on 时声明血缘）。
-      { sourceClass: 'industry_data', providerKey: 'channel_catalog', hasCompanyLineage: false },
+      // Batch 1.4-B / Phase 1：本地渠道库枚举（零出网零成本；默认声明血缘，CHANNEL_CATALOG_PROVIDER=off 可关停）。
+      { sourceClass: 'industry_data', providerKey: 'channel_catalog', hasCompanyLineage: true },
     ]);
     // Contact, email and enrichment adapters are never plan query sources.
     expect(sources.map((source) => source.providerKey)).not.toEqual(
@@ -210,7 +210,7 @@ describe('DiscoveryProviderRegistry SourceClass governance', () => {
       (await registry.routeCompanyDiscovery(db as never, sourceClass)).map((adapter) => adapter.key);
 
     expect(await routed('industry_data')).toEqual([
-      'public_web', 'directory', 'wikidata', 'openstreetmap', 'trade_fair',
+      'public_web', 'directory', 'wikidata', 'openstreetmap', 'trade_fair', 'channel_catalog',
     ]);
     expect(await routed('company_registry')).toEqual(['wikidata', 'opencorporates']);
     expect(await routed('public_intelligence')).toEqual([
@@ -314,8 +314,18 @@ describe('DiscoveryProviderRegistry SourceClass governance', () => {
       [...new Set(sources.filter((source) => source.hasCompanyLineage).map((source) => source.providerKey))],
     ).toEqual([
       'public_web', 'directory', 'wikidata', 'openstreetmap', 'trade_fair', 'ted', 'openfda',
-      'opencorporates', 'model_web_search',
+      'opencorporates', 'model_web_search', 'channel_catalog',
     ]);
+    // CHANNEL_CATALOG_PROVIDER=off acts as an emergency env kill switch for channel_catalog lineage.
+    const prevChannelSwitch = process.env.CHANNEL_CATALOG_PROVIDER;
+    process.env.CHANNEL_CATALOG_PROVIDER = 'off';
+    try {
+      const offSources = new DiscoveryProviderRegistry({ gateway: {} as ModelGateway }).companyDiscoverySources();
+      expect(offSources.find((s) => s.providerKey === 'channel_catalog')?.hasCompanyLineage).toBe(false);
+    } finally {
+      if (prevChannelSwitch === undefined) delete process.env.CHANNEL_CATALOG_PROVIDER;
+      else process.env.CHANNEL_CATALOG_PROVIDER = prevChannelSwitch;
+    }
     // A declared source that either contract rejects would fail its governed query instead of running it.
     for (const source of sources) {
       if (source.hasCompanyLineage) {

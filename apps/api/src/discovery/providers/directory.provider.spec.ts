@@ -150,6 +150,17 @@ describe('名录发现检索串构造', () => {
     expect(isDirectoryListingShaped('https://example.pl/lista-wystawcow', '')).toBe(true);
   });
 
+  it('Phase 1: tightened LISTING_HINT rejects association homepages, board/about/working-group pages while keeping true member lists', () => {
+    expect(isDirectoryListingShaped('https://www.italiasolare.eu/', 'Italia Solare - Associazione fotovoltaico')).toBe(false);
+    expect(isDirectoryListingShaped('https://www.italiasolare.eu/chi-siamo/', 'Chi siamo - Associazione Italia Solare')).toBe(false);
+    expect(isDirectoryListingShaped('https://www.italiasolare.eu/gruppi-di-lavoro/', 'Gruppi di lavoro dei soci')).toBe(false);
+    expect(isDirectoryListingShaped('https://www.solarpowereurope.org/about-us/board-of-members', 'Board of Members')).toBe(false);
+    expect(isDirectoryListingShaped('https://www.example.es/', 'Asociación Española de Energía Solar')).toBe(false);
+    expect(isDirectoryListingShaped('https://www.example.com/specialist-solar', 'Solar Specialist Solutions')).toBe(false);
+    expect(isDirectoryListingShaped('https://www.italiasolare.eu/chi-siamo/i-nostri-associati/', 'I nostri associati - Italia Solare')).toBe(true);
+    expect(isDirectoryListingShaped('https://www.solarpowereurope.org/about-us/members-directory', 'Members Directory')).toBe(true);
+  });
+
   it('意大利/西班牙等市场启用本地化名录意图词，并自动注入匹配的全球旗舰展会检索', () => {
     const searches = buildDirectorySearches(
       q({ industry: 'photovoltaic', country: 'Italy' }, ['solar module', 'EPC']),

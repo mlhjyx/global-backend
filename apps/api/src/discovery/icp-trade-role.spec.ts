@@ -75,4 +75,44 @@ describe('withIcpTradeRole', () => {
     expect(planned).toEqual(snapshot);
     expect(carried[0]).not.toBe(planned[0]);
   });
+
+  it('Phase 1: does not stamp distributor trade_side onto OpenStreetMap or EPC/installer/developer/manufacturer queries', () => {
+    const planned: PlanQueryShape[] = [
+      {
+        source_class: 'industry_data',
+        filters: { source_hint: 'openstreetmap', country: 'Italy', industry: 'solar' },
+        keywords: ['fotovoltaico'],
+        rationale: 'osm',
+        priority: 2,
+      },
+      {
+        source_class: 'public_intelligence',
+        filters: { source_hint: 'public_web', country: 'Italy', industry: 'photovoltaic' },
+        keywords: ['EPC fotovoltaico', 'installatore impianti solari'],
+        rationale: 'epc',
+        priority: 2,
+      },
+      {
+        source_class: 'public_intelligence',
+        filters: { source_hint: 'public_web', country: 'Italy', sub_industry: 'solar park developer' },
+        keywords: ['parco fotovoltaico', 'sviluppatore solare'],
+        rationale: 'dev',
+        priority: 2,
+      },
+      {
+        source_class: 'public_intelligence',
+        filters: { source_hint: 'public_web', country: 'Italy', industry: 'photovoltaic' },
+        keywords: ['moduli fotovoltaici grossista'],
+        rationale: 'dist',
+        priority: 2,
+      },
+    ];
+
+    const carried = withIcpTradeRole(planned, distributorIcp);
+
+    expect(carried[0]!.filters.trade_side).toBeUndefined();
+    expect(carried[1]!.filters.trade_side).toBeUndefined();
+    expect(carried[2]!.filters.trade_side).toBeUndefined();
+    expect(carried[3]!.filters.trade_side).toBe('distributor');
+  });
 });

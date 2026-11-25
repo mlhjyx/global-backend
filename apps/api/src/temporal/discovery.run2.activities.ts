@@ -1,4 +1,8 @@
-import { loadQuickScanPool, revisableProvisionalLeadWhere } from '../discovery/run2/pool';
+import {
+  loadQuickScanPool,
+  rejectProvisionalLeadOnPrefilter,
+  revisableProvisionalLeadWhere,
+} from '../discovery/run2/pool';
 import { createHash } from 'node:crypto';
 import { Context } from '@temporalio/activity';
 import { CancelledFailure } from '@temporalio/common';
@@ -214,6 +218,12 @@ export function createRun2Activities(deps: {
               candidates += 1;
             } else {
               prefilteredOut += 1;
+              await rejectProvisionalLeadOnPrefilter(tx, {
+                workspaceId: args.workspaceId,
+                icpId: args.icpId,
+                companyId: company.id,
+                verdict: decision.verdict,
+              });
               await appendRunEvent(tx as never, {
                 workspaceId: args.workspaceId,
                 runId: args.runId,

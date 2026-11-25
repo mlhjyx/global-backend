@@ -510,3 +510,76 @@ describe('search-first review follow-ups (G3 5.3)', () => {
     }
   });
 });
+
+describe('Phase 1: ecosystem-sniper & Exa findSimilar awakening', () => {
+  it('reserves search slots for competitor_brands / ecosystem_brands sniper queries instead of slicing them off', () => {
+    const queries = buildSearchQueries(distributorQuery({
+      filters: {
+        industry: 'fotovoltaico',
+        country: 'Italy',
+        trade_side: 'distributor',
+        competitor_brands: ['LONGi', 'JinkoSolar'],
+        ecosystem_brands: ['SMA'],
+      },
+      keywords: ['moduli solari', 'pannelli fotovoltaici'],
+    }));
+    expect(queries.length).toBeLessThanOrEqual(3);
+    expect(queries.some((q) => q.includes('"LONGi"'))).toBe(true);
+    expect(queries.some((q) => !q.includes('"LONGi"') && !q.includes('"JinkoSolar"') && !q.includes('"SMA"'))).toBe(true);
+  });
+
+  it('builds sniper queries even when general keywords/industry are empty', () => {
+    const queries = buildSearchQueries({
+      sourceClass: 'public_intelligence',
+      filters: {
+        country: 'Italy',
+        competitor_brands: ['LONGi'],
+        ecosystem_brands: ['Fronius'],
+      },
+      keywords: [],
+      limit: 20,
+    });
+    expect(queries.some((q) => q.includes('"LONGi"'))).toBe(true);
+    expect(queries.some((q) => q.includes('"Fronius"'))).toBe(true);
+  });
+
+  it('runs Exa find_similar when seed_domains are present even without keyword searches', async () => {
+    vi.stubEnv('EXA_API_KEY', 'exa-test-key');
+    try {
+      const invokedTools: Array<{ toolId: string; input: unknown }> = [];
+      const executionBroker = broker(async (toolId, input) => {
+        invokedTools.push({ toolId, input });
+        if (toolId === 'exa.search') {
+          return {
+            data: { results: [{ url: 'https://similar-solar.it/', title: 'Similar Solar S.r.l.' }] },
+            costCents: 0,
+          };
+        }
+        return { data: { results: [] }, costCents: 0 };
+      });
+      mocks.executeStructuredTaskWithRuntime.mockResolvedValue({
+        data: { is_company_site: true, name: 'Similar Solar S.r.l.' },
+        provider: 'gateway',
+        model: 'model',
+        runtimeExecution: {},
+      });
+
+      const res = await new PublicWebDiscoveryProvider({ gateway: {} as never, broker: executionBroker })
+        .discoverCompanies(
+          {
+            sourceClass: 'public_intelligence',
+            filters: { country: 'Italy', seed_domains: ['krannich-solar.com'] },
+            keywords: [],
+            limit: 10,
+          },
+          CTX,
+        );
+
+      expect(invokedTools.some((c) => c.toolId === 'exa.search' && (c.input as { mode?: string }).mode === 'find_similar')).toBe(true);
+      expect(res.records).toHaveLength(1);
+      expect(res.records[0]?.domain).toBe('similar-solar.it');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+});

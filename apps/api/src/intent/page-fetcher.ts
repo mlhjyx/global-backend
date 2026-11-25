@@ -1,4 +1,5 @@
 import type { CrawlHtmlResult } from '../adapters/web-crawler';
+import { isPdfDocumentUrl } from '../adapters/pdf-url-guard';
 import type { ExecutionBroker } from '../tools/tool-contract';
 import type { ToolContext } from '../tools/tool-contract';
 import {
@@ -44,7 +45,7 @@ export class Crawl4aiPageFetcher implements PageFetcher {
   constructor(private readonly broker?: ExecutionBroker) {}
 
   async fetch(url: string, context?: ToolContext): Promise<FetchedPage | null> {
-    if (!/^https?:\/\//i.test(url)) return null;
+    if (!/^https?:\/\//i.test(url) || isPdfDocumentUrl(url)) return null;
     if (!this.broker) {
       // 无闸门 = 不允许原始出网（绝不绕过 ToolBroker）→ 视同抓取失败降级（fail-closed），只警一次。
       if (!this.warnedNoBroker) {

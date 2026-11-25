@@ -17,6 +17,7 @@ import {
   appendRunEvent,
   QUALIFICATION_BATCH_SCORED_EVENT,
 } from '../discovery/run2/run-events';
+import { loadEliminatedCompanyIdsForIcp } from './qualify-elimination-filter';
 
 export interface QualifyRunInput {
   workspaceId: string;
@@ -227,6 +228,12 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
               })
             : [];
           const storedHitByCompany = new Map(storedHits.map((row) => [row.canonicalCompanyId, row]));
+          const eliminatedCompanyIds = await loadEliminatedCompanyIdsForIcp(
+            tx,
+            args.workspaceId,
+            args.icpId,
+            scoredCompanies.map((company) => company.id),
+          );
           for (const c of scoredCompanies) {
             // 该 (icpId, company) 的既有 Lead——资格门① 写在这里（fitVerdict/fitReasons），是 CandidateAssessment。
             // 权威 Fit 来自**本 ICP 的 Lead**（不再读 canonical，那是「上一个判定该公司的 ICP」的值 → 串 ICP 的根 bug）。
@@ -247,6 +254,9 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
                 decisions: { where: { action: 'reject' }, select: { id: true }, take: 1 },
               },
             });
+            // Run 2.0 预筛淘汰、快扫/深判 mismatch、L0 门控拦截或 NOT_FIT 判定未建 Lead 的公司，
+            // 评分阶段绝不得把它们复活进 needs_review。
+            if (existing === null && eliminatedCompanyIds.has(c.id)) continue;
             const authoritativeFit = (existing?.fitVerdict ?? null) as 'match' | 'weak' | 'mismatch' | null;
 
             // 第五门：这次命中且未被人工清 → sanctionsHold（queue 强制 sanctions_hold）。这次没有命中时，
@@ -282,11 +292,7 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
                 revenueUsd: c.revenueUsd,
                 attributes: c.attributes as Record<string, unknown> | null,
                 status: c.status,
-                contacts: c.contacts.map((ct) => ({
-                  title: ct.title,
-                  seniority: ct.seniority,
-                  contactPoints: ct.contactPoints.map((p) => ({ type: p.type, status: p.status })),
-                })),
+                contacts: mapContactsForScoring(c.contacts),
                 companyContactPoints: reachableCompanyContactPoints(c.companyContactPoints, suppressions, c).map(
                   (p) => ({ kind: p.kind, status: p.status }),
                 ),
@@ -299,12 +305,7 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
             );
             // ch08 §3.1.12：陈旧名单不得自动放行——熔断档全进 sanctions_hold（禁联优先级更高，保留，
             // suppressed 是更强的法律状态）；降级档不得进 recommended。
-            let queue = result.queue;
-            if (freshness?.blocked && queue !== 'suppressed') {
-              queue = 'sanctions_hold';
-            } else if (freshness?.stale && queue === 'recommended') {
-              queue = 'needs_review';
-            }
+            const queue = applySanctionsFreshnessToQueue(result.queue, freshness);
             const status =
               queue === 'suppressed' ? 'SUPPRESSED' : queue === 'rejected' ? 'REJECTED' : 'REVIEW';
             // ruleVersion：这次计分用的规则版本。LeadQualified 快照读它，而不是决策时的代码常量——
@@ -477,3 +478,36 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
 }
 
 export type QualifyActivities = ReturnType<typeof createQualifyActivities>;
+
+function mapContactsForScoring(
+  contacts: ReadonlyArray<{
+    title: string | null;
+    seniority: string | null;
+    contactPoints: ReadonlyArray<{
+      type: string;
+      status: string;
+      sourceType?: string | null;
+      verificationMethod?: string | null;
+    }>;
+  }>,
+) {
+  return contacts.map((ct) => ({
+    title: ct.title,
+    seniority: ct.seniority,
+    contactPoints: ct.contactPoints.map((p) => ({
+      type: p.type,
+      status: p.status,
+      sourceType: p.sourceType ?? null,
+      verificationMethod: p.verificationMethod ?? null,
+    })),
+  }));
+}
+
+function applySanctionsFreshnessToQueue<Q extends string>(
+  queue: Q,
+  freshness?: { blocked?: boolean; stale?: boolean },
+): Q | 'sanctions_hold' | 'needs_review' {
+  if (freshness?.blocked && queue !== 'suppressed') return 'sanctions_hold';
+  if (freshness?.stale && queue === 'recommended') return 'needs_review';
+  return queue;
+}
