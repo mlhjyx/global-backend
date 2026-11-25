@@ -292,16 +292,7 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
                 revenueUsd: c.revenueUsd,
                 attributes: c.attributes as Record<string, unknown> | null,
                 status: c.status,
-                contacts: c.contacts.map((ct) => ({
-                  title: ct.title,
-                  seniority: ct.seniority,
-                  contactPoints: ct.contactPoints.map((p) => ({
-                    type: p.type,
-                    status: p.status,
-                    sourceType: (p as { sourceType?: string | null }).sourceType ?? null,
-                    verificationMethod: (p as { verificationMethod?: string | null }).verificationMethod ?? null,
-                  })),
-                })),
+                contacts: mapContactsForScoring(c.contacts),
                 companyContactPoints: reachableCompanyContactPoints(c.companyContactPoints, suppressions, c).map(
                   (p) => ({ kind: p.kind, status: p.status }),
                 ),
@@ -314,12 +305,7 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
             );
             // ch08 §3.1.12：陈旧名单不得自动放行——熔断档全进 sanctions_hold（禁联优先级更高，保留，
             // suppressed 是更强的法律状态）；降级档不得进 recommended。
-            let queue = result.queue;
-            if (freshness?.blocked && queue !== 'suppressed') {
-              queue = 'sanctions_hold';
-            } else if (freshness?.stale && queue === 'recommended') {
-              queue = 'needs_review';
-            }
+            const queue = applySanctionsFreshnessToQueue(result.queue, freshness);
             const status =
               queue === 'suppressed' ? 'SUPPRESSED' : queue === 'rejected' ? 'REJECTED' : 'REVIEW';
             // ruleVersion：这次计分用的规则版本。LeadQualified 快照读它，而不是决策时的代码常量——
@@ -492,3 +478,36 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
 }
 
 export type QualifyActivities = ReturnType<typeof createQualifyActivities>;
+
+function mapContactsForScoring(
+  contacts: ReadonlyArray<{
+    title: string | null;
+    seniority: string | null;
+    contactPoints: ReadonlyArray<{
+      type: string;
+      status: string;
+      sourceType?: string | null;
+      verificationMethod?: string | null;
+    }>;
+  }>,
+) {
+  return contacts.map((ct) => ({
+    title: ct.title,
+    seniority: ct.seniority,
+    contactPoints: ct.contactPoints.map((p) => ({
+      type: p.type,
+      status: p.status,
+      sourceType: p.sourceType ?? null,
+      verificationMethod: p.verificationMethod ?? null,
+    })),
+  }));
+}
+
+function applySanctionsFreshnessToQueue<Q extends string>(
+  queue: Q,
+  freshness?: { blocked?: boolean; stale?: boolean },
+): Q | 'sanctions_hold' | 'needs_review' {
+  if (freshness?.blocked && queue !== 'suppressed') return 'sanctions_hold';
+  if (freshness?.stale && queue === 'recommended') return 'needs_review';
+  return queue;
+}

@@ -29,16 +29,20 @@ export function throwIfActivityCancelled(context: Context | null, reason = 'ACTI
   }
 }
 
+export interface ActivityHeartbeatHandle {
+  readonly context: Context | null;
+  checkpoint(step: string): void;
+  stop(): void;
+}
+
 /**
- * Wraps a long-running Temporal activity with periodic heartbeats and explicit
- * checkpoint cancellation checks so parent workflow cancellation reaches the
- * worker promptly instead of letting child activities leak RESERVED budget rows.
+ * Starts periodic Temporal heartbeats and returns a handle with explicit cancellation
+ * checkpoints plus a `stop()` cleanup method for `try { ... } finally { hb.stop(); }`.
  */
-export async function withActivityHeartbeat<T>(
+export function startActivityHeartbeat(
   details: Readonly<Record<string, unknown>>,
-  fn: (context: Context | null, checkpoint: (step: string) => void) => Promise<T>,
   intervalMs: number = DEFAULT_HEARTBEAT_INTERVAL_MS,
-): Promise<T> {
+): ActivityHeartbeatHandle {
   const context = currentActivityContext();
   let lastStep = 'start';
   const checkpoint = (step: string): void => {
@@ -56,9 +60,29 @@ export async function withActivityHeartbeat<T>(
         }, intervalMs)
       : null;
   timer?.unref?.();
+  return {
+    context,
+    checkpoint,
+    stop: () => {
+      if (timer) clearInterval(timer);
+    },
+  };
+}
+
+/**
+ * Wraps a long-running Temporal activity with periodic heartbeats and explicit
+ * checkpoint cancellation checks so parent workflow cancellation reaches the
+ * worker promptly instead of letting child activities leak RESERVED budget rows.
+ */
+export async function withActivityHeartbeat<T>(
+  details: Readonly<Record<string, unknown>>,
+  fn: (context: Context | null, checkpoint: (step: string) => void) => Promise<T>,
+  intervalMs: number = DEFAULT_HEARTBEAT_INTERVAL_MS,
+): Promise<T> {
+  const hb = startActivityHeartbeat(details, intervalMs);
   try {
-    return await fn(context, checkpoint);
+    return await fn(hb.context, hb.checkpoint);
   } finally {
-    if (timer) clearInterval(timer);
+    hb.stop();
   }
 }

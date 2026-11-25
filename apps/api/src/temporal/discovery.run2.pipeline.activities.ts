@@ -96,7 +96,11 @@ import { corroborateCompanyBeforeFit } from '../discovery/run2/corroboration-enr
 import { scopeIndependentEnrichment } from '../discovery/enrichment-identity';
 import type { FailureStage } from '../discovery/judgment/failure-codes';
 import { withClassifiedFailure } from './pipeline-failure-activity';
-import { isActivityCancelledError, withActivityHeartbeat } from './activity-heartbeat';
+import {
+  isActivityCancelledError,
+  startActivityHeartbeat,
+  withActivityHeartbeat,
+} from './activity-heartbeat';
 import { revisableProvisionalLeadWhere } from '../discovery/run2/pool';
 
 export interface CompanyPipelineActivityInput {
@@ -138,6 +142,15 @@ function isRunLevelPipelineFailure(error: unknown): boolean {
 function describeSoftFailure(error: unknown): string {
   if (error instanceof Error) return `${error.name}: ${error.message.slice(0, 200)}`;
   return String(error).slice(0, 200);
+}
+
+function shouldRethrowSignalEnricherError(error: unknown): boolean {
+  return (
+    isActivityCancelledError(error) ||
+    isExecutionControlError(error) ||
+    error instanceof BudgetExceededError ||
+    error instanceof BudgetOperationReplayError
+  );
 }
 
 export function createRun2PipelineActivities(deps: {
@@ -616,9 +629,8 @@ export function createRun2PipelineActivities(deps: {
       provider: string | null;
       skipped?: string;
     }> {
-      return withActivityHeartbeat(
-        { stage: 'signals', runId: args.runId, companyId: args.companyId },
-        async (_activityCtx, checkpoint) => {
+      const hb = startActivityHeartbeat({ stage: 'signals', runId: args.runId, companyId: args.companyId });
+      try {
       const binding = await ensureRunBudget(args);
       const enrichers = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
         deps.providers.routeSignalEnrichment(tx as never),
@@ -664,7 +676,7 @@ export function createRun2PipelineActivities(deps: {
       const hits: Array<{ key: string; result: EnrichmentResult }> = [];
       let subjectDenied = false;
       for (const enricher of enrichers) {
-        checkpoint(`enricher:${enricher.key}`);
+        hb.checkpoint(`enricher:${enricher.key}`);
         const prev = existing[enricher.key] as { _ts?: string } | undefined;
         if (prev?._ts && nowMs - Date.parse(prev._ts) < SIGNAL_TTL_MS) continue;
         if (!(await mayUse(args.workspaceId, args.companyId))) {
@@ -686,23 +698,16 @@ export function createRun2PipelineActivities(deps: {
           );
           if (result.matched) hits.push({ key: enricher.key, result });
         } catch (error) {
-          if (isActivityCancelledError(error)) throw error;
+          if (shouldRethrowSignalEnricherError(error)) throw error;
           if (artifactSubjectSkipReason(error)) {
             subjectDenied = true;
             break;
           }
-          if (isExecutionControlError(error)) throw error;
           if (isPublicHttpTransportFailure(error)) {
             console.warn(
               `[run2-pipeline] signal ${enricher.key} read company ${args.companyId} failed (${String((error as { code?: unknown }).code ?? 'UNKNOWN')}); skipping this source`,
             );
             continue;
-          }
-          if (
-            error instanceof BudgetExceededError ||
-            error instanceof BudgetOperationReplayError
-          ) {
-            throw error;
           }
           /* 单信号源失败不影响其余 */
         }
@@ -726,8 +731,9 @@ export function createRun2PipelineActivities(deps: {
         provider: committed.length ? committed.join('+') : null,
         ...(subjectDenied ? { skipped: 'suppressed' } : {}),
       };
-        },
-      );
+      } finally {
+        hb.stop();
+      }
     },
 
     /** 联系人：单公司决策人发现 + 可选邮箱补全（M3 双闸语义不变）。 */

@@ -560,9 +560,8 @@ export class PublicWebDiscoveryProvider
       pages.push({ url: base, text: homeText });
       const candidates = legalPageCandidates(base, extractSameSiteLinks(homeText, base), {
         maxPages: MAX_PUBLIC_WEB_CONTACT_LINKED_PAGES,
-      });
+      }).filter((candidate) => !isPdfDocumentUrl(candidate.url));
       for (const candidate of candidates) {
-        if (isPdfDocumentUrl(candidate.url)) continue;
         try {
           const rendered = await render(candidate.url);
           if (rendered.data.robotsBlocked || isCrawl4aiRenderEmptyHtml(rendered.data.html)) {

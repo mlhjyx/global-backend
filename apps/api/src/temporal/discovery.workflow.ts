@@ -77,6 +77,38 @@ interface DiscoveryRunOutcome {
   stats: Record<string, unknown>;
 }
 
+function summarizeRun2Outcome(input: {
+  quick: { judged: number; failed: number; skipped: number; ruleFallback: number };
+  deepSummary: { failed: number; skipped: number };
+  deepTargetCount: number;
+  elapsedMinutes: number;
+  discoveryBudgetTruncated: boolean;
+  prefilterCandidates: number;
+}): { status: DiscoveryRunOutcome['status']; alerts: string[] } {
+  const failureRate =
+    input.deepTargetCount > 0
+      ? (input.deepSummary.failed + input.deepSummary.skipped + input.quick.failed) / input.deepTargetCount
+      : 0;
+  const alerts: string[] = [];
+  if (input.discoveryBudgetTruncated) alerts.push('budget_exhausted');
+  if (failureRate > 0.3) alerts.push('failure_rate_high');
+  if (input.elapsedMinutes > 30) alerts.push('duration_exceeded');
+  let status: DiscoveryRunOutcome['status'] = 'DONE';
+  if (
+    input.quick.failed > 0 ||
+    input.quick.skipped > 0 ||
+    input.quick.ruleFallback > 0 ||
+    input.deepSummary.failed > 0 ||
+    input.deepSummary.skipped > 0
+  ) {
+    status = 'PARTIAL';
+  }
+  if (input.quick.judged === 0) {
+    status = input.prefilterCandidates === 0 ? 'PARTIAL' : 'FAILED';
+  }
+  return { status, alerts };
+}
+
 function invalidAuthorityInput(): never {
   throw ApplicationFailure.nonRetryable(
     'EXECUTION_BUDGET_WORKFLOW_INPUT_INVALID',
@@ -630,27 +662,14 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
       }
       // M0⑥ 告警：预算耗尽 / 失败率 >30% / 超过 30 分钟未完成 → stats.alerts（站内通知与运维共用）。
       const elapsed = await acts.runElapsedMinutes({ workspaceId, runId });
-      const deepTargetCount = deepTargets.companyIds.length;
-      const failureRate =
-        deepTargetCount > 0 ? (deepSummary.failed + deepSummary.skipped + quick.failed) / deepTargetCount : 0;
-      const alerts: string[] = [];
-      if (discoveryBudgetTruncated) alerts.push('budget_exhausted');
-      if (failureRate > 0.3) alerts.push('failure_rate_high');
-      if (elapsed.minutes > 30) alerts.push('duration_exceeded');
-      // 空池、或粗判全部失败 → FAILED（本次 run 没有可用名单）；有失败/跳过/规则兜底/深挖未完成 → PARTIAL。
-      let quickStatus: DiscoveryRunOutcome['status'] = 'DONE';
-      if (
-        quick.failed > 0 ||
-        quick.skipped > 0 ||
-        quick.ruleFallback > 0 ||
-        deepSummary.failed > 0 ||
-        deepSummary.skipped > 0
-      ) {
-        quickStatus = 'PARTIAL';
-      }
-      if (quick.judged === 0) {
-        quickStatus = (run2Prefilter?.candidates ?? 0) === 0 ? 'PARTIAL' : 'FAILED';
-      }
+      const { status: quickStatus, alerts } = summarizeRun2Outcome({
+        quick,
+        deepSummary,
+        deepTargetCount: deepTargets.companyIds.length,
+        elapsedMinutes: elapsed.minutes,
+        discoveryBudgetTruncated,
+        prefilterCandidates: run2Prefilter?.candidates ?? 0,
+      });
       outcome = {
         status: quickStatus,
         stats: {
