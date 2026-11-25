@@ -20,6 +20,7 @@ export type DiscoveryCompanyLineageProviderKey =
   | 'opencorporates'
   | 'companies_house_registry'
   | 'registry_frame'
+  | 'channel_catalog'
   | 'model_web_search';
 
 export type DiscoveryCompanyReceiptAttemptV1 = Readonly<{
@@ -131,6 +132,11 @@ const PROVIDER_RECEIPT_CONTRACT = Object.freeze({
   registry_frame: Object.freeze({
     producerId: 'registry.query',
     resultSchema: 'registry-query/v1',
+  }),
+  // Batch 1.4-B（local_query 变体）：零出网本地已审渠道库 `source_channel_record` 枚举。
+  channel_catalog: Object.freeze({
+    producerId: 'channel_catalog.query',
+    resultSchema: 'channel-catalog-query/v1',
   }),
   // WEB-1 模型联网搜索：血缘回执来自结构确认模型的持久投影（任务即 producer），
   // 探索环的搜索工具回执只是 auxiliary——搜索工具本身被 public_web/directory 共用，

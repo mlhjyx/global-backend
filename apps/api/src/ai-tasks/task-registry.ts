@@ -336,7 +336,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     id: 'discovery.extract_company',
     // PublicWebDiscoveryProvider 以本契约身份经 Broker 搜索（收口②：白名单真实生效）。
     // G3（2026-09-24）：发现阶段只用搜索结果判站，建档前不抓页面，故不再允许 crawl4ai.fetch。
-    allowedTools: ['searxng.search', 'serper.search', 'exa.search', 'google_places.search'],
+    allowedTools: ['searxng.search', 'serper.search', 'brave.search', 'exa.search', 'google_places.search'],
     maxCostCents: 3,
     maxOutputTokens: REASONING_TASK_MAX_OUTPUT_TOKENS,
     timeoutMs: 180000,
@@ -406,8 +406,8 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
 
   'discovery.web_search_candidates': {
     id: 'discovery.web_search_candidates',
-    // 获客通路 A：模型规划检索词并通过 web_search 工具搜索（SearXNG / DeepSeek / Serper / Exa）。
-    allowedTools: ['searxng.search', 'deepseek.search', 'serper.search', 'exa.search'],
+    // 获客通路 A：模型规划检索词并通过 web_search 工具搜索（SearXNG / DeepSeek / Serper / Brave / Exa）。
+    allowedTools: ['searxng.search', 'deepseek.search', 'serper.search', 'brave.search', 'exa.search'],
     maxCostCents: 5,
     // 结构确认要逐个核对探索候选与证据：输出预算被推理吃满时 deepseek-flash 会
     // finish=length 且 content 为空（STRUCTURED_OUTPUT_EMPTY_TRUNCATED，2026-11-10 run
@@ -500,7 +500,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
   'discovery.extract_list': {
     id: 'discovery.extract_list',
     // DirectoryDiscoveryProvider 以本契约身份经 Broker 搜索/抓取（收口②）。
-    allowedTools: ['searxng.search', 'serper.search', 'crawl4ai.fetch'],
+    allowedTools: ['searxng.search', 'serper.search', 'brave.search', 'crawl4ai.fetch'],
     maxCostCents: 5,
     maxOutputTokens: REASONING_TASK_MAX_OUTPUT_TOKENS,
     timeoutMs: 180000,

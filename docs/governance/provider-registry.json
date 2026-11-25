@@ -689,6 +689,39 @@
       ]
     },
     {
+      "key": "channel_catalog",
+      "status": "IMPLEMENTED",
+      "source_classes": [
+        "industry_data"
+      ],
+      "purpose": "Zero-egress discovery over platform-approved trade fair, association, and directory enterprise records stored in source_channel_record (reviewStatus=APPROVED, channel.status=ENABLED). Maps company-level attributes only and excludes contact PII.",
+      "taxonomy": [
+        "approved channel catalog",
+        "trade fair exhibitor directory",
+        "country ISO2",
+        "industry keywords"
+      ],
+      "license": {
+        "classification": "public",
+        "note": "Reads only platform-reviewed records from ENABLED channels; downstream evidence retains public/licensed provenance without copying personal contact fields."
+      },
+      "personal_data_class": "COMPANY_ONLY",
+      "default_enablement": "DISABLED",
+      "call_gates": [
+        "data_provider_status",
+        "provider_env_switch"
+      ],
+      "test_paths": [
+        "apps/api/src/discovery/providers/channel-catalog.provider.spec.ts"
+      ],
+      "evidence_refs": [
+        {
+          "kind": "TEST_ANCHOR",
+          "path": "apps/api/src/discovery/providers/channel-catalog.provider.spec.ts"
+        }
+      ]
+    },
+    {
       "key": "openstreetmap",
       "status": "IMPLEMENTED",
       "source_classes": [

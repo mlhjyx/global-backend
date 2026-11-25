@@ -28,6 +28,7 @@ import {
   ENRICH_COMPANY_CONCURRENCY,
   ENRICH_SOFT_DEADLINE_MS,
   MAX_GLEIF_FETCHES_PER_COMPANY,
+  MAX_GOOGLE_PLACES_SEARCHES_PER_QUERY,
   MAX_PUBLIC_WEB_CONTACT_LINKED_PAGES,
   MAX_PUBLIC_WEB_DOMAINS_PER_QUERY,
   MAX_PUBLIC_WEB_SEARCHES_PER_QUERY,
@@ -60,6 +61,7 @@ import {
 } from '../discovery/model-web-search/model-web-search';
 import { deepseekSearchTool } from '../tools/deepseek-tools';
 import {
+  braveSearchTool,
   exaSearchTool,
   googlePlacesSearchTool,
   serperSearchTool,
@@ -247,11 +249,16 @@ function discoveryRunEnvelope(
           queries * MODEL_WEB_SEARCH_MAX_TOOL_CALLS,
       ),
       tool(
+        contract(braveSearchTool),
+        queries * (MAX_PUBLIC_WEB_SEARCHES_PER_QUERY + MAX_DIRECTORY_SEARCHES_PER_QUERY) +
+          queries * MODEL_WEB_SEARCH_MAX_TOOL_CALLS,
+      ),
+      tool(
         contract(exaSearchTool),
         queries * MAX_PUBLIC_WEB_SEARCHES_PER_QUERY +
           queries * MODEL_WEB_SEARCH_MAX_TOOL_CALLS,
       ),
-      tool(contract(googlePlacesSearchTool), singleSearches),
+      tool(contract(googlePlacesSearchTool), queries * MAX_GOOGLE_PLACES_SEARCHES_PER_QUERY),
       tool(
         contract(crawl4aiFetchTool),
         queries * directoryPages +

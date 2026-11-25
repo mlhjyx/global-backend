@@ -148,6 +148,8 @@ describe('DiscoveryProviderRegistry SourceClass governance', () => {
       // 公司血缘（零出网=无 durable 回执），执行面等 local_query 变体获批
       // （design: docs/superpowers/plans/2026-11-09-registry-frame-local-lineage.md）。
       { sourceClass: 'company_registry', providerKey: 'registry_frame', hasCompanyLineage: false },
+      // Batch 1.4-B：本地已审渠道库枚举（零出网零成本；CHANNEL_CATALOG_PROVIDER=on 时声明血缘）。
+      { sourceClass: 'industry_data', providerKey: 'channel_catalog', hasCompanyLineage: false },
     ]);
     // Contact, email and enrichment adapters are never plan query sources.
     expect(sources.map((source) => source.providerKey)).not.toEqual(

@@ -111,6 +111,16 @@ const PROVIDER_KEYS: Readonly<Record<string, readonly string[]>> =
       "name",
       "provenance",
     ],
+    channel_catalog: [
+      "attributes",
+      "country",
+      "domain",
+      "externalId",
+      "industry",
+      "license",
+      "name",
+      "provenance",
+    ],
   });
 const SHA256 = /^[0-9a-f]{64}$/u;
 const DOMAIN =
@@ -473,6 +483,41 @@ function normalizeModelWebSearchAttributes(
   };
 }
 
+function normalizeChannelCatalogAttributes(input: RawJsonRecord): RawJsonRecord | null {
+  if (
+    !exactKeys(input, ["channel_id", "record_id", "source_class"]) ||
+    typeof input.channel_id !== "string" ||
+    typeof input.record_id !== "string" ||
+    input.source_class !== "industry_data"
+  ) {
+    return null;
+  }
+  return {
+    channel_id: input.channel_id,
+    record_id: input.record_id,
+    source_class: input.source_class,
+  };
+}
+
+function normalizeCompaniesHouseRegistryAttributes(input: RawJsonRecord): RawJsonRecord | null {
+  // 只落公司字段（注册号/状态）；OGL 署名与许可留在 provider 载荷（field_evidence.license 承载许可）。
+  if (!exactKeys(input, ["ch_registry"])) return null;
+  const ch = record(input.ch_registry);
+  if (
+    !ch ||
+    !keysWithin(ch, ["attribution", "company_number", "company_status"])
+  )
+    return null;
+  return {
+    ch_registry: Object.fromEntries(
+      [
+        ["company_number", ch.company_number],
+        ["company_status", ch.company_status],
+      ].flatMap(([key, item]) => (item == null ? [] : [[key, item]])),
+    ),
+  };
+}
+
 function normalizeAttributes(
   providerKey: string,
   value: unknown,
@@ -581,6 +626,8 @@ function normalizeAttributes(
   }
   if (providerKey === "model_web_search")
     return normalizeModelWebSearchAttributes(input);
+  if (providerKey === "channel_catalog")
+    return normalizeChannelCatalogAttributes(input);
   if (providerKey === "ted") {
     if (!exactKeys(input, ["ted"])) return null;
     const ted = record(input.ted);
@@ -699,24 +746,8 @@ function normalizeAttributes(
       ),
     };
   }
-  if (providerKey === "companies_house_registry") {
-    // 只落公司字段（注册号/状态）；OGL 署名与许可留在 provider 载荷（field_evidence.license 承载许可）。
-    if (!exactKeys(input, ["ch_registry"])) return null;
-    const ch = record(input.ch_registry);
-    if (
-      !ch ||
-      !keysWithin(ch, ["attribution", "company_number", "company_status"])
-    )
-      return null;
-    return {
-      ch_registry: Object.fromEntries(
-        [
-          ["company_number", ch.company_number],
-          ["company_status", ch.company_status],
-        ].flatMap(([key, item]) => (item == null ? [] : [[key, item]])),
-      ),
-    };
-  }
+  if (providerKey === "companies_house_registry")
+    return normalizeCompaniesHouseRegistryAttributes(input);
   if (providerKey === "public_web") {
     if (
       !keysWithin(input, [

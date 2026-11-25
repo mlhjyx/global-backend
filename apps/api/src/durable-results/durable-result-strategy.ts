@@ -46,6 +46,7 @@ const typedProjectionSchemaValues = [
   "deepseek-search/v1",
   "deepseek-fetch/v1",
   "serper-search/v1",
+  "brave-search/v1",
   "exa-search/v1",
   "google-places-search/v1",
   "outreach-first-contact-draft/v1",

@@ -67,6 +67,8 @@ export const SYSTEM_PLANNED_SOURCE_KEYS: ReadonlySet<string> = new Set(['ted', '
 const SOURCE_ROUTE_PRIORITY: Readonly<Record<string, number>> = Object.freeze({
   // 本地注册库 frame 枚举：零出网零成本，裁剪时最先保留（ch03 T3-09）。
   registry_frame: 5,
+  // 本地已审渠道库（source_channel_record）：零出网零成本，紧随 registry_frame 优先保留。
+  channel_catalog: 6,
   wikidata: 10,
   // OpenCorporates 注册库聚合（获客 vNext W4）：结构化源，与 wikidata 同档。
   opencorporates: 10,
@@ -186,6 +188,8 @@ export const PLANNER_SOURCE_GUIDE: Readonly<Record<string, string>> = Object.fre
     'Companies House 官方注册处（仅英国 GB）：按 keywords 检索 GB 注册实体，返回公司名/注册号/状态；country 必须含英国才路由',
   registry_frame:
     '本地注册库 frame 枚举（零出网零成本）：按 country/scheme/nace_prefix/employee_band/legal_form/status/postal_prefix 过滤已装载的官方注册实体',
+  channel_catalog:
+    '本地已审渠道库（source_channel_record，零出网零成本）：按 country、filters.industry 与 keywords 检索已通过审核的展会参展商与协会名录企业',
   openstreetmap:
     'OpenStreetMap，按 filters.industry（映射成工业标签）+ country/region/area_name 枚举工厂',
   trade_fair:

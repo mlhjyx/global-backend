@@ -556,6 +556,7 @@ const REPRESENTATIVE_LEGAL_BOUNDARY_FIXTURES: readonly ProjectionFixture[] = [
   { toolId: 'deepseek.search', schema: 'deepseek-search/v1', raw: DEEPSEEK_SEARCH_RAW },
   { toolId: 'deepseek.fetch', schema: 'deepseek-fetch/v1', raw: DEEPSEEK_FETCH_RAW },
   { toolId: 'serper.search', schema: 'serper-search/v1', raw: SERPER_SEARCH_RAW },
+  { toolId: 'brave.search', schema: 'brave-search/v1', raw: SERPER_SEARCH_RAW },
   { toolId: 'exa.search', schema: 'exa-search/v1', raw: EXA_SEARCH_RAW },
   { toolId: 'google_places.search', schema: 'google-places-search/v1', raw: GOOGLE_PLACES_RAW },
 ];
@@ -803,6 +804,12 @@ const EXPECTED_BOUNDS: Readonly<Record<string, JsonRecord>> = {
     '$.data.results[].url.maxLength': 2048,
     '$.data.results[].title.maxLength': 2000,
   },
+  'brave-search/v1': {
+    ...COMMON_RESULT_BOUNDS,
+    '$.data.results.maxItems': 20,
+    '$.data.results[].url.maxLength': 2048,
+    '$.data.results[].title.maxLength': 2000,
+  },
   'exa-search/v1': {
     ...COMMON_RESULT_BOUNDS,
     '$.data.results.maxItems': 20,
@@ -924,7 +931,7 @@ describe('closed catalog Tool result projections', () => {
       'wikidata.entity', 'gleif.fetch', 'companies_house.search', 'inpi_rne.search',
       'google_patents.search', 'tradefair.algolia', 'mapyourshow.fetch',
       'deepseek.search', 'deepseek.fetch',
-      'serper.search', 'exa.search', 'google_places.search',
+      'serper.search', 'brave.search', 'exa.search', 'google_places.search',
     ]);
     expect(CATALOG_RESULT_PROJECTION_SCHEMAS).toEqual({
       'searxng.search': 'searxng-search/v1',
@@ -942,6 +949,7 @@ describe('closed catalog Tool result projections', () => {
       'deepseek.search': 'deepseek-search/v1',
       'deepseek.fetch': 'deepseek-fetch/v1',
       'serper.search': 'serper-search/v1',
+      'brave.search': 'brave-search/v1',
       'exa.search': 'exa-search/v1',
       'google_places.search': 'google-places-search/v1',
     });

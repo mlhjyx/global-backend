@@ -5,6 +5,8 @@ import {
 } from '../durable-results/catalog-result-projections';
 import { TypedProjectionRegistry } from '../durable-results/typed-projection.registry';
 import {
+  braveSearchTool,
+  createBraveSearchTool,
   createExaSearchTool,
   createGooglePlacesSearchTool,
   createSerperSearchTool,
@@ -157,9 +159,50 @@ describe('L0 search provider tools (serper.search / exa.search / google_places.s
     });
   });
 
-  it('registers all three tools through registerBuiltinTools', () => {
+  it('brave.search degrades cleanly when key absent, strips LinkedIn /in/, and projects validly', async () => {
+    const ctx: ToolContext = { workspaceId: 'ws', purpose: 'discovery' };
+    const unconfigured = createBraveSearchTool({
+      braveSearch: vi.fn(),
+      resolveApiKey: () => undefined,
+    });
+    expect(await unconfigured.execute({ query: 'HJT solar EPC' }, ctx)).toEqual({
+      data: { results: [] },
+      costCents: 0,
+      degraded: true,
+    });
+
+    const beforePhysicalWire = vi.fn(async () => undefined);
+    const configured = createBraveSearchTool({
+      resolveApiKey: () => 'brave-key',
+      braveSearch: vi.fn(async (_input, deps) => {
+        await deps?.beforeRequest?.();
+        return {
+          billed: true,
+          hits: [
+            { url: 'https://www.linkedin.com/in/mario-rossi', title: 'Mario Rossi' },
+            { url: 'https://coesaenergy.it/fotovoltaico', title: 'Coesa Energy S.r.l.' },
+          ],
+        };
+      }),
+    });
+    const res = await configured.execute(
+      { query: 'fotovoltaico EPC Italia', country: 'IT', searchLang: 'it' },
+      { workspaceId: 'ws', purpose: 'discovery', beforePhysicalWire },
+    );
+    expect(beforePhysicalWire).toHaveBeenCalledTimes(1);
+    expect(res).toEqual({
+      data: { results: [{ url: 'https://coesaenergy.it/fotovoltaico', title: 'Coesa Energy S.r.l.' }] },
+      costCents: 1,
+    });
+    expect(
+      projectionRegistry().project(CATALOG_RESULT_PROJECTION_SCHEMAS['brave.search'], res).data,
+    ).toEqual(res);
+  });
+
+  it('registers all four tools through registerBuiltinTools', () => {
     const registry = registerBuiltinTools(new ToolRegistry());
     expect(registry.get('serper.search')).toBe(serperSearchTool);
+    expect(registry.get('brave.search')).toBe(braveSearchTool);
     expect(registry.get('exa.search')).toBe(exaSearchTool);
     expect(registry.get('google_places.search')).toBe(googlePlacesSearchTool);
   });

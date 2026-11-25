@@ -37,7 +37,11 @@ import {
 import type { SearxngSearchOutput } from '../../tools/builtin-tools';
 import type { SearchProviderOutput } from '../../tools/search-provider-tools';
 import { resolveDeepSeekApiKey } from '../../adapters/deepseek-tools';
-import { resolveExaApiKey, resolveSerperApiKey } from '../../adapters/search-providers';
+import {
+  resolveBraveSearchApiKey,
+  resolveExaApiKey,
+  resolveSerperApiKey,
+} from '../../adapters/search-providers';
 
 const PROVIDER_KEY = 'model_web_search' as const;
 /** 结构确认任务的契约字面量（execution-authority 策略要求 getTask 用字面量或同文件单一声明常量）。 */
@@ -89,13 +93,19 @@ export class ModelWebSearchDiscoveryProvider implements CompanyDiscoveryAdapter 
     return (this.env.MODEL_WEB_SEARCH_PROVIDER ?? '').trim() === 'on';
   }
 
-  private executor(): 'searxng' | 'deepseek' | 'serper' | 'exa' {
+  private executor(): 'searxng' | 'deepseek' | 'serper' | 'brave' | 'exa' {
     const configured = (this.env.MODEL_WEB_SEARCH_EXECUTOR ?? '').trim().toLowerCase();
-    if (configured === 'deepseek' || configured === 'serper' || configured === 'exa') {
+    if (
+      configured === 'deepseek' ||
+      configured === 'serper' ||
+      configured === 'brave' ||
+      configured === 'exa'
+    ) {
       return configured;
     }
     if (configured === 'auto') {
       if (resolveSerperApiKey(this.env)) return 'serper';
+      if (resolveBraveSearchApiKey(this.env)) return 'brave';
       if (resolveExaApiKey(this.env)) return 'exa';
       if (resolveDeepSeekApiKey(this.env)) return 'deepseek';
     }
@@ -147,6 +157,17 @@ export class ModelWebSearchDiscoveryProvider implements CompanyDiscoveryAdapter 
       return async (q) => {
         const res = await broker.invoke<{ query: string }, SearchProviderOutput>(
           'serper.search',
+          { query: q },
+          this.toolCtx(ctx),
+        );
+        const rows = Array.isArray(res.data?.results) ? res.data.results : [];
+        return rows.filter((row) => typeof row?.url === 'string' && row.url.length > 0);
+      };
+    }
+    if (mode === 'brave') {
+      return async (q) => {
+        const res = await broker.invoke<{ query: string }, SearchProviderOutput>(
+          'brave.search',
           { query: q },
           this.toolCtx(ctx),
         );
