@@ -90,20 +90,81 @@ function channelRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
+const writerFor = (p: ReturnType<typeof makePrisma>['prisma']) =>
+  ({
+    $transaction: (cb: (t: unknown) => unknown) => p.withWorkspace('probe', cb as never),
+    $queryRaw: async () => [
+      {
+        currentUser: 'execution_budget_platform_writer_login',
+        sessionUser: 'execution_budget_platform_writer_login',
+        sessionRole: 'none',
+        rolCanLogin: true,
+        rolInherit: true,
+        rolSuper: false,
+        rolBypassRls: false,
+        rolCreateDb: false,
+        rolCreateRole: false,
+        rolReplication: false,
+        memberships: ['execution_budget_platform_writer'],
+      },
+    ],
+  }) as never;
+
 describe('保存即测试（probe）', () => {
   it('未接出网通道时 fail-closed：CHANNEL_TEST_EGRESS_UNAVAILABLE（503）', async () => {
     const { prisma } = makePrisma(channelRow());
-    const service = new ChannelProbeService(prisma as never, resolver, undefined, () => NOW);
+    const service = new ChannelProbeService(prisma as never, resolver, undefined, () => NOW, writerFor(prisma));
     await expect(service.probeChannel(CTX, CHANNEL_ID)).rejects.toMatchObject({
       status: 503,
       response: { error: { code: 'CHANNEL_TEST_EGRESS_UNAVAILABLE' } },
     });
   });
 
+  it('缺 platformWriter 时 fail-closed：PLATFORM_CHANNEL_WRITER_UNAVAILABLE（503）', async () => {
+    const { prisma } = makePrisma(channelRow());
+    const http: ChannelHttpClient = { request: vi.fn() };
+    const service = new ChannelProbeService(prisma as never, resolver, http, () => NOW);
+    await expect(service.probeChannel(CTX, CHANNEL_ID)).rejects.toMatchObject({
+      status: 503,
+      response: { error: { code: 'PLATFORM_CHANNEL_WRITER_UNAVAILABLE' } },
+    });
+    expect(http.request).not.toHaveBeenCalled();
+  });
+
+  it('platformWriter 为 superuser/错角色时 fail-closed（503）', async () => {
+    const { prisma } = makePrisma(channelRow());
+    const http: ChannelHttpClient = { request: vi.fn() };
+    const badWriter = {
+      $transaction: vi.fn(),
+      $queryRaw: vi.fn(async () => [
+        {
+          currentUser: 'global',
+          sessionUser: 'global',
+          sessionRole: 'none',
+          rolCanLogin: true,
+          rolInherit: true,
+          rolSuper: true,
+          rolBypassRls: true,
+          rolCreateDb: true,
+          rolCreateRole: true,
+          rolReplication: true,
+          memberships: [],
+        },
+      ]),
+    };
+    const service = new ChannelProbeService(prisma as never, resolver, http, () => NOW, badWriter as never);
+    await expect(service.probeChannel(CTX, CHANNEL_ID)).rejects.toMatchObject({
+      status: 503,
+      response: { error: { code: 'PLATFORM_CHANNEL_WRITER_UNAVAILABLE' } },
+    });
+    expect(badWriter.$transaction).not.toHaveBeenCalled();
+    expect(http.request).not.toHaveBeenCalled();
+  });
+
   it('非 api 渠道明确不支持（crawl 走平台抓取链，后续波次）', async () => {
     const { prisma } = makePrisma(channelRow({ mode: 'crawl', manifest: null }));
     const http: ChannelHttpClient = { request: vi.fn() };
-    const service = new ChannelProbeService(prisma as never, resolver, http, () => NOW);
+    const service = new ChannelProbeService(prisma as never, resolver, http, () => NOW, writerFor(prisma));
     await expect(service.probeChannel(CTX, CHANNEL_ID)).rejects.toMatchObject({
       status: 409,
       response: { error: { code: 'CHANNEL_TEST_UNSUPPORTED_MODE' } },
@@ -113,7 +174,7 @@ describe('保存即测试（probe）', () => {
   it('api 渠道缺 manifest → CHANNEL_MANIFEST_REQUIRED', async () => {
     const { prisma } = makePrisma(channelRow({ manifest: null, manifestSha256: null }));
     const http: ChannelHttpClient = { request: vi.fn() };
-    const service = new ChannelProbeService(prisma as never, resolver, http, () => NOW);
+    const service = new ChannelProbeService(prisma as never, resolver, http, () => NOW, writerFor(prisma));
     await expect(service.probeChannel(CTX, CHANNEL_ID)).rejects.toMatchObject({
       status: 409,
       response: { error: { code: 'CHANNEL_MANIFEST_REQUIRED' } },
@@ -132,7 +193,7 @@ describe('保存即测试（probe）', () => {
         }),
       ),
     };
-    const service = new ChannelProbeService(prisma as never, resolver, http, () => NOW);
+    const service = new ChannelProbeService(prisma as never, resolver, http, () => NOW, writerFor(prisma));
     const result = await service.probeChannel(CTX, CHANNEL_ID);
     expect(result).toMatchObject({ status: 'SUCCEEDED', recordsFound: 2, pagesFetched: 1 });
     expect(writes.probes[0]).toMatchObject({
@@ -154,7 +215,7 @@ describe('保存即测试（probe）', () => {
   it('失败（401）：probe 行 FAILED、不解除 probe_required、写 PROBE_FAILED、health_state 记 lastErrorCode', async () => {
     const { prisma, writes } = makePrisma(channelRow());
     const http: ChannelHttpClient = { request: vi.fn(async () => response({}, 401)) };
-    const service = new ChannelProbeService(prisma as never, resolver, http, () => NOW);
+    const service = new ChannelProbeService(prisma as never, resolver, http, () => NOW, writerFor(prisma));
     const result = await service.probeChannel(CTX, CHANNEL_ID);
     expect(result).toMatchObject({ status: 'FAILED', errorCode: 'CHANNEL_AUTH_INVALID' });
     expect(writes.probes[0]).toMatchObject({ status: 'FAILED', errorCode: 'CHANNEL_AUTH_INVALID' });
@@ -166,7 +227,7 @@ describe('保存即测试（probe）', () => {
   it('0 产出视为失败（试跑语义）：CHANNEL_SCHEMA_MISMATCH', async () => {
     const { prisma, writes } = makePrisma(channelRow());
     const http: ChannelHttpClient = { request: vi.fn(async () => response({ opportunitiesData: [] })) };
-    const service = new ChannelProbeService(prisma as never, resolver, http, () => NOW);
+    const service = new ChannelProbeService(prisma as never, resolver, http, () => NOW, writerFor(prisma));
     const result = await service.probeChannel(CTX, CHANNEL_ID);
     expect(result).toMatchObject({ status: 'FAILED', errorCode: 'CHANNEL_SCHEMA_MISMATCH', recordsFound: 0 });
     expect(writes.updates[0]).not.toHaveProperty('probeRequired');
@@ -179,7 +240,7 @@ describe('保存即测试（probe）', () => {
       }),
     );
     const http: ChannelHttpClient = { request: vi.fn(async () => response({}, 503)) };
-    const service = new ChannelProbeService(prisma as never, resolver, http, () => NOW);
+    const service = new ChannelProbeService(prisma as never, resolver, http, () => NOW, writerFor(prisma));
     const result = await service.probeChannel(CTX, CHANNEL_ID);
     expect(result.errorCode).toBe('CHANNEL_UPSTREAM_5XX');
     expect(writes.events.map((event) => event.event)).toEqual(expect.arrayContaining(['CIRCUIT_OPEN', 'PROBE_FAILED']));

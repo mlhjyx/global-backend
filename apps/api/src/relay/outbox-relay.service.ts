@@ -36,21 +36,22 @@ import {
   type WorkflowKnobBounds,
 } from "../temporal/discovery.workflow-knobs";
 import {
-  matchesAssetCleanupPayload,
-  parseAssetCleanupCommand,
-} from "../temporal/asset-cleanup.contract";
-import { DiscoveryProviderRegistry } from "../discovery/provider.registry";
-import {
   assertMigrationCompatible,
   RuntimeProcessLeaseService,
 } from "../runtime/runtime-process-lease";
 import { RuntimeAdmissionService } from "../runtime/runtime-admission";
 import { RuntimeReleaseIdentityService } from "../runtime/runtime-release-identity";
 import { completesWithin, settlesWithin } from "../runtime/bounded-settlement";
-import { seedSanctions } from "../sanctions/sanctions-seed";
-import { seedSkillCatalog } from "../skills/skill-catalog.seed";
-import { seedPackCatalog } from "../skills/packs/pack-catalog.seed";
-import { seedAgentCatalog } from "../agents/agent-catalog.seed";
+import {
+  assertScopedDatabasePrincipal,
+  inspectScopedDatabaseUrl,
+  OUTBOX_RELAY_DATABASE_ROLE,
+} from "../runtime/scoped-database-principal";
+import { DEFAULT_EXPECTED_PROVIDER_KEYS, verifyPlatformCatalogsReadOnly } from "../runtime/platform-catalog-verification";
+import { SANCTIONS_SOURCE_SEEDS } from "../sanctions/sanctions-seed";
+import { BUILTIN_SKILLS } from "../skills/generated/builtin-skill-catalog";
+import { BUILTIN_PACKS } from "../skills/packs/generated/builtin-pack-catalog";
+import { BUILTIN_AGENTS } from "../agents/agent-catalog";
 import {
   parseExecutionBudgetBinding,
   type ExecutionBudgetBinding,
@@ -63,7 +64,12 @@ import {
   toEnvelope,
   validateIntegrationEvent,
 } from "./event-registry";
-import { logIntegrationPayloadWarning, qualifyWorkflowArgs } from "./event-payload-helpers";
+import {
+  assertPersonalArtifactCleanupOutboxPayload,
+  logIntegrationPayloadWarning,
+  parseAssetCleanupOutboxCommand,
+  qualifyWorkflowArgs,
+} from "./event-payload-helpers";
 import { OutboxDispatchBackoff, tryWithOutboxAdvisoryLock } from "./outbox-retry-guard";
 
 /** Transactional Outbox relay (ADR-009): DATABASE_URL owner scans across tenants;
@@ -125,7 +131,9 @@ type FetchLike = (
 @Injectable()
 export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger("OutboxRelay");
-  private readonly db: PrismaClient;
+  private readonly db?: PrismaClient;
+  private readonly ownsDb: boolean;
+  private principalVerified = false;
   private readonly fetchFn: FetchLike;
   private timer?: NodeJS.Timeout;
   private running = false;
@@ -165,9 +173,36 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     // every command on the managed Temporal and the 'understanding' queue.
     @Optional() private readonly devFastLane?: DevFastLaneTemporalClient,
   ) {
-    this.db =
-      db ?? new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
+    if (db) {
+      this.db = db;
+      this.ownsDb = false;
+      this.principalVerified = true;
+    } else {
+      const check = inspectScopedDatabaseUrl(
+        "OUTBOX_RELAY_DATABASE_URL",
+        process.env.OUTBOX_RELAY_DATABASE_URL,
+      );
+      if (check.status === "ok") {
+        this.db = new PrismaClient({
+          datasourceUrl: process.env.OUTBOX_RELAY_DATABASE_URL,
+        });
+        this.ownsDb = true;
+      } else {
+        this.db = undefined;
+        this.ownsDb = false;
+        this.logger.error(
+          `outbox relay requires OUTBOX_RELAY_DATABASE_URL (${OUTBOX_RELAY_DATABASE_ROLE}): ${check.code}`,
+        );
+      }
+    }
     this.fetchFn = fetchFn ?? ((url, init) => fetch(url, init));
+  }
+
+  private requireDb(): PrismaClient {
+    if (!this.db) {
+      throw new Error("OUTBOX_RELAY_DATABASE_UNAVAILABLE");
+    }
+    return this.db;
   }
 
   async onModuleInit(): Promise<void> {
@@ -192,6 +227,13 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
 
   async reconnect(): Promise<boolean> {
     if (this.shuttingDown) return false;
+    if (!this.db) {
+      this.readiness = {
+        status: "not_ready",
+        code: "OUTBOX_RELAY_DATABASE_UNAVAILABLE",
+      };
+      return false;
+    }
     if (this.admission && !this.admission.current().admitted) {
       this.readiness = {
         status: "not_ready",
@@ -204,6 +246,14 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     }
     try {
       await this.db.$connect();
+      if (this.ownsDb && !this.principalVerified) {
+        await assertScopedDatabasePrincipal(
+          this.db,
+          OUTBOX_RELAY_DATABASE_ROLE,
+          "OutboxRelayService",
+        );
+        this.principalVerified = true;
+      }
       if (!(await this.migrationCompatible())) return false;
       if (this.shuttingDown) return false;
       if (!this.leaseStartingPublished) {
@@ -235,17 +285,21 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
 
   async initializePlatformState(): Promise<void> {
     assertRuntimeCandidateOperational();
-    // 平台配置播种（data_provider 无 RLS，owner 连接写入）。失败要**大声**：seed 静默失败意味着
-    // 全部 provider 对 registry 路由不可见（信号/富集层运行时 no-op），且环境重置后会无声复发。
-    await new DiscoveryProviderRegistry().seed(this.db);
-    // 制裁名单源 + source_policy seed（第五门，DISABLED；API-only 部署也需登记 source_policy 供 broker 门）。
-    await seedSanctions(this.db);
-    // S0 技能目录 seed（owner 写平台表；版本漂移会大声抛错，不允许带病起服务）。
-    await seedSkillCatalog(this.db);
-    // S1 Pack 目录 seed（同上；仅为尚无平台激活的包补默认激活）。
-    await seedPackCatalog(this.db);
-    // M2 步 9b agent 注册表 seed（同上；目录行缺失即补建，不覆盖 ops 启停）。
-    await seedAgentCatalog(this.db);
+    const db = this.requireDb();
+    // 部署期已通过 seed-platform-catalogs 写入平台目录；运行时仅用 runtime_outbox_relay_worker 做只读就绪校验。
+    await verifyPlatformCatalogsReadOnly(db, {
+      expectedProviderKeys: DEFAULT_EXPECTED_PROVIDER_KEYS,
+      expectedSanctionsKeys: SANCTIONS_SOURCE_SEEDS.map((s) => s.key),
+      expectedSkillVersions: BUILTIN_SKILLS.map((s) => ({
+        skillKey: s.manifest.platform.skillKey,
+        version: s.manifest.platform.version,
+      })),
+      expectedPackVersions: BUILTIN_PACKS.map((p) => ({
+        packKey: p.manifest.packKey,
+        version: p.manifest.version,
+      })),
+      expectedAgentKeys: BUILTIN_AGENTS.map((a) => a.agentKey),
+    });
     // webhook 配置不完整要**大声**：URL 配了但缺 secret / 非 https（非 localhost）→ sink 拒绝启用，
     // 推送通道既不建交付行也不派送——只报一次，不让运维以为推送在跑。
     if (process.env.SAAS_WEBHOOK_URL && !this.webhookEnabled()) {
@@ -298,11 +352,13 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     if (this.leaseStartingAttempted && !this.leaseStartingPublished) {
       await this.atomicTerminalizeUncertainLease();
     }
-    const disconnected = await completesWithin(
-      this.db.$disconnect().catch(() => undefined),
-    );
-    if (!disconnected) {
-      this.logger.error("outbox relay database disconnect timed out");
+    if (this.db) {
+      const disconnected = await completesWithin(
+        this.db.$disconnect().catch(() => undefined),
+      );
+      if (!disconnected) {
+        this.logger.error("outbox relay database disconnect timed out");
+      }
     }
     this.readiness = {
       status: "not_ready",
@@ -353,6 +409,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async migrationCompatible(): Promise<boolean> {
+    if (!this.db) return false;
     if (!this.releaseIdentity) return true;
     try {
       await assertMigrationCompatible(
@@ -374,15 +431,16 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
 
   async tick(): Promise<void> {
     assertRuntimeCandidateOperational();
+    const db = this.requireDb();
     if (this.running) return; // avoid overlapping ticks
     this.running = true;
     try {
-      await tryWithOutboxAdvisoryLock(this.db as never, async () => {
+      await tryWithOutboxAdvisoryLock(db as never, async () => {
         await this.expireDueClaims();
         if (this.shuttingDown) return;
         const laneCommands = this.devFastLaneCommands();
         const coolingIds = this.dispatchBackoff.coolingEventIds();
-        const events = (await this.db.outboxEvent.findMany({
+        const events = (await db.outboxEvent.findMany({
           where: { publishedAt: null, parkedAt: null, ...(coolingIds.length ? { eventId: { notIn: coolingIds } } : {}), ...(laneCommands ? { NOT: laneCommands } : {}), ...candidateWorkspaceWhere() },
           orderBy: { id: "asc" },
           take: BATCH_SIZE,
@@ -434,9 +492,10 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
 
   private async lanePass(laneCommands: LaneCommandFilter): Promise<void> {
     assertCandidateWorkspaceAllowed(laneCommands.workspaceId);
+    const db = this.requireDb();
     const devFastLane = this.devFastLane;
     if (!devFastLane || devFastLane.coolingDown()) return;
-    const events = (await this.db.outboxEvent.findMany({
+    const events = (await db.outboxEvent.findMany({
       where: { publishedAt: null, parkedAt: null, ...laneCommands },
       orderBy: { id: "asc" },
       take: BATCH_SIZE,
@@ -458,17 +517,18 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
    */
   async routeEvent(ev: OutboxEventRecord): Promise<void> {
     assertCandidateWorkspaceAllowed(ev.workspaceId);
+    const db = this.requireDb();
     if (INTERNAL_COMMANDS.has(ev.eventType)) {
       try {
         await this.dispatch(ev);
-        await this.db.outboxEvent.update({
+        await db.outboxEvent.update({
           where: { id: ev.id },
           data: { publishedAt: new Date() },
         });
         this.dispatchBackoff.clear(ev.eventId);
       } catch (err) {
         if (err instanceof NonRetryableOutboxCommandError) {
-          await this.db.outboxEvent.update({
+          await db.outboxEvent.update({
             where: { id: ev.id },
             data: { parkedAt: new Date() },
           });
@@ -487,7 +547,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     }
     if (INTEGRATION_EVENTS.has(ev.eventType)) {
       if (!validateIntegrationEvent(ev)) {
-        await this.db.outboxEvent.update({
+        await db.outboxEvent.update({
           where: { id: ev.id },
           data: { parkedAt: new Date() },
         });
@@ -499,7 +559,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       logIntegrationPayloadWarning(this.logger, ev);
       const sinks = [PULL_SINK, ...(this.webhookEnabled() ? [WEBHOOK_SINK] : [])];
       try {
-        await this.db.$transaction(async (tx) => {
+        await db.$transaction(async (tx) => {
           await tx.outboxDelivery.createMany({
             data: sinks.map((sink) => ({
               workspaceId: ev.workspaceId,
@@ -522,7 +582,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     }
     // 未注册类型：停靠（不标 published——那是假发布；不留在轮询里——那是毒化）。
     try {
-      await this.db.outboxEvent.update({
+      await db.outboxEvent.update({
         where: { id: ev.id },
         data: { parkedAt: new Date() },
       });
@@ -567,7 +627,8 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     if (this.shuttingDown || !this.webhookEnabled()) return;
     const url = process.env.SAAS_WEBHOOK_URL as string;
     const secret = process.env.SAAS_WEBHOOK_SECRET as string;
-    const due = await this.db.outboxDelivery.findMany({
+    const db = this.requireDb();
+    const due = await db.outboxDelivery.findMany({
       where: {
         sink: WEBHOOK_SINK,
         status: "PENDING",
@@ -598,7 +659,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
         await Promise.resolve(res.body?.cancel?.()).catch(() => undefined);
         if (this.shuttingDown) break;
         if (res.ok) {
-          await this.db.outboxDelivery.updateMany({ where: { id: d.id, status: "PENDING" }, data: { status: "ACKED", deliveredAt: attemptNow, ackedAt: attemptNow } });
+          await db.outboxDelivery.updateMany({ where: { id: d.id, status: "PENDING" }, data: { status: "ACKED", deliveredAt: attemptNow, ackedAt: attemptNow } });
           continue;
         }
         await this.recordWebhookFailure(d, `HTTP ${res.status}`, attemptNow);
@@ -619,10 +680,11 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     error: string,
     now: Date,
   ): Promise<void> {
+    const db = this.requireDb();
     const attempts = d.attempts + 1;
     const isDead = attempts >= MAX_WEBHOOK_ATTEMPTS;
     const backoffMs = Math.min(BACKOFF_BASE_MS * 2 ** attempts, BACKOFF_CAP_MS);
-    const r = await this.db.outboxDelivery.updateMany({
+    const r = await db.outboxDelivery.updateMany({
       where: { id: d.id, status: "PENDING", attempts: d.attempts },
       data: {
         attempts,
@@ -642,10 +704,11 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
   /** KNW-003/KNW-009：validUntil 到期的已批准事实 → EXPIRED（约每 60s 扫一次）。 */
   private async expireDueClaims(): Promise<void> {
     assertRuntimeCandidateOperational();
+    const db = this.requireDb();
     this.expireCounter = (this.expireCounter + 1) % 30;
     if (this.expireCounter !== 0) return;
     const now = new Date();
-    const expired = await this.db.claim.findMany({
+    const expired = await db.claim.findMany({
       where: { status: "APPROVED", validUntil: { lt: now }, ...candidateWorkspaceWhere() },
       select: {
         id: true,
@@ -663,7 +726,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       try {
         // 原子成对（E）：CAS 状态翻转与 ClaimExpired 同事务。读后若人工 revoke/
         // re-approve 已推进 status/version，CAS 失手且不伪造过期事件。
-        const changed = await this.db.$transaction(async (tx) => {
+        const changed = await db.$transaction(async (tx) => {
           const update = await tx.claim.updateMany({
             where: {
               id: c.id,
@@ -943,22 +1006,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       await this.startDeletionCommand(ev);
     }
     if (ev.eventType === "PersonalArtifactCleanupRequested") {
-      const payload =
-        ev.payload !== null &&
-        typeof ev.payload === "object" &&
-        !Array.isArray(ev.payload)
-          ? (ev.payload as Record<string, unknown>)
-          : null;
-      if (
-        ev.schemaVersion !== 1 ||
-        !payload ||
-        Reflect.ownKeys(payload).length !== 1 ||
-        payload.deletionRequestId !== ev.aggregateId
-      ) {
-        throw new NonRetryableOutboxCommandError(
-          "personal artifact cleanup payload contract mismatch",
-        );
-      }
+      assertPersonalArtifactCleanupOutboxPayload(ev);
       await this.startWorkflowIdempotent(
         PERSONAL_ARTIFACT_CLEANUP_WORKFLOW,
         {
@@ -975,43 +1023,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       );
     }
     if (ev.eventType === "AssetObjectCleanupRequested") {
-      const payload = (ev.payload ?? {}) as Record<string, unknown>;
-      let command: ReturnType<typeof parseAssetCleanupCommand>;
-      try {
-        if (payload.assetId !== ev.aggregateId) {
-          throw new Error(
-            "cleanup payload assetId must match Outbox aggregateId",
-          );
-        }
-        if (
-          (payload.objectClass === "staging" && ev.schemaVersion !== 1) ||
-          (payload.objectClass === "canonical" && ev.schemaVersion !== 2)
-        ) {
-          throw new Error(
-            "cleanup Outbox schemaVersion does not match objectClass",
-          );
-        }
-        command = parseAssetCleanupCommand({
-          eventId: ev.eventId,
-          workspaceId: ev.workspaceId,
-          assetId: ev.aggregateId,
-          siteId: payload.siteId,
-          objectClass: payload.objectClass,
-          reason: payload.reason,
-          ...(payload.objectClass === "staging"
-            ? { objectKey: payload.objectKey, notBefore: payload.notBefore }
-            : { canonical: payload.canonical, variants: payload.variants }),
-        });
-        if (!matchesAssetCleanupPayload(payload, command)) {
-          throw new Error(
-            "cleanup Outbox payload contains unknown or mismatched fields",
-          );
-        }
-      } catch (error) {
-        throw new NonRetryableOutboxCommandError(
-          error instanceof Error ? error.message : String(error),
-        );
-      }
+      const command = parseAssetCleanupOutboxCommand(ev);
       await this.startWorkflowIdempotent(
         ASSET_OBJECT_CLEANUP_WORKFLOW,
         {

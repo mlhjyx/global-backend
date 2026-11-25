@@ -152,10 +152,10 @@ export class IntentProjectionService {
       pages: pages.length,
     };
     };
-    if (!durableReceipts.length) return persist(prisma);
     if (!this.deps.platformWriter) {
       throw new ExecutionControlError('DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE');
     }
+    if (!durableReceipts.length) return persist(this.deps.platformWriter);
     return this.deps.platformWriter.$transaction(async (tx) => {
       const result = await applyDomainAckConsumerTransactions({
         transaction: tx,

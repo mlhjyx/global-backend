@@ -143,4 +143,46 @@ describe('company-subject erasure of company contact points (BI-14)', () => {
     expect(purgeStatements.some((sql) => sql.includes('DELETE FROM url_content_cache'))).toBe(true);
     expect(purgeStatements.some((sql) => sql.includes('DELETE FROM llm_extraction_cache'))).toBe(true);
   });
+
+  it('chunks patent tombstone and cache-purge RPC calls into <=256-key batches and sums deleted counts', async () => {
+    const { tx, activities } = makeTx(0);
+    const contacts = Array.from({ length: 160 }, (_, index) => ({
+      id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+      fullName: `Patent Person ${index} Müller`,
+      contactPoints: [],
+    }));
+    tx.canonicalContact.findMany = vi.fn(async () => contacts);
+    const tombstoneBatchSizes: number[] = [];
+    const purgeBatchSizes: number[] = [];
+    tx.$queryRaw = vi.fn(async (query: { strings?: TemplateStringsArray; values?: unknown[] } | TemplateStringsArray) => {
+      const sqlText = Array.isArray(query)
+        ? query.join('?')
+        : (query.strings?.join('?') ?? '');
+      const values = Array.isArray(query) ? [] : (query.values ?? []);
+      if (sqlText.includes('record_patent_inventor_tombstones_v1')) {
+        tombstoneBatchSizes.push((values[0] as string[]).length);
+        return [{ record_patent_inventor_tombstones_v1: 1 }];
+      }
+      if (sqlText.includes('purge_patent_inventor_cache_by_keys_v1')) {
+        purgeBatchSizes.push((values[0] as string[]).length);
+        return [{ deleted: 2 }];
+      }
+      return [];
+    }) as never;
+
+    const counts = await activities.eraseSubject({
+      input: {
+        workspaceId: WORKSPACE_ID,
+        deletionRequestId: DELETION_REQUEST_ID,
+        subjectType: 'company',
+        subjectId: COMPANY_ID,
+      },
+      located: LOCATED,
+    });
+
+    expect(tombstoneBatchSizes.length).toBeGreaterThan(1);
+    expect(purgeBatchSizes).toEqual(tombstoneBatchSizes);
+    expect(tombstoneBatchSizes.every((size) => size >= 1 && size <= 256)).toBe(true);
+    expect(counts).toMatchObject({ patentCacheErased: purgeBatchSizes.length * 2 });
+  });
 });

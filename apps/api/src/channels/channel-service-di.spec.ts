@@ -32,10 +32,10 @@ describe('ChannelService DI wiring（编译产物）', () => {
       ChannelService,
     ) as unknown[] | undefined;
     expect(paramTypes).toBeDefined();
-    // 第 3 个参数（密钥解析器）走 @Inject(CHANNEL_SECRET_RESOLVER) 显式令牌，接口类型本就
+    // 第 3 个参数（密钥解析器）与第 4 个参数（platformWriter）走显式 @Inject(...) 令牌，接口类型本就
     // 退化为 Object，不影响解析；这里只钉住 platformTemporal 必须是真实类令牌。
-    expect(paramTypes).toHaveLength(3);
+    expect(paramTypes).toHaveLength(4);
     expect(paramTypes?.[1]).toBe(PlatformTemporalClient);
     expect(paramTypes?.[1]).not.toBe(Function);
-  });
+  }, 15_000);
 });

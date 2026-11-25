@@ -6,6 +6,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { createExecutionBudgetPlatformWriterClient } from '../src/execution-budget/execution-budget-platform-writer.database';
 import { IntentProjectionService } from '../src/intent/intent-projection.service';
 import { classifyPageKind } from '../src/intent/page-signals';
 import { buildToolBroker, sourcePolicyReaderFrom } from '../src/tools/tool-broker.factory';
@@ -18,8 +19,10 @@ for (const line of readFileSync(new URL('../.env', import.meta.url), 'utf8').spl
 const [cmd, workspaceId, arg, ...rest] = process.argv.slice(2);
 const prisma = new PrismaService();
 await prisma.$connect();
+const platformWriter = createExecutionBudgetPlatformWriterClient(process.env) ?? undefined;
+await platformWriter?.$connect();
 const broker = buildToolBroker({ sourcePolicyReader: sourcePolicyReaderFrom(prisma) });
-const svc = new IntentProjectionService({ prisma, broker });
+const svc = new IntentProjectionService({ prisma, broker, platformWriter });
 
 if (cmd === 'register' && workspaceId && arg) {
   const pages = rest.length ? rest.map((url) => ({ url, kind: classifyPageKind(url) })) : undefined;
@@ -30,7 +33,10 @@ if (cmd === 'register' && workspaceId && arg) {
   console.log(`投影完成：命中公司 ${r.companiesTouched} 家，写入 intent 事件 ${r.eventsProjected} 条 → attributes.intent.*`);
 } else {
   console.error('usage:\n  intent-watch.mts register <workspaceId> <canonicalCompanyId> [url ...]\n  intent-watch.mts project  <workspaceId>');
+  await platformWriter?.$disconnect();
+  await prisma.$disconnect();
   process.exit(1);
 }
 
+await platformWriter?.$disconnect();
 await prisma.$disconnect();

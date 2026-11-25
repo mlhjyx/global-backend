@@ -86,7 +86,7 @@ async function main() {
 
   // ══════════ A · 一次刷新落库（唯一 BQ 扫描）══════════
   console.log('\n══ A · Job User 一次刷新落 postgres（记 bytesScanned）══');
-  await enqueuePatentLookup(ownerDb, { companyName: TARGET.name, country: TARGET.country });
+  await enqueuePatentLookup(prisma, { companyName: TARGET.name, country: TARGET.country });
   const refreshA = await refreshPatentCache({ db: ownerDb as unknown as PatentRefreshDb, bq: bigqueryPatents });
   console.log(`   status=${refreshA.status} rows=${refreshA.rowCount} cached=${refreshA.cached} bytesScanned=${refreshA.bytesScanned}`);
   ok(refreshA.status === 'OK', 'A：刷新 status=OK');
@@ -117,7 +117,7 @@ async function main() {
   const cacheProvider = new GooglePatentsInventorProvider({
     mode: 'cache',
     cacheReader: (n, o) => readPatentCache(prisma, n, o),
-    enqueue: async (n, c) => { await enqueuePatentLookup(ownerDb, { companyName: n, country: c }); },
+    enqueue: async (n, c) => { await enqueuePatentLookup(prisma, { companyName: n, country: c }); },
   });
   const cacheRes = await cacheProvider.discoverContacts(TARGET, { workspaceId: WS });
   ok(cacheRes.contacts.length > 0, `B：cache 模式 provider 产 ${cacheRes.contacts.length} 联系人（technical_buyer/CC BY）`);

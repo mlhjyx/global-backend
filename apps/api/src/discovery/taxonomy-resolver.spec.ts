@@ -84,7 +84,7 @@ describe('TaxonomyResolver — durable model budget binding', () => {
     }));
     const prisma = {
       withWorkspace: vi.fn(async (_workspaceId, fn) => fn({
-        termAlias: { upsert: vi.fn(async () => ({})) },
+        $queryRaw: vi.fn(async () => []),
       })),
       termAlias: { findUnique: vi.fn(async () => null), upsert: vi.fn(async () => ({})) },
       canonicalTaxonomy: {
@@ -143,7 +143,7 @@ describe('TaxonomyResolver — durable model budget binding', () => {
     });
     const prisma = {
       withWorkspace: vi.fn(async (_workspaceId, fn) => fn({
-        termAlias: { upsert: vi.fn(async () => ({})) },
+        $queryRaw: vi.fn(async () => []),
       })),
       termAlias: { findUnique: vi.fn(async () => null), upsert: vi.fn(async () => ({})) },
       canonicalTaxonomy: {
@@ -175,7 +175,7 @@ describe('TaxonomyResolver — durable model budget binding', () => {
     const replayError = new BudgetOperationReplayError('taxonomy-op');
     const prisma = {
       withWorkspace: vi.fn(async (_workspaceId, fn) => fn({
-        termAlias: { upsert: vi.fn(async () => ({})) },
+        $queryRaw: vi.fn(async () => []),
       })),
       termAlias: { findUnique: vi.fn(async () => null) },
       canonicalTaxonomy: { findMany: vi.fn(async () => [{ code: 'industry-1', labelEn: 'Pumps', labels: {} }]) },
@@ -205,7 +205,7 @@ describe('TaxonomyResolver — durable model budget binding', () => {
     // activity, and the retries could only replay the spent operation.
     const prisma = {
       withWorkspace: vi.fn(async (_workspaceId, fn) => fn({
-        termAlias: { upsert: vi.fn(async () => ({})) },
+        $queryRaw: vi.fn(async () => []),
       })),
       termAlias: { findUnique: vi.fn(async () => null) },
       canonicalTaxonomy: { findMany: vi.fn(async () => [{ code: 'industry-1', labelEn: 'Pumps', labels: {} }]) },
@@ -257,7 +257,7 @@ describe('TaxonomyResolver — durable model budget binding', () => {
     });
     const prisma = {
       withWorkspace: vi.fn(async (_workspaceId, fn) => fn({
-        termAlias: { upsert: vi.fn(async () => ({})) },
+        $queryRaw: vi.fn(async () => []),
       })),
       termAlias: {
         findUnique: vi.fn(async () => null),
@@ -333,8 +333,8 @@ describe('TaxonomyResolver — durable model budget binding', () => {
           provider: 'gateway', model: 'model', durableReceipt: TAXONOMY_RECEIPT,
         };
       });
-      const aliasUpsert = vi.fn();
-      const transaction = { termAlias: { upsert: aliasUpsert } };
+      const aliasUpsert = vi.fn(async () => []);
+      const transaction = { $queryRaw: aliasUpsert };
       const prisma = {
         withWorkspace: vi.fn(async (_workspaceId, callback) => callback(transaction)),
         termAlias: { findUnique: vi.fn(async () => null) },
@@ -376,7 +376,7 @@ describe('TaxonomyResolver — operation identity per query (W2)', () => {
     }));
     const prisma = {
       withWorkspace: vi.fn(async (_workspaceId, fn) => fn({
-        termAlias: { upsert: vi.fn(async () => ({})) },
+        $queryRaw: vi.fn(async () => []),
       })),
       termAlias: { findUnique: vi.fn(async () => null) },
       canonicalTaxonomy: {

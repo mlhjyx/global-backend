@@ -21,7 +21,7 @@ process.env.DATABASE_URL ??= 'postgresql://global:global@localhost:5432/global_d
 
 const prisma = new PrismaClient();
 const registry = new SourceAdapterRegistry().register(new TradeFairSourceAdapter());
-const svc = new AcquisitionService({ prisma: prisma as any, registry });
+const svc = new AcquisitionService({ prisma: prisma as any, registry, platformWriter: prisma });
 
 const INTERPHEX = {
   sourceKey: 'interphex-2026', // gitleaks:allow —— 公开展会 slug（非密钥）

@@ -49,6 +49,26 @@ import { PersonalArtifactCleanupEnqueuer } from '../durable-results/artifact/per
  * 幂等：每步用 CAS（updateMany where status=<expected>）守，Temporal 重试不产生重复副作用；擦除计数取自
  * ② 擦除时刻的真实擦除面并落 stats，故重试（行已删、二次统计为 0）也不失真。所有租户读写经 withWorkspace（RLS，app_user）。
  */
+const PATENT_ERASURE_BATCH_SIZE = 256;
+
+async function erasePatentInventorCacheInBatches(
+  tx: Prisma.TransactionClient,
+  erasureKeys: readonly string[],
+): Promise<number> {
+  let deleted = 0;
+  for (let offset = 0; offset < erasureKeys.length; offset += PATENT_ERASURE_BATCH_SIZE) {
+    const batch = erasureKeys.slice(offset, offset + PATENT_ERASURE_BATCH_SIZE);
+    await tx.$queryRaw(
+      Prisma.sql`SELECT public.record_patent_inventor_tombstones_v1(${batch}::text[])`,
+    );
+    const purged = await tx.$queryRaw<Array<{ deleted: number | bigint }>>(
+      Prisma.sql`SELECT public.purge_patent_inventor_cache_by_keys_v1(${batch}::text[]) AS deleted`,
+    );
+    deleted += Number(purged[0]?.deleted ?? 0);
+  }
+  return deleted;
+}
+
 export function createDeletionActivities(deps: {
   prisma: PrismaService;
   sellerDocumentsStorage?: Pick<SellerDocumentsStorage, 'delete'>;
@@ -237,15 +257,10 @@ export function createDeletionActivities(deps: {
         if (erasureKeys.length) {
           // 🔴 P2-5（Codex PR #93）：**先写持久墓碑**（按盲键，over-suppress 变体集同 delete）——令周更刷新
           //   upsert 前查墓碑跳过，防 DSR 完成后同一 assignee 从 BigQuery 再拉回被擦除人 PII 重物化（Art.17 持久性）。
-          //   即便当前无缓存行（下面 deleteMany count=0），墓碑仍挡**未来**的重物化。skipDuplicates 幂等（唯一盲键）。
-          //   🔴 墓碑只存不可逆盲键，绝无明文名（PII 最小化）。平台表无 RLS，app_user 有 INSERT（迁移 GRANT）。
-          await tx.patentInventorTombstone.createMany({
-            data: erasureKeys.map((inventorNameKey) => ({ inventorNameKey })),
-            skipDuplicates: true,
-          });
-          const pc = await tx.patentInventorCache.deleteMany({ where: { inventorNameKey: { in: erasureKeys } },
-          });
-          patentCacheErased = pc.count;
+          //   即便当前无缓存行（下面 deleteMany count=0），墓碑仍挡**未来**的重物化。
+          //   🔴 墓碑只存不可逆盲键，绝无明文名（PII 最小化）。app_user 对两张平台表仅 SELECT，
+          //   通过窄 SECURITY DEFINER RPC（单批上限 256 键）受控写入墓碑与清理缓存。
+          patentCacheErased = await erasePatentInventorCacheInBatches(tx, erasureKeys);
         }
 
         // PR-B（2026-11-08）：租户缓存表按 workspace 全量擦除（隐私保守方向）。

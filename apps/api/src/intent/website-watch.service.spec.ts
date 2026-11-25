@@ -124,7 +124,11 @@ describe('WebsiteWatchService', () => {
       cadence: { everyMs: 86400000 },
       config: { company: { name: 'Acme', domain: 'acme.com' }, pages: [{ url: URL1, kind: 'products' }] },
     });
-    svc = new WebsiteWatchService({ prisma: prisma as unknown as PrismaService, fetcher });
+    svc = new WebsiteWatchService({
+      prisma: prisma as unknown as PrismaService,
+      fetcher,
+      platformWriter: prisma as never,
+    });
   });
 
   it('round 1: first sight = ADDED baseline, no intent event', async () => {
@@ -203,6 +207,7 @@ describe('WebsiteWatchService', () => {
     const bounded = new WebsiteWatchService({
       prisma: prisma as unknown as PrismaService,
       fetcher: { fetch: boundedFetch },
+      platformWriter: prisma as never,
     });
 
     const result = await bounded.watch('src1');
@@ -231,6 +236,7 @@ describe('WebsiteWatchService', () => {
     const controlled = new WebsiteWatchService({
       prisma: prisma as unknown as PrismaService,
       fetcher: { fetch: async () => { calls += 1; throw failure; } },
+      platformWriter: prisma as never,
     });
     await expect(controlled.watch('src1')).rejects.toBe(failure);
     expect(calls).toBe(1);
@@ -242,6 +248,7 @@ describe('WebsiteWatchService', () => {
     watchAckMock.mockClear();
     fetcher.next = { url: URL1, html: productHtml('Laser X1') };
     const platformWriter = {
+      sourceFetch: prisma.sourceFetch,
       $transaction: vi.fn(async (callback: (transaction: FakePrisma) => Promise<unknown>) =>
         callback(prisma)),
     };
@@ -297,6 +304,7 @@ describe('WebsiteWatchService', () => {
       prisma: prisma as unknown as PrismaService,
       fetcher,
       platformWriter: {
+        sourceFetch: prisma.sourceFetch,
         $transaction: vi.fn(async (callback: (transaction: FakePrisma) => Promise<unknown>) =>
           callback(prisma)),
       } as never,

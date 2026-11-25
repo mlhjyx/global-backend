@@ -63,6 +63,6 @@ describe('CH-6：source_channel_run 维度扩展迁移', () => {
       expect(schema).toContain(field);
     }
     const manifest = JSON.parse(readFileSync(PRIVILEGES, 'utf8')) as { tables: Record<string, string[]> };
-    expect(manifest.tables.source_channel_run).toEqual(['INSERT', 'SELECT', 'UPDATE']);
+    expect(manifest.tables.source_channel_run).toEqual(['SELECT']);
   });
 });

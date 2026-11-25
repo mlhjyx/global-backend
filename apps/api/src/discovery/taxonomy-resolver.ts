@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { ModelDurableResultProjectionError } from '../model-gateway/router-model-gateway';
 import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
@@ -497,11 +498,10 @@ export class TaxonomyResolver {
         receipt: durableReceipt,
         domainAckKey: `${kind}:${term}`,
         domainRevision: code,
-        apply: (transaction) => transaction.termAlias.upsert({
-          where: { kind_term: { kind, term } },
-          update: { code, source: 'llm' },
-          create: { kind, term, code, source: 'llm' },
-        }),
+        apply: (transaction) =>
+          transaction.$queryRaw(
+            Prisma.sql`SELECT public.upsert_term_alias_v1(${kind}, ${term}, ${code})::text AS ok`,
+          ),
       });
     });
   }

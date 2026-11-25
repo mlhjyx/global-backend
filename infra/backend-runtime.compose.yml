@@ -4,6 +4,7 @@
 x-backend-environment: &backend-environment
   NODE_ENV: production
   APP_ENVIRONMENT: ${APP_ENVIRONMENT:-development}
+  DATABASE_URL: ""
   RUNTIME_IMAGE_REFERENCE: ${GLOBAL_BACKEND_IMAGE}
   MACHINE_BOOTSTRAP_CA_FILE: /run/secrets/machine/bootstrap-ca.pem
   MACHINE_BOOTSTRAP_CERT_FILE: /run/secrets/machine/client-cert.pem
@@ -116,6 +117,7 @@ services:
     environment:
       NODE_ENV: production
       APP_ENVIRONMENT: ${APP_ENVIRONMENT:-development}
+      DATABASE_URL: ""
       RUNTIME_IMAGE_REFERENCE: ${GLOBAL_BACKEND_IMAGE}
       MACHINE_BOOTSTRAP_CA_FILE: /run/secrets/machine/bootstrap-ca.pem
       MACHINE_BOOTSTRAP_CERT_FILE: /run/secrets/machine/client-cert.pem

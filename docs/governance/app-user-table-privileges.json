@@ -464,9 +464,7 @@
       "UPDATE"
     ],
     "monitored_source": [
-      "INSERT",
-      "SELECT",
-      "UPDATE"
+      "SELECT"
     ],
     "offering": [
       "DELETE",
@@ -487,7 +485,6 @@
       "UPDATE"
     ],
     "outreach_global_suppression": [
-      "INSERT",
       "SELECT"
     ],
     "pack_activation": [
@@ -515,17 +512,13 @@
     ],
     "patent_cache_refresh_audit": [],
     "patent_inventor_cache": [
-      "DELETE",
       "SELECT"
     ],
     "patent_inventor_tombstone": [
-      "INSERT",
       "SELECT"
     ],
     "patent_lookup_request": [
-      "INSERT",
-      "SELECT",
-      "UPDATE"
+      "SELECT"
     ],
     "persona": [
       "DELETE",
@@ -615,9 +608,7 @@
       "UPDATE"
     ],
     "signal_ingest": [
-      "INSERT",
-      "SELECT",
-      "UPDATE"
+      "SELECT"
     ],
     "site": [
       "DELETE",
@@ -712,9 +703,7 @@
       "SELECT"
     ],
     "source_channel": [
-      "INSERT",
-      "SELECT",
-      "UPDATE"
+      "SELECT"
     ],
     "source_channel_enablement": [
       "DELETE",
@@ -722,49 +711,34 @@
       "SELECT"
     ],
     "source_channel_health_event": [
-      "INSERT",
       "SELECT"
     ],
     "source_channel_probe": [
-      "INSERT",
-      "SELECT",
-      "UPDATE"
+      "SELECT"
     ],
     "source_channel_record": [
-      "INSERT",
-      "SELECT",
-      "UPDATE"
+      "SELECT"
     ],
     "source_channel_run": [
-      "INSERT",
-      "SELECT",
-      "UPDATE"
+      "SELECT"
     ],
     "source_compliance_matrix": [
       "SELECT"
     ],
     "source_entity": [
-      "INSERT",
-      "SELECT",
-      "UPDATE"
+      "SELECT"
     ],
     "source_entity_change": [
-      "DELETE",
-      "INSERT",
       "SELECT"
     ],
     "source_fetch": [
-      "INSERT",
-      "SELECT",
-      "UPDATE"
+      "SELECT"
     ],
     "source_policy": [
       "SELECT"
     ],
     "source_signal": [
-      "INSERT",
-      "SELECT",
-      "UPDATE"
+      "SELECT"
     ],
     "source_yield_ledger": [
       "INSERT",
@@ -784,9 +758,7 @@
       "UPDATE"
     ],
     "term_alias": [
-      "INSERT",
-      "SELECT",
-      "UPDATE"
+      "SELECT"
     ],
     "tool_budget_account": [
       "SELECT"

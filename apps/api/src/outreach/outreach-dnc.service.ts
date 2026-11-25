@@ -1,5 +1,17 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  Optional,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { createHash } from 'node:crypto';
+import type { PrismaClient } from '@prisma/client';
+import {
+  assertExecutionBudgetPlatformWriterPrincipal,
+  EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE,
+  ScopedDatabasePrincipalError,
+} from '../execution-budget/execution-budget-platform-writer.database';
 import { PrismaService } from '../prisma/prisma.service';
 import { canonicalizeSuppressionValue } from '../discovery/suppression-value';
 
@@ -32,7 +44,12 @@ function invalid(code: string, message: string): never {
  */
 @Injectable()
 export class OutreachDncService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional()
+    @Inject(EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE)
+    private readonly platformWriter?: PrismaClient | null,
+  ) {}
 
   canonicalEmail(raw: unknown): string {
     if (typeof raw !== 'string') {
@@ -107,7 +124,33 @@ export class OutreachDncService {
     if (!source || source.length > 64) {
       invalid('OUTREACH_DNC_INVALID_SOURCE', 'source must be 1..64 characters');
     }
-    await this.prisma.outreachGlobalSuppression.createMany({
+    if (!this.platformWriter) {
+      throw new ServiceUnavailableException({
+        error: {
+          code: 'OUTREACH_DNC_WRITER_UNAVAILABLE',
+          message:
+            'Global DNC suppression requires EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL',
+        },
+      });
+    }
+    try {
+      await assertExecutionBudgetPlatformWriterPrincipal(
+        this.platformWriter,
+        'OutreachDncService',
+      );
+    } catch (error) {
+      if (error instanceof ScopedDatabasePrincipalError) {
+        throw new ServiceUnavailableException({
+          error: {
+            code: 'OUTREACH_DNC_WRITER_UNAVAILABLE',
+            message:
+              'Global DNC suppression requires a valid execution_budget_platform_writer database principal',
+          },
+        });
+      }
+      throw error;
+    }
+    await this.platformWriter.outreachGlobalSuppression.createMany({
       data: [
         {
           emailHash: this.emailHash(email),

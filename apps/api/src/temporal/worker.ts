@@ -20,9 +20,19 @@ import { buildGatewayProvider } from "../model-gateway/model-providers.config";
 import { AiTraceSink } from "../model-gateway/ai-trace.sink";
 import { createUnderstandingActivities } from "./understanding.activities";
 import { createCampaignPlanningActivities } from "./campaign-planning.activities";
-import { seedSkillCatalog } from "../skills/skill-catalog.seed";
-import { seedPackCatalog } from "../skills/packs/pack-catalog.seed";
-import { seedAgentCatalog } from "../agents/agent-catalog.seed";
+import { BUILTIN_SKILLS } from "../skills/generated/builtin-skill-catalog";
+import { BUILTIN_PACKS } from "../skills/packs/generated/builtin-pack-catalog";
+import { BUILTIN_AGENTS } from "../agents/agent-catalog";
+import { SANCTIONS_SOURCE_SEEDS } from "../sanctions/sanctions-seed";
+import {
+  assertScopedDatabasePrincipal,
+  CUSTOMER_WORKER_OPS_DATABASE_ROLE,
+  inspectScopedDatabaseUrl,
+} from "../runtime/scoped-database-principal";
+import {
+  DEFAULT_EXPECTED_PROVIDER_KEYS,
+  verifyPlatformCatalogsReadOnly,
+} from "../runtime/platform-catalog-verification";
 import { createDbSkillResolver } from "../skills/skill-resolver";
 import { PrismaSkillRegistryStore } from "../skills/skill-registry.store";
 import { createDbAgentResolver } from "../agents/agent-resolver";
@@ -63,7 +73,6 @@ import {
 } from "../site-builder/agents/task-routes";
 import { createAssetCleanupActivities } from "./asset-cleanup.activities";
 import { createMeasurementActivities } from "./measurement.activities";
-import { seedSanctions } from "../sanctions/sanctions-seed";
 import { SanctionsScreeningService } from "../sanctions/sanctions-screening.service";
 import { KbService } from "../site-builder/kb.service";
 import { EmbeddingsClient } from "../site-builder/embeddings.client";
@@ -71,7 +80,6 @@ import { DoclingClient } from "../site-builder/docling.client";
 import { StorageService } from "../site-builder/storage.service";
 import { ImagePipelineService } from "../site-builder/image-pipeline.service";
 import { IsolatedImagePipelineRunner } from "../site-builder/image-pipeline-runner";
-import { seedJurisdictionPolicy } from "../compliance/jurisdiction-policy.seed";
 import { DiscoveryProviderRegistry } from "../discovery/provider.registry";
 import { sourcePolicyReaderFrom } from "../tools/tool-broker.factory";
 import { createWorkerContactEnrichmentSafety } from "../enrichment/safety/contact-enrichment-safety.composition";
@@ -383,84 +391,70 @@ async function main(): Promise<void> {
     new IsolatedImagePipelineRunner(),
   );
 
-  // owner 连接（DATABASE_URL）：① data_provider seed（平台配置表，app_user 无写权）；
-  // ② 跨租户**只读**扫描（列 workspace / ACTIVE ICP——RLS 下 app_user 不可见）。
-  // 与 OutboxRelayService 同一「受信系统扫描器」先例；租户数据读写仍走 withWorkspace。
-  const ownerDb = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
+  // 专用受限跨租户扫描/维护连接（CUSTOMER_WORKER_OPS_DATABASE_URL → runtime_customer_worker_ops，
+  // NOSUPERUSER NOBYPASSRLS）：仅覆盖 ExternalIntent / SiteBuilder KB+reconcile / ReleaseMaintenance /
+  // ContactReverify / ContactWeeklyReport / MeasurementRollup；绝不持有 superuser 或 outbox/budget 权限。
+  // 租户数据读写仍走 withWorkspace（app_user）。
+  const workerOpsCheck = inspectScopedDatabaseUrl(
+    "CUSTOMER_WORKER_OPS_DATABASE_URL",
+    process.env.CUSTOMER_WORKER_OPS_DATABASE_URL,
+  );
+  if (workerOpsCheck.status !== "ok") {
+    clearInterval(startingHeartbeat);
+    personalArtifactCleanupRuntime.destroy();
+    await providerWireDatabase.disconnect().catch(() => undefined);
+    await runtimeTelemetry.shutdown();
+    return holdWorkerNotReady(workerOpsCheck.code, runtimeLeases);
+  }
+  const workerOpsDb = new PrismaClient({
+    datasourceUrl: process.env.CUSTOMER_WORKER_OPS_DATABASE_URL,
+  });
   const holdPlatformNotReady = async (code: string): Promise<never> => {
     clearInterval(startingHeartbeat);
     personalArtifactCleanupRuntime.destroy();
     await providerWireDatabase.disconnect().catch(() => undefined);
-    await ownerDb.$disconnect().catch(() => undefined);
+    await workerOpsDb.$disconnect().catch(() => undefined);
     await runtimeTelemetry.shutdown();
     return holdWorkerNotReady(code, runtimeLeases);
   };
   try {
-    await ownerDb.$connect();
-  } catch {
-    await holdPlatformNotReady("OWNER_DATABASE_UNAVAILABLE");
+    await workerOpsDb.$connect();
+    await assertScopedDatabasePrincipal(
+      workerOpsDb,
+      CUSTOMER_WORKER_OPS_DATABASE_ROLE,
+      "worker",
+    );
+  } catch (error) {
+    console.error("[worker] customer worker ops principal check failed:", error);
+    await holdPlatformNotReady("CUSTOMER_WORKER_OPS_DATABASE_UNAVAILABLE");
   }
   const budgetStore = new PostgresBudgetStore(prisma);
-  // seed 双保险：此前只在 API relay 启动时 seed 且失败静默——环境重置后只跑 worker 时，
-  // 4 个 signal provider 对路由不可见（信号/富集层运行时 no-op）。失败必须大声。
-  const providerRegistrySeed = new DiscoveryProviderRegistry();
+  // 部署期已通过 seed-platform-catalogs 写入平台目录；worker 启动只经 app_user 做只读就绪校验。
   try {
-    await providerRegistrySeed.seed(ownerDb);
-    console.log("[worker] data_provider seed ok");
-  } catch {
-    await holdPlatformNotReady("PROVIDER_REGISTRY_SEED_UNAVAILABLE");
-  }
-
-  // 收口⑥：jurisdiction_policy seed（平台规则表，owner 写）。worker 的删除编排/合规判定需之；
-  // 失败大声——规则空则 DataRights 对 red 数据 fail-closed。
-  try {
-    const n = await seedJurisdictionPolicy(ownerDb);
-    console.log(`[worker] jurisdiction_policy seed ok (${n} rules)`);
-  } catch {
-    await holdPlatformNotReady("JURISDICTION_POLICY_SEED_UNAVAILABLE");
-  }
-
-  // 制裁名单源 + source_policy seed（第五门，owner 写平台表；全 DISABLED，真测绿后 ops 翻 ENABLED）。
-  try {
-    await seedSanctions(ownerDb);
+    const catalogSummary = await verifyPlatformCatalogsReadOnly(prisma, {
+      requireJurisdictionPolicy: true,
+      expectedProviderKeys: DEFAULT_EXPECTED_PROVIDER_KEYS,
+      expectedSanctionsKeys: SANCTIONS_SOURCE_SEEDS.map((s) => s.key),
+      expectedSkillVersions: BUILTIN_SKILLS.map((s) => ({
+        skillKey: s.manifest.platform.skillKey,
+        version: s.manifest.platform.version,
+      })),
+      expectedPackVersions: BUILTIN_PACKS.map((p) => ({
+        packKey: p.manifest.packKey,
+        version: p.manifest.version,
+      })),
+      expectedAgentKeys: BUILTIN_AGENTS.map((a) => a.agentKey),
+    });
     console.log(
-      "[worker] sanctions source/policy seed ok (DISABLED until ops enables)",
-    );
-  } catch {
-    await holdPlatformNotReady("SANCTIONS_SEED_UNAVAILABLE");
-  }
-
-  // S0 技能目录 seed（owner 写平台表；解析器 fail-closed，目录缺失即全员不可用 → 大声失败）。
-  try {
-    const skillSeed = await seedSkillCatalog(ownerDb);
-    console.log(
-      `[worker] skill catalog seed ok (${skillSeed.packages} packages, ${skillSeed.versionsInserted} new versions)`,
+      `[worker] platform catalogs verified read-only (${JSON.stringify(catalogSummary)})`,
     );
   } catch (error) {
-    console.error("[worker] skill catalog seed failed:", error);
-    await holdPlatformNotReady("SKILL_CATALOG_SEED_UNAVAILABLE");
-  }
-
-  // S1 Pack v1 目录 seed（平台表；版本漂移大声失败，激活仅在缺失时补默认）。
-  try {
-    const packSeed = await seedPackCatalog(ownerDb);
-    console.log(
-      `[worker] pack catalog seed ok (${packSeed.packages} packs, ${packSeed.versionsInserted} new versions, ${packSeed.activationsInserted} activations)`,
-    );
-  } catch (error) {
-    console.error("[worker] pack catalog seed failed:", error);
-    await holdPlatformNotReady("PACK_CATALOG_SEED_UNAVAILABLE");
-  }
-
-  // M2 步 9b agent 注册表 seed（owner 写平台表；解析器 fail-closed，目录缺失即全员不可用 → 大声失败）。
-  try {
-    const agentSeed = await seedAgentCatalog(ownerDb);
-    console.log(
-      `[worker] agent catalog seed ok (${agentSeed.profiles} agents, ${agentSeed.inserted} new)`,
-    );
-  } catch (error) {
-    console.error("[worker] agent catalog seed failed:", error);
-    await holdPlatformNotReady("AGENT_CATALOG_SEED_UNAVAILABLE");
+    console.error("[worker] platform catalog verification failed:", error);
+    const code =
+      error instanceof Error && "code" in error && typeof error.code === "string"
+        ? error.code
+        : "PLATFORM_CATALOG_NOT_SEEDED";
+    await holdPlatformNotReady(code);
   }
 
   // Schedule provisioning is an independently authorized operator action.
@@ -679,15 +673,15 @@ async function main(): Promise<void> {
         prisma,
         providers,
         gateway,
-        ownerDb,
+        ownerDb: workerOpsDb,
         broker,
         runtimeTelemetry: runtimeTelemetry.telemetry,
         budgetStore,
       }),
       // P1-19：联系人邮箱再验证（contact-reverify-sweep Schedule，注册即 paused；
       // 三重门不满足时活动零调用零成本）。broker 供 SMTP 兜底票（第二票）出网。
-      ...createContactReverifyActivities({ ownerDb, broker }),
-      ...createContactWeeklyReportActivities({ ownerDb }),
+      ...createContactReverifyActivities({ prisma, ownerDb: workerOpsDb, broker }),
+      ...createContactWeeklyReportActivities({ ownerDb: workerOpsDb }),
       // ch03 执行面 3b：域名解析 / 召回审计编排（env 门默认关——DOMAIN_RESOLUTION_WORKFLOW_ENABLED /
       // RECALL_AUDIT_WORKFLOW_ENABLED 未开时活动一律 fail closed，零调用零落库；不注册任何 schedule）。
       ...createDomainResolutionActivities({ prisma }),
@@ -698,7 +692,7 @@ async function main(): Promise<void> {
       ...createExternalIntentActivities({
         prisma,
         taxonomy,
-        ownerDb,
+        ownerDb: workerOpsDb,
         broker,
         budgetStore,
       }),
@@ -712,7 +706,7 @@ async function main(): Promise<void> {
         prisma,
         costLedger,
         costReconciliationResolver,
-        ownerDb,
+        ownerDb: workerOpsDb,
         gateway,
         runtimeTelemetry: runtimeTelemetry.telemetry,
         broker,
@@ -740,9 +734,9 @@ async function main(): Promise<void> {
         prisma,
         storage: siteBuilderStorage,
       }),
-      ...createMeasurementActivities({ ownerDb }),
+      ...createMeasurementActivities({ ownerDb: workerOpsDb }),
       ...createSiteReleaseMaintenanceActivities({
-        ownerDb,
+        ownerDb: workerOpsDb,
         storage: siteBuilderStorage,
       }),
     },
@@ -827,7 +821,7 @@ async function main(): Promise<void> {
     personalArtifactCleanupRuntime.destroy();
     await connection.close().catch(() => undefined);
     await providerWireDatabase.disconnect().catch(() => undefined);
-    await ownerDb.$disconnect().catch(() => undefined);
+    await workerOpsDb.$disconnect().catch(() => undefined);
     await runtimeLeaseStore.disconnectWriters();
     await prisma.$disconnect().catch(() => undefined);
     exitDeadline.clear();

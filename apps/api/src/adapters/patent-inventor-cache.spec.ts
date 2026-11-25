@@ -541,25 +541,25 @@ describe('refreshPatentCache · Codex PR #93 复审加固', () => {
 });
 
 describe('enqueuePatentLookup（Step 6 队列）', () => {
-  it('有效公司 → upsert PENDING（anchor + 归一名 + 国别）', async () => {
-    const rows: Array<Record<string, unknown>> = [];
+  it('有效公司 → 通过 upsert_patent_lookup RPC 排入 PENDING（anchor + 归一名 + 国别）', async () => {
+    const calls: Array<{ strings: readonly string[]; values: readonly unknown[] }> = [];
     const db = {
-      patentLookupRequest: {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        upsert: async ({ create }: any) => { rows.push(create); return {}; },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      $queryRaw: async (sql: any) => {
+        calls.push({ strings: sql.strings, values: sql.values });
+        return [{ enqueue_patent_lookup_v1: true }];
       },
     };
     const r = await enqueuePatentLookup(db as never, { companyName: 'Acme GmbH', country: 'DE' });
     expect(r.enqueued).toBe(true);
-    expect(rows[0].assigneeNorm).toBe('acme');
-    expect(rows[0].country).toBe('de');
-    expect(rows[0].anchor).toBe('%ACME%');
-    expect(rows[0].status).toBe('PENDING');
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.strings.join('?')).toContain('enqueue_patent_lookup_v1');
+    expect(calls[0]!.values).toEqual(['acme', 'de', '%ACME%', 'Acme GmbH']);
   });
 
   it('无有效锚（纯法人词）→ no-op', async () => {
     let called = false;
-    const db = { patentLookupRequest: { upsert: async () => { called = true; return {}; } } };
+    const db = { $queryRaw: async () => { called = true; return []; } };
     const r = await enqueuePatentLookup(db as never, { companyName: 'GmbH' });
     expect(r.enqueued).toBe(false);
     expect(called).toBe(false);

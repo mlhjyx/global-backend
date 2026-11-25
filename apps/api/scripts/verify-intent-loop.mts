@@ -39,8 +39,8 @@ await prisma.$connect();
 const ownerDb = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
 await ownerDb.$connect();
 const broker = buildToolBroker({ sourcePolicyReader: sourcePolicyReaderFrom(prisma) });
-const intentSvc = new IntentProjectionService({ prisma, broker });
-const watchSvc = new WebsiteWatchService({ prisma, fetcher: new Crawl4aiPageFetcher(broker) });
+const intentSvc = new IntentProjectionService({ prisma, broker, platformWriter: ownerDb });
+const watchSvc = new WebsiteWatchService({ prisma, fetcher: new Crawl4aiPageFetcher(broker), platformWriter: ownerDb });
 
 // ① fit=match + 域名 的 canonical 公司
 const identity = companyIdentity({ name: 'TRUMPF', domain: 'trumpf.com', country: 'DE' });

@@ -1,5 +1,8 @@
-import { Injectable, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
+import { Inject, Injectable, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
+import type { PrismaClient } from '@prisma/client';
+import { EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE } from '../execution-budget/execution-budget-platform-writer.database';
 import { PrismaService } from '../prisma/prisma.service';
+import { requireChannelPlatformWriter } from './channel-platform-writer';
 import {
   CHANNEL_WARNING_FAILURE_COUNT,
   evaluateChannelHealth,
@@ -48,6 +51,9 @@ export class ChannelHealthSweepService implements OnModuleInit, OnModuleDestroy 
   constructor(
     private readonly prisma: PrismaService,
     @Optional() private readonly now: () => Date = () => new Date(),
+    @Optional()
+    @Inject(EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE)
+    private readonly platformWriter?: PrismaClient | null,
   ) {}
 
   onModuleInit(): void {
@@ -123,7 +129,7 @@ export class ChannelHealthSweepService implements OnModuleInit, OnModuleDestroy 
         now,
       });
       if (verdict.action === 'NONE') continue;
-      await this.prisma.$transaction(async (tx) => {
+      await (await requireChannelPlatformWriter(this.platformWriter)).$transaction(async (tx) => {
         if (verdict.action === 'AUTO_DISABLE') {
           await tx.sourceChannel.update({
             where: { id: row.id },

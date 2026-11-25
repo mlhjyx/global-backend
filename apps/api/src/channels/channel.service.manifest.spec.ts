@@ -123,8 +123,26 @@ function makeService(
       }),
     },
   };
-  const prisma = { withWorkspace: vi.fn(async (_ws: string, cb: (t: typeof tx) => unknown) => cb(tx)) };
-  const service = new ChannelService(prisma as never, undefined, resolver);
+  const prisma = {
+    withWorkspace: vi.fn(async (_ws: string, cb: (t: typeof tx) => unknown) => cb(tx)),
+    $transaction: vi.fn(async (cb: (t: typeof tx) => unknown) => cb(tx)),
+    $queryRaw: vi.fn(async () => [
+      {
+        currentUser: 'execution_budget_platform_writer_login',
+        sessionUser: 'execution_budget_platform_writer_login',
+        sessionRole: 'none',
+        rolCanLogin: true,
+        rolInherit: true,
+        rolSuper: false,
+        rolBypassRls: false,
+        rolCreateDb: false,
+        rolCreateRole: false,
+        rolReplication: false,
+        memberships: ['execution_budget_platform_writer'],
+      },
+    ]),
+  };
+  const service = new ChannelService(prisma as never, undefined, resolver, prisma as never);
   return { service, prisma, tx, writes };
 }
 

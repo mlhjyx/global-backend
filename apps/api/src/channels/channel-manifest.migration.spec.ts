@@ -82,8 +82,8 @@ describe('渠道 manifest/健康迁移（v3.0 第 6 章数据层）', () => {
   it('平台表无 RLS（与 source_channel 同层惯例），但权限清单同步登记', () => {
     expect(sql).not.toMatch(/ALTER TABLE "source_channel_probe" ENABLE ROW LEVEL SECURITY/u);
     const manifest = JSON.parse(readFileSync(PRIVILEGES, 'utf8')) as { tables: Record<string, string[]> };
-    expect(manifest.tables.source_channel_probe).toEqual(['INSERT', 'SELECT', 'UPDATE']);
-    expect(manifest.tables.source_channel_health_event).toEqual(['INSERT', 'SELECT']);
+    expect(manifest.tables.source_channel_probe).toEqual(['SELECT']);
+    expect(manifest.tables.source_channel_health_event).toEqual(['SELECT']);
   });
 
   it('Prisma schema 与 SQL 同步（不制造表漂移）', () => {

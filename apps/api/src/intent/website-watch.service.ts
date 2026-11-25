@@ -86,6 +86,13 @@ export class WebsiteWatchService {
     }>;
   }) {}
 
+  private requirePlatformWriter(): PrismaClient {
+    if (!this.deps.platformWriter) {
+      throw new ExecutionControlError('DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE');
+    }
+    return this.deps.platformWriter;
+  }
+
   async watch(sourceId: string): Promise<WatchResult> {
     const { prisma, fetcher } = this.deps;
     const source = await prisma.monitoredSource.findUnique({ where: { id: sourceId } });
@@ -114,7 +121,8 @@ export class WebsiteWatchService {
       }
     }
 
-    const fetchRow = await prisma.sourceFetch.create({ data: { sourceId, status: 'RUNNING', parserVersion: PARSER_VERSION } });
+    const writer = this.requirePlatformWriter();
+    const fetchRow = await writer.sourceFetch.create({ data: { sourceId, status: 'RUNNING', parserVersion: PARSER_VERSION } });
 
     const existing = await prisma.sourceEntity.findMany({ where: { sourceId } });
     const existingByUrl = new Map(existing.map((e) => [e.externalId, e]));
@@ -245,12 +253,9 @@ export class WebsiteWatchService {
       return watchResult;
     };
     if (!durableReceipts.length) {
-      return persist(prisma as unknown as WebsiteWatchWriteDb);
+      return persist(writer as unknown as WebsiteWatchWriteDb);
     }
-    if (!this.deps.platformWriter) {
-      throw new ExecutionControlError('DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE');
-    }
-    return this.deps.platformWriter.$transaction(async (transaction) => {
+    return writer.$transaction(async (transaction) => {
       const result = await applyDomainAckConsumerTransactions({
         transaction,
         acknowledgements: durableReceipts.map(({ producerId, receipt }) => ({
@@ -293,10 +298,11 @@ export class WebsiteWatchService {
    */
   async purgeStaleEvents(olderThanMs: number): Promise<{ deleted: number }> {
     const { prisma } = this.deps;
+    const writer = this.requirePlatformWriter();
     const cutoff = new Date(Date.now() - olderThanMs);
     const sources = await prisma.monitoredSource.findMany({ where: { providerKey: WEB_WATCH_KEY }, select: { id: true } });
     if (!sources.length) return { deleted: 0 };
-    const res = await prisma.sourceEntityChange.deleteMany({
+    const res = await writer.sourceEntityChange.deleteMany({
       where: { sourceId: { in: sources.map((s) => s.id) }, createdAt: { lt: cutoff } },
     });
     return { deleted: res.count };

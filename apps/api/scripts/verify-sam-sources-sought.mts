@@ -83,7 +83,7 @@ if (process.argv.includes('--use-test-model-fixture')) {
 const gateway = new RouterModelGateway(new ModelRouter(reg), new AiTraceSink(prisma));
 const taxonomy = new TaxonomyResolver(prisma, gateway);
 // §8.8（收口⑤）：出网收敛在**摄取层**——SignalIngestService 经 ToolBroker 过 source_policy 门；投影 service 只读 source_signal 平台表。
-const ingest = new SignalIngestService({ prisma, broker: buildToolBroker({ sourcePolicyReader: sourcePolicyReaderFrom(prisma) }) });
+const ingest = new SignalIngestService({ prisma, broker: buildToolBroker({ sourcePolicyReader: sourcePolicyReaderFrom(prisma) }), platformWriter: ownerDb });
 const svc = new SamIntentProjectionService({ prisma });
 
 const evidenceCount = () =>

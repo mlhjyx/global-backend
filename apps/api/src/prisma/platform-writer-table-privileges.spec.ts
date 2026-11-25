@@ -17,25 +17,28 @@ const ROOT = path.resolve(import.meta.dirname, '../../../..');
 const manifest = JSON.parse(
   readFileSync(path.join(ROOT, 'docs/governance/platform-writer-table-privileges.json'), 'utf8'),
 ) as Manifest;
-const migration = readFileSync(
-  path.join(
-    ROOT,
-    'packages/db/prisma/migrations/20261031140000_platform_writer_business_grants/migration.sql',
-  ),
-  'utf8',
+const MIGRATION_PATHS = [
+  'packages/db/prisma/migrations/20261031140000_platform_writer_business_grants/migration.sql',
+  'packages/db/prisma/migrations/20261126010000_runtime_scoped_principals/migration.sql',
+  'packages/db/prisma/migrations/20261126020000_revoke_app_user_platform_table_writes/migration.sql',
+];
+const migrations = MIGRATION_PATHS.map((relPath) =>
+  readFileSync(path.join(ROOT, relPath), 'utf8'),
 );
 
 const PRIVILEGES = new Set(['DELETE', 'INSERT', 'REFERENCES', 'SELECT', 'TRIGGER', 'TRUNCATE', 'UPDATE']);
 
 function grantedFromMigration(): Map<string, Set<string>> {
   const granted = new Map<string, Set<string>>();
-  const pattern = /GRANT ([A-Z, ]+) ON TABLE([\s\S]*?)\s+TO execution_budget_platform_writer;/g;
-  for (const match of migration.matchAll(pattern)) {
-    const privileges = match[1].split(',').map((value) => value.trim()).filter(Boolean);
-    for (const name of match[2].matchAll(/"([a-z_][a-z0-9_]*)"/g)) {
-      const set = granted.get(name[1]) ?? new Set<string>();
-      for (const privilege of privileges) set.add(privilege);
-      granted.set(name[1], set);
+  const pattern = /GRANT ([A-Z, ]+) ON TABLE([^;]*?)\s+TO execution_budget_platform_writer;/g;
+  for (const migration of migrations) {
+    for (const match of migration.matchAll(pattern)) {
+      const privileges = match[1].split(',').map((value) => value.trim()).filter(Boolean);
+      for (const name of match[2].matchAll(/"([a-z_][a-z0-9_]*)"/g)) {
+        const set = granted.get(name[1]) ?? new Set<string>();
+        for (const privilege of privileges) set.add(privilege);
+        granted.set(name[1], set);
+      }
     }
   }
   return granted;

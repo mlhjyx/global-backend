@@ -1,4 +1,5 @@
 import { ExecutionBudgetGrantError } from "../execution-budget/execution-budget-authority.types";
+import { inspectScopedDatabaseUrl } from "./scoped-database-principal";
 import { createHash } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { constants } from "node:fs";
@@ -170,8 +171,18 @@ export function validateRuntimeCandidate(
       instance.database.port === 5432 ||
       !/^global_candidate_[a-z0-9_]{1,50}$/u.test(instance.database.name) ||
       !databaseMatches(env.APP_DATABASE_URL, instance.database, "app_user") ||
-      (env.DATABASE_URL &&
-        !databaseMatches(env.DATABASE_URL, instance.database)) ||
+      !!env.DATABASE_URL?.trim() ||
+      [
+        "OUTBOX_RELAY_DATABASE_URL",
+        "MEMORY_OUTBOX_DATABASE_URL",
+        "CUSTOMER_WORKER_OPS_DATABASE_URL",
+        "EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL",
+      ].some(
+        (key) =>
+          !!env[key]?.trim() &&
+          (inspectScopedDatabaseUrl(key, env[key]).status !== "ok" ||
+            !databaseMatches(env[key], instance.database)),
+      ) ||
       env.TEMPORAL_ADDRESS !== instance.temporal.address ||
       env.TEMPORAL_TLS_SERVER_NAME !== instance.temporal.tlsServerName ||
       !HASH.test(instance.temporal.configurationRevision) ||

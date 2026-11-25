@@ -31,7 +31,7 @@ describe("site build cost reconciliation worker wiring", () => {
       "export { siteBuildCostReconciliationSweepWorkflow }",
     );
     expect(worker).toMatch(
-      /createSiteBuilderActivities\(\{[\s\S]*?costLedger,[\s\S]*?ownerDb,/,
+      /createSiteBuilderActivities\(\{[\s\S]*?costLedger,[\s\S]*?ownerDb(?::\s*workerOpsDb)?,/,
     );
     expect(worker).toContain("createSiteBuildSettlementReadbackRuntimeFromEnv");
     expect(worker).toContain("createSiteBuildCostReconciliationCatalogFromEnv");

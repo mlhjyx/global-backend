@@ -40,6 +40,13 @@ export class SignalIngestService {
     platformWriter?: PrismaClient;
   }) {}
 
+  private requirePlatformWriter(): PrismaClient {
+    if (!this.deps.platformWriter) {
+      throw new ExecutionControlError('DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE');
+    }
+    return this.deps.platformWriter;
+  }
+
   async ingestTed(
     params: { cpvCodes: string[]; buyerCountries: string[]; sinceDays?: number; maxRecords?: number },
     opts?: IngestOpts,
@@ -131,7 +138,7 @@ export class SignalIngestService {
 
   /** 状态机：ACTIVE 且 expiresAt<now → EXPIRED（EXPIRED/REVOKED 不动）。sweep 头部调。 */
   async expireStale(now: Date = new Date()): Promise<number> {
-    const res = await this.deps.prisma.sourceSignal.updateMany({
+    const res = await this.requirePlatformWriter().sourceSignal.updateMany({
       where: { status: 'ACTIVE', expiresAt: { lt: now } },
       data: { status: 'EXPIRED' },
     });
@@ -144,7 +151,7 @@ export class SignalIngestService {
    * 供审计对账与防复活（subjectKey 为规范化派生键，完全擦除含键的路径随收口⑥ DataRightsService 落地）。
    */
   async revoke(signalId: string): Promise<void> {
-    await this.deps.prisma.sourceSignal.update({
+    await this.requirePlatformWriter().sourceSignal.update({
       where: { id: signalId },
       data: revokePatch(),
     });
@@ -152,7 +159,7 @@ export class SignalIngestService {
 
   /** 批量撤回：按主体（Art.17 单主体擦除请求）。返回翻转行数。 */
   async revokeBySubjectKey(subjectKey: string): Promise<number> {
-    const res = await this.deps.prisma.sourceSignal.updateMany({
+    const res = await this.requirePlatformWriter().sourceSignal.updateMany({
       where: { subjectKey, status: { not: 'REVOKED' } },
       data: revokePatch(),
     });
@@ -162,7 +169,7 @@ export class SignalIngestService {
   /** 批量撤回：按 provider（合规事件「采集本身被判违规」时的整源处置——SUSPENDED 只停采不停用，
    *  存量处置靠本入口；两级撤停语义见 docs/architecture §5）。返回翻转行数。 */
   async revokeByProvider(providerKey: string): Promise<number> {
-    const res = await this.deps.prisma.sourceSignal.updateMany({
+    const res = await this.requirePlatformWriter().sourceSignal.updateMany({
       where: { providerKey, status: { not: 'REVOKED' } },
       data: revokePatch(),
     });
@@ -286,12 +293,20 @@ export class SignalIngestService {
         };
       });
     } else {
-      const result = await this.persistSignals(fetched.outcomes, this.deps.prisma);
-      await this.writeLedger(spec, fingerprint, windowKey, {
-        recordsFetched: fetched.records,
-        signalsUpserted: result.upserted,
-        status: 'OK', error: null,
-      });
+      const writer = this.requirePlatformWriter();
+      const result = await this.persistSignals(fetched.outcomes, writer);
+      await this.writeLedger(
+        spec,
+        fingerprint,
+        windowKey,
+        {
+          recordsFetched: fetched.records,
+          signalsUpserted: result.upserted,
+          status: 'OK',
+          error: null,
+        },
+        writer,
+      );
       persisted = { ...result, recordsFetched: fetched.records };
     }
     const { upserted, skipped } = persisted;
@@ -350,7 +365,7 @@ export class SignalIngestService {
     fingerprint: string,
     windowKey: string,
     patch: { recordsFetched: number; signalsUpserted: number; status: 'OK' | 'ERROR'; error: string | null },
-    database: Pick<Prisma.TransactionClient, 'signalIngest'> = this.deps.prisma,
+    database: Pick<Prisma.TransactionClient, 'signalIngest'> = this.requirePlatformWriter(),
   ): Promise<void> {
     await database.signalIngest.upsert({
       where: { providerKey_queryFingerprint_windowKey: { providerKey: spec.provider, queryFingerprint: fingerprint, windowKey } },
@@ -373,12 +388,13 @@ export class SignalIngestService {
    * 记档：双拉本身（都过检查才写）由 source_signal 幂等 upsert 兜底数据不坏，根治需 PENDING 抢锁（后续）。
    */
   private async writeLedgerError(spec: CanonicalQuerySpec, fingerprint: string, windowKey: string, error: string): Promise<void> {
-    const updated = await this.deps.prisma.signalIngest.updateMany({
+    const writer = this.requirePlatformWriter();
+    const updated = await writer.signalIngest.updateMany({
       where: { providerKey: spec.provider, queryFingerprint: fingerprint, windowKey, status: { not: 'OK' } },
       data: { status: 'ERROR', error, recordsFetched: 0, signalsUpserted: 0, fetchedAt: new Date() },
     });
     if (updated.count === 0) {
-      await this.deps.prisma.signalIngest
+      await writer.signalIngest
         .create({
           data: {
             providerKey: spec.provider,

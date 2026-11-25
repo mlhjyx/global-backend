@@ -29,6 +29,22 @@ class FakePrisma {
     });
   }
 
+  readonly $queryRaw = async () => [
+    {
+      currentUser: 'execution_budget_platform_writer_login',
+      sessionUser: 'execution_budget_platform_writer_login',
+      sessionRole: 'none',
+      rolCanLogin: true,
+      rolInherit: true,
+      rolSuper: false,
+      rolBypassRls: false,
+      rolCreateDb: false,
+      rolCreateRole: false,
+      rolReplication: false,
+      memberships: ['execution_budget_platform_writer'],
+    },
+  ];
+
   readonly outreachGlobalSuppression = {
     findMany: async () => this.globalRows,
     createMany: async ({
@@ -72,7 +88,7 @@ describe('OutreachDncService', () => {
 
   it('suppresses on the platform-wide hash list across tenants', async () => {
     const prisma = new FakePrisma();
-    const service = new OutreachDncService(prisma as never);
+    const service = new OutreachDncService(prisma as never, prisma as never);
     await service.suppressGlobal({
       email: 'bob@example.com',
       reason: 'complaint',
@@ -85,9 +101,56 @@ describe('OutreachDncService', () => {
     expect(JSON.stringify(prisma.globalRows)).not.toContain('bob@example.com');
   });
 
+  it('fails closed when global suppression runs without platformWriter', async () => {
+    const service = new OutreachDncService(new FakePrisma() as never);
+    await expect(
+      service.suppressGlobal({
+        email: 'bob@example.com',
+        reason: 'complaint',
+        source: 'outreach_unsubscribe',
+      }),
+    ).rejects.toMatchObject({
+      response: { error: { code: 'OUTREACH_DNC_WRITER_UNAVAILABLE' } },
+    });
+  });
+
+  it('fails closed when global suppression receives a superuser or wrong-role platformWriter', async () => {
+    const prisma = new FakePrisma();
+    const badWriter = {
+      $queryRaw: async () => [
+        {
+          currentUser: 'global',
+          sessionUser: 'global',
+          sessionRole: 'none',
+          rolCanLogin: true,
+          rolInherit: true,
+          rolSuper: true,
+          rolBypassRls: true,
+          rolCreateDb: true,
+          rolCreateRole: true,
+          rolReplication: true,
+          memberships: [],
+        },
+      ],
+      outreachGlobalSuppression: prisma.outreachGlobalSuppression,
+    };
+    const service = new OutreachDncService(prisma as never, badWriter as never);
+    await expect(
+      service.suppressGlobal({
+        email: 'bob@example.com',
+        reason: 'complaint',
+        source: 'outreach_unsubscribe',
+      }),
+    ).rejects.toMatchObject({
+      status: 503,
+      response: { error: { code: 'OUTREACH_DNC_WRITER_UNAVAILABLE' } },
+    });
+    expect(prisma.globalRows).toHaveLength(0);
+  });
+
   it('is idempotent for duplicate global suppressions', async () => {
     const prisma = new FakePrisma();
-    const service = new OutreachDncService(prisma as never);
+    const service = new OutreachDncService(prisma as never, prisma as never);
     await service.suppressGlobal({
       email: 'bob@example.com',
       reason: 'bounce',

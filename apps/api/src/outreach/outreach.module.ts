@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ExecutionBudgetPlatformWriterDatabaseModule } from '../execution-budget/execution-budget-platform-writer.database';
 import { OutreachDncServiceTokenGuard } from './outreach-dnc-service-token.guard';
 import { OutreachDncController } from './outreach-dnc.controller';
 import { OutreachDncService } from './outreach-dnc.service';
@@ -11,6 +12,7 @@ import { ContactBounceService } from './contact-bounce.service';
 
 /** M2 步 11 受控邮件触达：DNC + 全局抑制 + P1-16 联系人可触达性查询。 */
 @Module({
+  imports: [ExecutionBudgetPlatformWriterDatabaseModule],
   controllers: [OutreachDncController, ContactEligibilityController, ContactBounceController],
   providers: [
     OutreachDncService,

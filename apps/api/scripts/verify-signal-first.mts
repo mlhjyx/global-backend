@@ -65,7 +65,7 @@ if (su[0]?.usesuper) {
 }
 
 const broker = buildToolBroker({ sourcePolicyReader: sourcePolicyReaderFrom(prisma) });
-const ingest = new SignalIngestService({ prisma, broker });
+const ingest = new SignalIngestService({ prisma, broker, platformWriter: ownerDb });
 const tedProj = new TedIntentProjectionService({ prisma });
 const recompute = new IntentRecomputeService({ prisma });
 

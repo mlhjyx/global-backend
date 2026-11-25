@@ -33,9 +33,14 @@ describe("skill runtime worker wiring", () => {
     expect(lane).toContain("new PrismaSkillRegistryStore(prisma)");
   });
 
-  it("seeds the skill catalog in the managed worker only (owner writes stay there)", () => {
-    expect(worker).toContain("seedSkillCatalog(ownerDb)");
-    expect(worker).toContain("SKILL_CATALOG_SEED_UNAVAILABLE");
+  it("seeds the skill catalog via deploy CLI and verifies read-only at worker startup", () => {
+    const seedCli = readFileSync(
+      join(import.meta.dirname, "..", "..", "scripts", "seed-platform-catalogs.mts"),
+      "utf8",
+    );
+    expect(seedCli).toContain("seedSkillCatalog(ownerDb)");
+    expect(worker).not.toContain("seedSkillCatalog(");
+    expect(worker).toContain("verifyPlatformCatalogsReadOnly(");
     expect(lane).not.toContain("seedSkillCatalog");
   });
 

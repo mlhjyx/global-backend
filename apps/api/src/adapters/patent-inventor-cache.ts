@@ -17,7 +17,7 @@
  *
  * 纯逻辑（{@link buildSyntheticRecords}）与 I/O（{@link readPatentCache} / {@link refreshPatentCache}）分离，便于测试。
  */
-import type { PrismaClient } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
 import {
   PatentRecord,
   PatentSearchOptions,
@@ -213,8 +213,8 @@ export class PatentCacheClient {
 
 // ── Step 6 攒集队列 enqueue（冷启动预热 + 条件触发刷新）─────────────────────
 
-/** enqueue DB 最小面。 */
-export type PatentEnqueueDb = { patentLookupRequest: Pick<PrismaClient['patentLookupRequest'], 'upsert'> };
+/** enqueue DB 最小面（app_user 通过受控 SECURITY DEFINER RPC 排入）。 */
+export type PatentEnqueueDb = Pick<PrismaClient, '$queryRaw'>;
 
 /**
  * 把一家公司排入专利查询队列（PENDING）——驱动条件触发刷新 + 冷启动预热。幂等（同 (assigneeNorm, country) upsert）：
@@ -223,26 +223,15 @@ export type PatentEnqueueDb = { patentLookupRequest: Pick<PrismaClient['patentLo
 export async function enqueuePatentLookup(
   db: PatentEnqueueDb,
   input: { companyName: string; country?: string },
-  now: () => number = Date.now,
+  _now: () => number = Date.now,
 ): Promise<{ enqueued: boolean }> {
   const anchor = assigneeLikeAnchor(input.companyName);
   const assigneeNorm = normForMatch(input.companyName);
   if (!anchor || !assigneeNorm) return { enqueued: false };
   const country = normCountryLoose(input.country);
-  const nowDate = new Date(now());
-  await db.patentLookupRequest.upsert({
-    where: { assigneeNorm_country: { assigneeNorm, country } },
-    update: { lastRequestedAt: nowDate },
-    create: {
-      assigneeNorm,
-      country,
-      anchor,
-      sampleName: input.companyName.trim().slice(0, 200),
-      status: 'PENDING',
-      firstRequestedAt: nowDate,
-      lastRequestedAt: nowDate,
-    },
-  });
+  await db.$queryRaw(
+    Prisma.sql`SELECT public.enqueue_patent_lookup_v1(${assigneeNorm}, ${country}, ${anchor}, ${input.companyName.trim().slice(0, 200)})`,
+  );
   return { enqueued: true };
 }
 

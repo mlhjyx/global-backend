@@ -376,6 +376,7 @@ describe('IntentProjectionService — company subject for sitemap wires (G3 5.5)
       prisma: prisma as never,
       broker: { invoke } as never,
       budgetStore: { attestAuthorized: vi.fn(async () => undefined) } as never,
+      platformWriter: prisma as never,
     });
 
     await service.registerWatch(WATCH_WORKSPACE, 'company-1', {
@@ -418,7 +419,12 @@ describe('IntentProjectionService — sitemap budget scope', () => {
         create: vi.fn(async () => ({ id: 'monitor-1' })),
       },
     };
-    const service = new IntentProjectionService({ prisma: prisma as never, broker: { invoke } as never, budgetStore: budgetStore as never });
+    const service = new IntentProjectionService({
+      prisma: prisma as never,
+      broker: { invoke } as never,
+      budgetStore: budgetStore as never,
+      platformWriter: prisma as never,
+    });
 
     await service.registerWatch(WATCH_WORKSPACE, 'company-1', {
       budgetKey: WATCH_BINDING.accountKey,

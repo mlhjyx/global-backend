@@ -145,4 +145,24 @@ describe('contactReverifySweepOnce：三重门', () => {
       byState: { VALID: 0, INVALID: 0, CATCH_ALL_RISKY: 0, UNKNOWN: 0 },
     });
   });
+
+  it('uses prisma (app_user) for checkProviderGates while keeping ownerDb for sweep writes', async () => {
+    const provider = fakeProvider(true);
+    const prisma = fakeOwnerDb();
+    const ownerDb = fakeOwnerDb();
+    ownerDb.sourcePolicy.findUnique = vi.fn(async () => {
+      throw new Error('42501 permission denied for table source_policy');
+    });
+    const activities = createContactReverifyActivities({
+      prisma: prisma as never,
+      ownerDb: ownerDb as never,
+      providers: [provider],
+      now: NOW,
+    });
+    const result = await activities.contactReverifySweepOnce({ limit: 10 });
+    expect(result.status).toBe('ran');
+    expect(prisma.sourcePolicy.findUnique).toHaveBeenCalledOnce();
+    expect(ownerDb.sourcePolicy.findUnique).not.toHaveBeenCalled();
+    expect(ownerDb.contactPoint.findMany).toHaveBeenCalledOnce();
+  });
 });

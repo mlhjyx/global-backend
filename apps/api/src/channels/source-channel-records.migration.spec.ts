@@ -75,6 +75,6 @@ describe('source channel records migration (物化)', () => {
     expect(sql).toMatch(/GRANT SELECT, INSERT, UPDATE ON TABLE "source_channel_record" TO app_user/u);
     const manifest = JSON.parse(readFileSync(PRIVILEGES, 'utf8')) as Record<string, string[] | unknown>;
     const tables = (manifest.tables ?? manifest) as Record<string, string[]>;
-    expect(tables.source_channel_record).toEqual(['INSERT', 'SELECT', 'UPDATE']);
+    expect(tables.source_channel_record).toEqual(['SELECT']);
   });
 });

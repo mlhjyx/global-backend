@@ -1,9 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { evaluateDataRights } from './data-rights.engine';
-import { seedJurisdictionPolicy } from './jurisdiction-policy.seed';
 import {
   CURRENT_RULE_VERSION,
   DataRightsContext,
@@ -34,21 +32,17 @@ export class DataRightsService implements OnModuleInit {
   constructor(private readonly prisma: PrismaService) {}
 
   async onModuleInit(): Promise<void> {
-    // jurisdiction_policy 是平台表，app_user 只读 → 用 owner 连接播种（同 provider seed）。
-    // seed 失败要**大声**：规则空则引擎对 red 数据 fail-closed（安全但会全拒），运维需知晓。
-    const owner = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
-    try {
-      await seedJurisdictionPolicy(owner);
-    } catch (err) {
-      this.logger.error(`jurisdiction_policy seed FAILED — DataRights fail-closed until seeded: ${String(err)}`);
-    } finally {
-      await owner.$disconnect();
-    }
+    // jurisdiction_policy 由部署期 seed-platform-catalogs 写入；运行时只通过 app_user (this.prisma) 只读加载。
     // 单一产品运行路径：缺 managed dependency 时进程必须能启动做诊断
     // （readiness 由 database 组件关闭）。规则为空 → 引擎对 red 数据 fail-closed，
-    // 与 seed 失败同语义；绝不允许在这里抛错杀死 bootstrap。
+    // 绝不允许在这里抛错杀死 bootstrap。
     try {
       await this.loadRules();
+      if (this.rules.length === 0) {
+        this.logger.error(
+          'jurisdiction_policy is empty — DataRights fail-closed until seed-platform-catalogs runs',
+        );
+      }
     } catch (err) {
       this.logger.error(`jurisdiction_policy loadRules FAILED — DataRights fail-closed with zero rules: ${String(err)}`);
     }
