@@ -107,6 +107,29 @@ describe('buildRegistryLocalQueryReceipt', () => {
     ]);
     expect(reordered.resultDigest).toBe(receiptFor([record()]).resultDigest);
   });
+  it('compacts long production binding.accountKey runIds deterministically within 200-char SAFE_KEY limit', () => {
+    const prodAccountKey = `discovery.run:discovery_run:${RUN}:${'b'.repeat(64)}`;
+    expect(prodAccountKey.length).toBe(129);
+    const first = buildRegistryLocalQueryReceipt({
+      workspaceId: AUTHORITY,
+      authorityId: AUTHORITY,
+      accountId: ACCOUNT,
+      runId: prodAccountKey,
+      queryDigest: 'a'.repeat(64),
+      records: [record()],
+    });
+    const second = buildRegistryLocalQueryReceipt({
+      workspaceId: AUTHORITY,
+      authorityId: AUTHORITY,
+      accountId: ACCOUNT,
+      runId: prodAccountKey,
+      queryDigest: 'a'.repeat(64),
+      records: [record()],
+    });
+    expect(first.operationKey.length).toBeLessThanOrEqual(200);
+    expect(first.operationKey).toBe(second.operationKey);
+    expect(parseDurableExecutionReceipt(first).operationKey).toBe(first.operationKey);
+  });
 });
 
 describe('buildRegistryQueryLineage', () => {

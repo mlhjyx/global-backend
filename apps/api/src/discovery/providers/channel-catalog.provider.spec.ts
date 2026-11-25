@@ -71,4 +71,28 @@ describe('ChannelCatalogDiscoveryProvider (本地已审渠道库 zero-egress)', 
     expect(onDurableReceipt).toHaveBeenCalledTimes(1);
     expect(parseDiscoveryCompanyResultLineage(res.lineage, 'channel_catalog').recordCount).toBe(1);
   });
+
+  it('生产环境 129 字符 binding.accountKey 不会触发 operationKey 超 200 字符报错', async () => {
+    const prodAccountKey = `discovery.run:discovery_run:${RUN}:${'c'.repeat(64)}`;
+    expect(prodAccountKey.length).toBe(129);
+    const onDurableReceipt = vi.fn();
+    const provider = new ChannelCatalogDiscoveryProvider({
+      prisma: { sourceChannelRecord: { findMany: vi.fn(async () => []) } } as never,
+      lineageEnabled: true,
+    });
+    const res = await provider.discoverCompanies(
+      { sourceClass: 'industry_data', filters: { country: 'IT' }, keywords: [], limit: 20 },
+      {
+        workspaceId: WS,
+        runId: prodAccountKey,
+        durableBudgetAuthority: { authorityId: AUTH, accountId: ACC },
+        onDurableReceipt,
+      },
+    );
+    expect(res.records).toHaveLength(0);
+    expect(onDurableReceipt).toHaveBeenCalledTimes(1);
+    const receipt = onDurableReceipt.mock.calls[0]?.[1] as { operationKey: string };
+    expect(receipt.operationKey.length).toBeLessThanOrEqual(200);
+    expect(parseDiscoveryCompanyResultLineage(res.lineage, 'channel_catalog').recordCount).toBe(0);
+  });
 });

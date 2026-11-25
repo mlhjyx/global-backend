@@ -52,6 +52,8 @@ export function channelCatalogQueryDigest(input: {
   );
 }
 
+const SAFE_OPERATION_KEY = /^[A-Za-z0-9:._/-]{1,200}$/u;
+
 export function buildChannelCatalogLocalQueryReceipt(input: {
   workspaceId: string;
   authorityId: string;
@@ -60,9 +62,14 @@ export function buildChannelCatalogLocalQueryReceipt(input: {
   queryDigest: string;
   records: readonly ProviderCompanyRecord[];
 }): DurableExecutionReceipt {
-  const operationKey = `channel_catalog.query:${input.runId}:${input.queryDigest}`;
-  if (operationKey.length > 200) {
-    throw new Error('channel_catalog local query operationKey exceeds 200 chars');
+  // 生产环境 `runId` 是 129 字符 `binding.accountKey`，直接拼接 64 字符摘要达 216 字符（>200 上限）；
+  // 超长时确定性折算 runId 为 32 位 sha256 前缀（总长固定 121 字符 ≤ 200），确保重放确定且永不溢出。
+  const directKey = `${CHANNEL_CATALOG_QUERY_PRODUCER_ID}:${input.runId}:${input.queryDigest}`;
+  const operationKey = SAFE_OPERATION_KEY.test(directKey)
+    ? directKey
+    : `${CHANNEL_CATALOG_QUERY_PRODUCER_ID}:r.${sha256Hex(input.runId).slice(0, 32)}:${input.queryDigest}`;
+  if (!SAFE_OPERATION_KEY.test(operationKey)) {
+    throw new Error('channel_catalog local query operationKey invalid');
   }
   return Object.freeze({
     schemaVersion: 'durable-execution-receipt/v1' as const,

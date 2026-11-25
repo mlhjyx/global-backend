@@ -70,16 +70,26 @@ export interface RegistryLocalQueryReceiptInput {
   records: readonly ProviderCompanyRecord[];
 }
 
+const SAFE_OPERATION_KEY = /^[A-Za-z0-9:._/-]{1,200}$/u;
+
 /**
  * 构造本地查询回执。字段全部确定性；`authorityId/accountId` 来自 run 的执行预算绑定
  * （执行器经 ExecutionContext.durableBudgetAuthority 注入）。
+ *
+ * 注：生产环境下 `input.runId` 实际为 129 字符的 `binding.accountKey`
+ * (`discovery.run:discovery_run:<uuid>:<sha256>`)，直接拼接 64 字符 `queryDigest`
+ * 会达到 209 字符并超过 durable-execution-receipt 的 200 字符上限。超长或含非法字符时
+ * 确定性折算为 `r.<sha256(runId)[0..32]>`（总长固定 114 字符 ≤ 200），兼顾唯一性与重放幂等。
  */
 export function buildRegistryLocalQueryReceipt(
   input: RegistryLocalQueryReceiptInput,
 ): DurableExecutionReceipt {
-  const operationKey = `registry.query:${input.runId}:${input.queryDigest}`;
-  if (operationKey.length > 200) {
-    throw new Error('registry local query operationKey exceeds 200 chars');
+  const directKey = `${REGISTRY_QUERY_PRODUCER_ID}:${input.runId}:${input.queryDigest}`;
+  const operationKey = SAFE_OPERATION_KEY.test(directKey)
+    ? directKey
+    : `${REGISTRY_QUERY_PRODUCER_ID}:r.${sha256Hex(input.runId).slice(0, 32)}:${input.queryDigest}`;
+  if (!SAFE_OPERATION_KEY.test(operationKey)) {
+    throw new Error('registry local query operationKey invalid');
   }
   return Object.freeze({
     schemaVersion: 'durable-execution-receipt/v1' as const,
