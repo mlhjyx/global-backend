@@ -5,7 +5,7 @@ import { DeletionService } from './deletion.service';
 
 const createdAt = new Date('2026-01-01T00:00:00Z');
 const request = {
-  id: 'request-1', subjectType: 'contact', subjectId: 'contact-1',
+  id: '10000000-0000-4000-8000-000000000001', subjectType: 'contact', subjectId: 'contact-1',
   status: 'RECEIVED', reason: 'erasure', requestRef: null,
   createdAt, completedAt: null, receipt: null,
 };
@@ -15,6 +15,7 @@ function fixture() {
     canonicalCompany: { count: vi.fn().mockResolvedValue(1) },
     deletionRequest: {
       findFirst: vi.fn().mockResolvedValue(null),
+      findMany: vi.fn().mockResolvedValue([]),
       findUnique: vi.fn().mockResolvedValue(request),
       create: vi.fn().mockResolvedValue(request),
     },
@@ -41,9 +42,9 @@ describe('DeletionService workspace-scoped acceptance and recovery', () => {
 
   it('accepts a new request and emits only references in the same workspace transaction', async () => {
     const { tx, service, withWorkspace } = fixture();
-    expect(await service.createRequest('workspace-a', 'actor', dto)).toMatchObject({ id: 'request-1', createdAt: createdAt.toISOString(), completedAt: null, receipt: null });
+    expect(await service.createRequest('workspace-a', 'actor', dto)).toMatchObject({ id: request.id, createdAt: createdAt.toISOString(), completedAt: null, receipt: null });
     expect(tx.deletionRequest.create).toHaveBeenCalledWith({ data: { workspaceId: 'workspace-a', requestedBy: 'actor', ...dto, reason: 'erasure', requestRef: null }, include: { receipt: true } });
-    expect(tx.outboxEvent.create).toHaveBeenCalledWith({ data: { workspaceId: 'workspace-a', eventType: 'DeletionRequested', aggregateType: 'DeletionRequest', aggregateId: 'request-1', payload: dto } });
+    expect(tx.outboxEvent.create).toHaveBeenCalledWith({ data: { workspaceId: 'workspace-a', eventType: 'DeletionRequested', aggregateType: 'DeletionRequest', aggregateId: request.id, payload: dto } });
     expect(withWorkspace.mock.calls.every(([workspace]) => workspace === 'workspace-a')).toBe(true);
   });
 
@@ -99,5 +100,68 @@ describe('DeletionService workspace-scoped acceptance and recovery', () => {
     const receipt = { contactsErased: 1, contactPointsErased: 2, fieldEvidenceErased: 3, signalsRevoked: 4, companiesSuppressed: 5, leadsRescoreRequested: 6, patentCacheErased: 7, ruleVersion: 'v1', createdAt };
     tx.deletionRequest.findUnique.mockResolvedValue({ ...request, status: 'COMPLETED', completedAt: createdAt, receipt });
     expect(await service.getRequest('workspace-a', request.id)).toMatchObject({ status: 'COMPLETED', completedAt: createdAt.toISOString(), receipt: { ...receipt, createdAt: createdAt.toISOString() } });
+  });
+});
+
+describe('DeletionService.listRequests', () => {
+  it('filters strictly to contact/company inside withWorkspace and paginates with limit + 1', async () => {
+    const { tx, service, withWorkspace } = fixture();
+    const row1 = { ...request, id: '10000000-0000-4000-8000-000000000011' };
+    const row2 = { ...request, id: '10000000-0000-4000-8000-000000000012', subjectType: 'company' };
+    const row3 = { ...request, id: '10000000-0000-4000-8000-000000000013' };
+    tx.deletionRequest.findMany.mockResolvedValueOnce([row1, row2, row3]);
+
+    const page1 = await service.listRequests('workspace-a', { limit: 2 });
+    expect(withWorkspace).toHaveBeenCalledWith('workspace-a', expect.any(Function));
+    expect(tx.deletionRequest.findMany).toHaveBeenCalledWith({
+      where: { subjectType: { in: ['contact', 'company'] } },
+      take: 3,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      include: { receipt: true },
+    });
+    expect(page1.hasMore).toBe(true);
+    expect(page1.nextCursor).toBe(row2.id);
+    expect(page1.data).toHaveLength(2);
+
+    tx.deletionRequest.findMany.mockResolvedValueOnce([row3]);
+    const page2 = await service.listRequests('workspace-a', { limit: 2, cursor: row2.id, status: 'COMPLETED' });
+    expect(tx.deletionRequest.findMany).toHaveBeenLastCalledWith({
+      where: { subjectType: { in: ['contact', 'company'] }, status: 'COMPLETED' },
+      take: 3,
+      cursor: { id: row2.id },
+      skip: 1,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      include: { receipt: true },
+    });
+    expect(page2.hasMore).toBe(false);
+    expect(page2.nextCursor).toBeNull();
+    expect(page2.data).toHaveLength(1);
+  });
+
+  it('clamps limit to [1, 100] and defaults invalid/NaN limit to 20', async () => {
+    const { tx, service } = fixture();
+    await service.listRequests('workspace-a', { limit: 500 });
+    expect(tx.deletionRequest.findMany).toHaveBeenLastCalledWith(expect.objectContaining({ take: 101 }));
+
+    await service.listRequests('workspace-a', { limit: -5 });
+    expect(tx.deletionRequest.findMany).toHaveBeenLastCalledWith(expect.objectContaining({ take: 2 }));
+  });
+
+  it('rejects non-UUID cursor with 400 VALIDATION_ERROR without calling Prisma', async () => {
+    const { service, withWorkspace } = fixture();
+    await expect(service.listRequests('workspace-a', { limit: 20, cursor: 'not-a-uuid' })).rejects.toMatchObject({
+      status: 400,
+      response: { error: { code: 'VALIDATION_ERROR' } },
+    });
+    expect(withWorkspace).not.toHaveBeenCalled();
+  });
+
+  it('rejects invalid status with 400 VALIDATION_ERROR without calling Prisma', async () => {
+    const { service, withWorkspace } = fixture();
+    await expect(service.listRequests('workspace-a', { limit: 20, status: 'BOGUS' })).rejects.toMatchObject({
+      status: 400,
+      response: { error: { code: 'VALIDATION_ERROR' } },
+    });
+    expect(withWorkspace).not.toHaveBeenCalled();
   });
 });

@@ -1,9 +1,15 @@
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { Readable } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import type { RequestContext } from '../auth/request-context';
 import type { PrismaService } from '../prisma/prisma.service';
-import { SellerDocumentsService, sellerDocumentCanonicalKey, sellerDocumentStagingKey } from './seller-documents.service';
+import {
+  SellerDocumentsService,
+  formatContentDisposition,
+  sellerDocumentCanonicalKey,
+  sellerDocumentStagingKey,
+} from './seller-documents.service';
 import type { SellerDocumentsStorage } from './seller-documents.storage';
 
 const CTX: RequestContext = {
@@ -314,5 +320,98 @@ describe('SellerDocumentsService.uploadContent（浏览器直传：引擎代传�
     await expect(
       service.uploadContent(CTX, COMPANY_ID, DOC_ID, Buffer.from('# hi'), 'text/markdown'),
     ).rejects.toMatchObject({ status: 503 });
+  });
+});
+
+describe('formatContentDisposition & SellerDocumentsService.openContentStream', () => {
+  it('sanitizes ASCII, Unicode, quotes, semicolons, CR/LF, path traversal, and empty filenames', () => {
+    expect(formatContentDisposition('catalog.pdf')).toBe(
+      `attachment; filename="catalog.pdf"; filename*=UTF-8''catalog.pdf`,
+    );
+    const zh = formatContentDisposition('产品目录-2026.pdf');
+    expect(zh).toContain('attachment; filename="');
+    expect(zh).toContain(`filename*=UTF-8''${encodeURIComponent('产品目录-2026.pdf')}`);
+
+    const injected = formatContentDisposition('../../a"b;c\r\nX-Evil: 1.pdf');
+    expect(injected).not.toMatch(/[\r\n]/);
+    expect(injected).not.toContain('/');
+    expect(injected).not.toContain('\\');
+    expect(injected).toMatch(/^attachment; filename="[^"]+"; filename\*=UTF-8''/);
+
+    expect(formatContentDisposition('\x00\r\n')).toBe(
+      `attachment; filename="document"; filename*=UTF-8''document`,
+    );
+  });
+
+  function streamFixture(
+    row: Record<string, unknown> | null,
+    getObjectStream = vi.fn(async () => ({
+      stream: Readable.from([Buffer.from('pdf-bytes')]),
+      contentLength: 9,
+      contentType: 'application/pdf',
+    })),
+  ) {
+    const prisma = {
+      withWorkspace: vi.fn(async (_ws: string, fn: (tx: unknown) => unknown) =>
+        fn({
+          sellerDocument: { findFirst: vi.fn(async () => row) },
+        }),
+      ),
+    };
+    const storage = { getObjectStream };
+    const service = new SellerDocumentsService(
+      prisma as unknown as PrismaService,
+      storage as unknown as SellerDocumentsStorage,
+      {} as never,
+      {} as never,
+    );
+    return { service, getObjectStream, prisma };
+  }
+
+  const READY_DOC = {
+    id: DOC_ID,
+    companyId: COMPANY_ID,
+    filename: '产品目录.pdf',
+    mime: 'application/pdf',
+    sizeBytes: 9n,
+    status: 'ready',
+    objectKey: 'ws/w1/companies/c1/seller-documents/d1/abc.pdf',
+    deletedAt: null,
+  };
+
+  it.each(['ready', 'queued', 'processing'] as const)('opens content stream when status is %s', async (status) => {
+    const { service, getObjectStream } = streamFixture({ ...READY_DOC, status });
+    const opened = await service.openContentStream(CTX, DOC_ID);
+    expect(getObjectStream).toHaveBeenCalledWith(READY_DOC.objectKey);
+    expect(opened.mime).toBe('application/pdf');
+    expect(opened.filename).toBe('产品目录.pdf');
+    expect(opened.contentLength).toBe(9);
+  });
+
+  it.each(['pending_upload', 'committing', 'failed_terminal', 'rejected'] as const)(
+    'throws 409 SELLER_DOCUMENT_NOT_READY when status is %s',
+    async (status) => {
+      const { service, getObjectStream } = streamFixture({ ...READY_DOC, status });
+      await expect(service.openContentStream(CTX, DOC_ID)).rejects.toBeInstanceOf(ConflictException);
+      expect(getObjectStream).not.toHaveBeenCalled();
+    },
+  );
+
+  it('throws 404 when document is missing or soft-deleted', async () => {
+    const { service, getObjectStream } = streamFixture(null);
+    await expect(service.openContentStream(CTX, DOC_ID)).rejects.toBeInstanceOf(NotFoundException);
+    expect(getObjectStream).not.toHaveBeenCalled();
+  });
+
+  it('maps S3 404/NoSuchKey to 404 NotFoundException and other errors to 503 SELLER_DOCUMENTS_STORAGE_UNAVAILABLE', async () => {
+    const s3NotFound = streamFixture(READY_DOC, vi.fn(async () => {
+      throw { name: 'NoSuchKey', $metadata: { httpStatusCode: 404 } };
+    }));
+    await expect(s3NotFound.service.openContentStream(CTX, DOC_ID)).rejects.toBeInstanceOf(NotFoundException);
+
+    const s3Down = streamFixture(READY_DOC, vi.fn(async () => {
+      throw new Error('ECONNREFUSED');
+    }));
+    await expect(s3Down.service.openContentStream(CTX, DOC_ID)).rejects.toBeInstanceOf(ServiceUnavailableException);
   });
 });

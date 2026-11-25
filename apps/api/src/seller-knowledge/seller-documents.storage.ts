@@ -21,6 +21,12 @@ import type { Readable } from 'node:stream';
 export const SELLER_DOCUMENTS_STAGING_TAG_KEY = 'global-lifecycle';
 export const SELLER_DOCUMENTS_STAGING_TAG_VALUE = 'seller-document-staging';
 
+export function isS3NotFoundError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const err = error as { name?: unknown; $metadata?: { httpStatusCode?: unknown } };
+  return err.$metadata?.httpStatusCode === 404 || err.name === 'NoSuchKey' || err.name === 'NotFound';
+}
+
 const PRESIGN_PUT_TTL_S = 900;
 const PRESIGN_GET_TTL_S = 600;
 
@@ -136,6 +142,20 @@ export class SellerDocumentsStorage {
         Tagging: `${SELLER_DOCUMENTS_STAGING_TAG_KEY}=${SELLER_DOCUMENTS_STAGING_TAG_VALUE}`,
       }),
     );
+  }
+
+  /** 流式读取对象内容（不整段缓冲进内存，供服务端鉴权代理下载）。 */
+  async getObjectStream(
+    key: string,
+  ): Promise<{ stream: Readable; contentLength?: number; contentType?: string }> {
+    const res = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
+    const stream = res.Body as Readable | undefined;
+    if (!stream) throw new Error(`empty object body: ${key}`);
+    return {
+      stream,
+      contentLength: typeof res.ContentLength === 'number' ? res.ContentLength : undefined,
+      contentType: res.ContentType ?? undefined,
+    };
   }
 
   /** 有界整段读取（解析用；超限即失败，不截断）。 */

@@ -1,13 +1,13 @@
-import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiProperty, ApiPropertyOptional, ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiProperty, ApiPropertyOptional, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { IsIn, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 import { Ctx } from '../auth/ctx.decorator';
 import { RequireScopes } from '../auth/require-scopes.decorator';
 import { RequestContext } from '../auth/request-context';
 import { ScopesGuard } from '../auth/scopes.guard';
-import { Enveloped, envelope } from '../common/envelope';
-import { ApiEnvelope } from '../common/api-envelope.decorator';
+import { Enveloped, PageEnveloped, envelope, pageEnvelope } from '../common/envelope';
+import { ApiEnvelope, ApiPageEnvelope } from '../common/api-envelope.decorator';
 import { DeletionRequestView, DeletionService } from './deletion.service';
 import { DELETION_REASONS, DELETION_STATUSES, DELETION_SUBJECT_TYPES, DeletionSubjectType } from './deletion.types';
 
@@ -86,6 +86,27 @@ export class DeletionController {
     @Body() dto: CreateDeletionRequestDto,
   ): Promise<Enveloped<DeletionRequestView>> {
     return envelope(await this.deletion.createRequest(ctx.workspaceId, ctx.userId, dto));
+  }
+
+  @Get()
+  @ApiOperation({ summary: '分页列出数据主体删除请求（仅 contact/company，不含内部清理单）' })
+  @ApiQuery({ name: 'limit', required: false, schema: { type: 'integer', default: 20, minimum: 1, maximum: 100 } })
+  @ApiQuery({ name: 'cursor', required: false, description: '游标（上一页 page.next_cursor，UUID）', schema: { type: 'string', format: 'uuid' } })
+  @ApiQuery({ name: 'status', required: false, description: '按删除状态过滤', enum: [...DELETION_STATUSES] })
+  @ApiPageEnvelope(DELETION_REQUEST_SCHEMA)
+  async list(
+    @Ctx() ctx: RequestContext,
+    @Query('limit') limit?: string,
+    @Query('cursor') cursor?: string,
+    @Query('status') status?: string,
+  ): Promise<PageEnveloped<DeletionRequestView>> {
+    const n = Math.min(Math.max(Math.floor(Number(limit) || 20), 1), 100);
+    const result = await this.deletion.listRequests(ctx.workspaceId, {
+      limit: n,
+      cursor: cursor || undefined,
+      status: status || undefined,
+    });
+    return pageEnvelope(result.data, result);
   }
 
   @Get(':id')

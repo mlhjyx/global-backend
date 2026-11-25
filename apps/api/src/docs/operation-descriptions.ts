@@ -109,6 +109,8 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
     '按 id 取单份资料详情。资源属于其他 workspace 或已软删时返回 404，不泄露存在性。',
   'GET /api/v1/seller-documents/{documentId}/download-url':
     '返回 10 分钟有效的 presigned GET；尚未上传完成（pending_upload/committing）或已被拒绝时返回 409。',
+  'GET /api/v1/seller-documents/{documentId}/content':
+    '流式代理下载资料原文件：校验 workspace 隔离与状态（ready/queued/processing；未完成返回 409 SELLER_DOCUMENT_NOT_READY，缺失或跨租户 404，对象存储不可用 503），不暴露内网 MinIO 地址。需要 acquisition:read。',
   'POST /api/v1/seller-documents/{documentId}/retry':
     '重试解析：仅 failed_terminal 或 queued 状态可调用，重置错误码后重新入队（202）。需要 acquisition:write。',
   'DELETE /api/v1/seller-documents/{documentId}':
@@ -267,6 +269,8 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
     'ACK 已消费的事件（pull sink 的消费真值）。幂等：重复 ACK 计 0。',
 
   // ── Compliance ────────────────────────────────────────────────────────────
+  'GET /api/v1/deletion-requests':
+    '游标分页列出本 workspace 的数据主体删除请求（仅 contact/company，严格排除内部 seller_document 清理单）：支持 ?limit=（默认 20，最大 100）、?cursor=（UUID）与 ?status= 过滤，返回 { data, page: { next_cursor, has_more } }；非法 cursor/status 返回 400 VALIDATION_ERROR。需要 compliance:manage。',
   'POST /api/v1/deletion-requests':
     '受理数据主体删除请求（GDPR Art.17），异步编排，返回 202 与请求 id。需要 compliance:manage。',
   'GET /api/v1/deletion-requests/{id}':

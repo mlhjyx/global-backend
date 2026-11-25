@@ -11,9 +11,12 @@ import {
   Put,
   Query,
   Req,
+  Res,
+  StreamableFile,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiProduces, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { AuthGuard } from '../auth/auth.guard';
 import { Ctx } from '../auth/ctx.decorator';
 import { RequireScopes } from '../auth/require-scopes.decorator';
@@ -26,7 +29,7 @@ import {
   PresignSellerDocumentResponseDto,
   SellerDocumentDto,
 } from './dto/seller-document.dto';
-import { SellerDocumentsService } from './seller-documents.service';
+import { formatContentDisposition, SellerDocumentsService } from './seller-documents.service';
 
 @ApiTags('Seller Documents')
 @ApiBearerAuth()
@@ -164,6 +167,67 @@ export class SellerDocumentsController {
     @Param('documentId', ParseUUIDPipe) documentId: string,
   ): Promise<Enveloped<{ url: string; expiresInSeconds: number }>> {
     return envelope({ url: await this.documents.downloadUrl(ctx, documentId), expiresInSeconds: 600 });
+  }
+
+  @Get(':documentId/content')
+  @RequireScopes('acquisition:read')
+  @ApiOperation({ summary: '流式下载资料原文件（经服务端鉴权代理，不暴露内网对象存储签名）' })
+  @ApiProduces('application/octet-stream')
+  @ApiResponse({
+    status: 200,
+    description: '资料原文件二进制字节流',
+    content: { 'application/octet-stream': { schema: { type: 'string', format: 'binary' } } },
+    headers: {
+      'Content-Type': { description: '文件 MIME 类型', schema: { type: 'string' } },
+      'Content-Disposition': { description: '安全转义的附件文件名', schema: { type: 'string' } },
+      'Content-Length': { description: '文件字节数', schema: { type: 'integer', minimum: 0 } },
+    },
+  })
+  @ApiResponse({ status: 404, description: '资料不存在、已软删、属其他 workspace 或对象缺失' })
+  @ApiResponse({ status: 409, description: '资料尚未上传完成或已被拒绝（SELLER_DOCUMENT_NOT_READY）' })
+  @ApiResponse({ status: 503, description: '对象存储暂时不可用（SELLER_DOCUMENTS_STORAGE_UNAVAILABLE）' })
+  async downloadContent(
+    @Ctx() ctx: RequestContext,
+    @Param('documentId', ParseUUIDPipe) documentId: string,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<StreamableFile> {
+    const content = await this.documents.openContentStream(ctx, documentId);
+    response.setHeader('Content-Type', content.mime);
+    response.setHeader('Content-Disposition', formatContentDisposition(content.filename));
+    if (
+      content.contentLength !== undefined &&
+      Number.isSafeInteger(content.contentLength) &&
+      content.contentLength >= 0
+    ) {
+      response.setHeader('Content-Length', String(content.contentLength));
+    }
+    response.setHeader('Cache-Control', 'no-store');
+    response.setHeader('X-Content-Type-Options', 'nosniff');
+    response.on('close', () => {
+      if (!response.writableEnded && !content.stream.destroyed) {
+        content.stream.destroy();
+      }
+    });
+    return new StreamableFile(content.stream)
+      .setErrorHandler((err, res) => {
+        if (!content.stream.destroyed) {
+          content.stream.destroy();
+        }
+        const writable = res as unknown as {
+          destroyed?: boolean;
+          headersSent?: boolean;
+          destroy?: (error?: Error) => void;
+          end?: () => void;
+        };
+        if (!writable.destroyed) {
+          if (writable.headersSent && typeof writable.destroy === 'function') {
+            writable.destroy(err);
+          } else {
+            writable.end?.();
+          }
+        }
+      })
+      .setErrorLogger(() => undefined);
   }
 
   @Post(':documentId/retry')
