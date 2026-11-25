@@ -169,6 +169,22 @@ function parseInput(value: unknown): { stepId: string } {
   return { stepId: row.stepId };
 }
 const PROVIDER_HOSTS = CONTROLLED_ENRICHMENT_API_HOSTS;
+const FINDER_DETERMINISTIC_4XX = new Set([400, 404, 422, 451]);
+function isDeterministicFinder4xx(
+  provider: ControlledEnrichmentProvider,
+  status: number,
+): boolean {
+  return isControlledFinderProvider(provider) && FINDER_DETERMINISTIC_4XX.has(status);
+}
+function sanitizeDiagnosticToken(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_:-]/gu, "_").slice(0, 64) || "unknown";
+}
+function logControlledEnrichmentDiagnostic(
+  provider: ControlledEnrichmentProvider,
+  detail: string,
+): void {
+  console.warn(`[enrichment-tool] provider=${provider} ${detail}`);
+}
 function timeoutOf(config: ControlledEnrichmentProviderState): number {
   if (!Number.isSafeInteger(config.timeoutMs) || config.timeoutMs < 100)
     return denied();
@@ -374,7 +390,17 @@ function controlledFetch(
           },
         },
       );
-      if (response.body.byteLength > 1000000 || !response.ok)
+      const passthrough4xx = isDeterministicFinder4xx(provider, response.status);
+      if (!response.ok) {
+        logControlledEnrichmentDiagnostic(
+          provider,
+          `http_status=${response.status} action=${passthrough4xx ? "passthrough_4xx" : "fail_closed"}`,
+        );
+      }
+      if (
+        response.body.byteLength > 1000000 ||
+        (!response.ok && !passthrough4xx)
+      )
         return unknownResult();
       return new Response(new Uint8Array(response.body), {
         status: response.status,
@@ -457,8 +483,15 @@ async function executeControlled(
       capture.fetches !== 1 ||
       capture.wires !== 1 ||
       outcome.status === "error"
-    )
+    ) {
+      if (outcome.status === "error") {
+        logControlledEnrichmentDiagnostic(
+          provider,
+          `outcome=error error_code=${sanitizeDiagnosticToken(outcome.errorCode)}`,
+        );
+      }
       return unknownResult();
+    }
     const data =
       outcome.status === "hit"
         ? {
@@ -494,8 +527,15 @@ async function executeControlled(
       : { providerTimeoutSeconds: payload.providerTimeoutSeconds }),
   });
   rethrowCaptured(capture);
-  if (capture.fetches !== 1 || capture.wires !== 1 || outcome.error !== null)
+  if (capture.fetches !== 1 || capture.wires !== 1 || outcome.error !== null) {
+    if (outcome.error !== null) {
+      logControlledEnrichmentDiagnostic(
+        provider,
+        `outcome=error error_code=${sanitizeDiagnosticToken(outcome.error)}`,
+      );
+    }
     return unknownResult();
+  }
   return parseContactEmailVerificationResult(provider, {
     data: {
       providerKey: provider,

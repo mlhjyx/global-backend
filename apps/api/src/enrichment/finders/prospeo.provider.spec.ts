@@ -22,11 +22,11 @@ const jsonResponse = (status: number, body: unknown): Response =>
   });
 
 describe('resolveProspeoConfig：env 解析', () => {
-  it('缺省值：无 key、api.prospeo.io、8s、19800 微美元', () => {
+  it('缺省值：无 key、api.prospeo.io、15s、19800 微美元', () => {
     expect(resolveProspeoConfig({})).toEqual({
       apiKey: null,
       baseUrl: 'https://api.prospeo.io',
-      timeoutMs: 8_000,
+      timeoutMs: 15_000,
       costMicrousd: 19_800,
     });
   });
@@ -146,6 +146,63 @@ describe('ProspeoProvider.findEmail：HTTP 契约', () => {
       errorCode: 'invalid_payload',
       retryable: false,
     });
+  });
+
+  it('HTTP 400/404/422 携带 NO_MATCH / INVALID_DATAPOINTS → 合法 miss；鉴权/欠费/废弃/畸形体仍为 error', async () => {
+    for (const [status, errorCode] of [
+      [400, 'NO_MATCH'],
+      [400, 'INVALID_DATAPOINTS'],
+      [404, 'NO_MATCH'],
+      [422, 'INVALID_DATAPOINTS'],
+    ] as const) {
+      const provider = new ProspeoProvider(
+        resolveProspeoConfig({ PROSPEO_API_KEY: 'k' }),
+        vi.fn(async () => jsonResponse(status, { error: true, error_code: errorCode })),
+      );
+      expect(await provider.findEmail(INPUT)).toMatchObject({
+        status: 'miss',
+        costMicrousd: 0,
+      });
+    }
+
+    const noCredits = new ProspeoProvider(
+      resolveProspeoConfig({ PROSPEO_API_KEY: 'k' }),
+      vi.fn(async () => jsonResponse(400, { error: true, error_code: 'INSUFFICIENT_CREDITS' })),
+    );
+    expect(await noCredits.findEmail(INPUT)).toMatchObject({
+      status: 'error',
+      errorCode: 'insufficient_credits',
+      retryable: false,
+      costMicrousd: 0,
+    });
+
+    const deprecated = new ProspeoProvider(
+      resolveProspeoConfig({ PROSPEO_API_KEY: 'k' }),
+      vi.fn(async () => jsonResponse(400, { error: true, error_code: 'DEPRECATED' })),
+    );
+    expect(await deprecated.findEmail(INPUT)).toMatchObject({
+      status: 'error',
+      errorCode: 'deprecated',
+      retryable: false,
+      costMicrousd: 0,
+    });
+
+    for (const badResponse of [
+      new Response('<html>Bad Request</html>', { status: 400 }),
+      jsonResponse(400, {}),
+      jsonResponse(400, { error: false, person: { email: { email: 'a@acme.example', status: 'VERIFIED' } } }),
+    ]) {
+      const provider = new ProspeoProvider(
+        resolveProspeoConfig({ PROSPEO_API_KEY: 'k' }),
+        vi.fn(async () => badResponse),
+      );
+      expect(await provider.findEmail(INPUT)).toMatchObject({
+        status: 'error',
+        errorCode: 'provider_http_error',
+        retryable: false,
+        costMicrousd: 0,
+      });
+    }
   });
 
   it('HTTP 429/401 与缺凭据', async () => {

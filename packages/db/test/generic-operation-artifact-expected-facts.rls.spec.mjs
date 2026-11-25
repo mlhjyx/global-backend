@@ -250,6 +250,26 @@ describe("generic operation artifact expected-facts PostgreSQL", () => {
     }
   });
 
+  it("allows contact-email-find hunter and prospeo schemas only with all six facts NULL", async () => {
+    const [row] = await owner.$queryRawUnsafe(`
+      SELECT
+        generic_operation_artifact_expected_facts_valid_v1(
+          'contact-email-find-hunter/v1', NULL, NULL, NULL, NULL, NULL, NULL
+        ) AS hunter_ok,
+        generic_operation_artifact_expected_facts_valid_v1(
+          'contact-email-find-prospeo/v1', NULL, NULL, NULL, NULL, NULL, NULL
+        ) AS prospeo_ok,
+        generic_operation_artifact_expected_facts_valid_v1(
+          'contact-email-find-prospeo/v1', 200::smallint, true, NULL, NULL, NULL, NULL
+        ) AS prospeo_non_null
+    `);
+    assert.deepEqual(row, {
+      hunter_ok: true,
+      prospeo_ok: true,
+      prospeo_non_null: false,
+    });
+  });
+
   it("keeps the metadata schema closed and the two forward migrations bounded", async () => {
     const columns = await owner.$queryRawUnsafe(
       `SELECT column_name FROM information_schema.columns

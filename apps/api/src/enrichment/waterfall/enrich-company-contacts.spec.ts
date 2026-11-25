@@ -728,8 +728,16 @@ describe('shared contact selector/tier ports for the frozen safety lane', () => 
     expect(selected.company?.domain).toBe('acme.example');
     expect(selected.contacts).toEqual([{ id: CONTACT_1, fullName: 'Synthetic Person' }]);
     expect(world.tx.canonicalContact.findMany).toHaveBeenCalledExactlyOnceWith({
-      where: { companyId: COMPANY, id: { in: [CONTACT_1] }, contactPoints: { none: { type: 'email' } } },
-      select: { id: true, fullName: true }, orderBy: { createdAt: 'asc' }, take: 3,
+      where: {
+        companyId: COMPANY,
+        id: { in: [CONTACT_1] },
+        OR: [
+          { title: null },
+          { NOT: { title: { equals: 'switchboard', mode: 'insensitive' } } },
+        ],
+        contactPoints: { none: { type: 'email' } },
+      },
+      select: { id: true, fullName: true, title: true }, orderBy: { createdAt: 'asc' }, take: 3,
     });
     expect(world.tx.contactPoint.upsert).not.toHaveBeenCalled();
     expect(world.tx.contactEnrichmentAttempt.create).not.toHaveBeenCalled();
@@ -738,7 +746,15 @@ describe('shared contact selector/tier ports for the frozen safety lane', () => 
     const world = fakeWorld({});
     await loadContactEnrichmentTargets(world.tx as never, { companyId: COMPANY, contactIds: [] }, 10);
     expect(world.tx.canonicalContact.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { companyId: COMPANY, id: { in: [] }, contactPoints: { none: { type: 'email' } } },
+      where: {
+        companyId: COMPANY,
+        id: { in: [] },
+        OR: [
+          { title: null },
+          { NOT: { title: { equals: 'switchboard', mode: 'insensitive' } } },
+        ],
+        contactPoints: { none: { type: 'email' } },
+      },
     }));
   });
   it('does not select contacts when the company has no domain', async () => {
@@ -756,6 +772,35 @@ describe('shared contact selector/tier ports for the frozen safety lane', () => 
     expect(await loadCompanyContactEnrichmentTier(world.prisma as never, INPUT, true)).toBe(expected);
     expect(world.tx.lead.findFirst).toHaveBeenCalledWith({ where: { canonicalCompanyId: COMPANY, totalScore: { gte: 0.8 } }, select: { id: true } });
   });
+  it('excludes switchboard placeholder contacts and single-token/non-Latin placeholder names while keeping named contacts with null title', async () => {
+    const world = fakeWorld({
+      contacts: [
+        { id: '00000000-0000-4000-8000-0000000000d3', fullName: '公开联系点 (info@)', title: 'switchboard' } as never,
+        { id: '00000000-0000-4000-8000-0000000000d4', fullName: 'Company Switchboard', title: null } as never,
+        { id: '00000000-0000-4000-8000-0000000000d5', fullName: 'Amministrazione', title: 'Finance' } as never,
+        { id: '00000000-0000-4000-8000-0000000000d6', fullName: '公开总机', title: null } as never,
+        { id: CONTACT_1, fullName: 'Marco Rossi', title: 'CEO' } as never,
+        { id: CONTACT_2, fullName: 'Giulia Bianchi', title: null } as never,
+      ],
+    });
+    const selected = await loadContactEnrichmentTargets(world.tx as never, { companyId: COMPANY }, 10);
+    expect(selected.contacts).toEqual([
+      { id: CONTACT_1, fullName: 'Marco Rossi' },
+      { id: CONTACT_2, fullName: 'Giulia Bianchi' },
+    ]);
+    expect(world.tx.canonicalContact.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          companyId: COMPANY,
+          OR: [
+            { title: null },
+            { NOT: { title: { equals: 'switchboard', mode: 'insensitive' } } },
+          ],
+        }),
+        select: { id: true, fullName: true, title: true },
+      }),
+    );
+  });
   it('supports opt-in unverified email target selector for RISKY/UNKNOWN contacts lacking VALID email', async () => {
     const world = fakeWorld({ contacts: [{ id: CONTACT_1, fullName: 'Synthetic Person' }] });
     await loadContactEnrichmentTargets(
@@ -765,7 +810,14 @@ describe('shared contact selector/tier ports for the frozen safety lane', () => 
     );
     expect(world.tx.canonicalContact.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { companyId: COMPANY, contactPoints: { none: { type: 'email', verificationState: 'VALID' } } },
+        where: {
+          companyId: COMPANY,
+          OR: [
+            { title: null },
+            { NOT: { title: { equals: 'switchboard', mode: 'insensitive' } } },
+          ],
+          contactPoints: { none: { type: 'email', verificationState: 'VALID' } },
+        },
         take: 5,
       }),
     );

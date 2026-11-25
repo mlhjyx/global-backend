@@ -42,7 +42,7 @@ export function resolveHunterConfig(env: NodeJS.ProcessEnv = process.env): Hunte
   return {
     apiKey: (env.HUNTER_API_KEY ?? '').trim() || null,
     baseUrl: (env.HUNTER_BASE_URL ?? 'https://api.hunter.io').replace(/\/+$/u, ''),
-    timeoutMs: positiveInt(env.HUNTER_TIMEOUT_MS, 8_000),
+    timeoutMs: positiveInt(env.HUNTER_TIMEOUT_MS, 15_000),
     // 年付 Starter $34/mo（2,000 credits）≈ $0.0170/条（2026-11-08 快照）→ 1700 微美元。
     costMicrousd: positiveInt(env.HUNTER_COST_MICROUSD, 1_700),
   };
@@ -197,6 +197,43 @@ export function parseHunterEmailFinder(raw: unknown): HunterEmailFinderParse {
   };
 }
 
+const HUNTER_DETERMINISTIC_4XX = new Set([400, 404, 422, 451]);
+const HUNTER_NON_MISS_ERROR_ID_RE =
+  /(?:auth|key|credit|quota|billing|payment|suspend|limit|rate|forbidden|too_many)/iu;
+
+function parseHunterDeterministic4xxError(
+  raw: unknown,
+  status: number,
+): { kind: 'miss'; id: string } | { kind: 'error'; errorCode: string; detail: string } {
+  const fallback = {
+    kind: 'error' as const,
+    errorCode: 'provider_http_error',
+    detail: `hunter_http_${status}`,
+  };
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return fallback;
+  const errors = (raw as Record<string, unknown>).errors;
+  if (!Array.isArray(errors) || errors.length === 0) return fallback;
+  let primaryId = '';
+  for (const entry of errors) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return fallback;
+    const rec = entry as Record<string, unknown>;
+    const id = typeof rec.id === 'string' ? rec.id.trim().toLowerCase() : '';
+    const code = typeof rec.code === 'number' ? rec.code : null;
+    if (!primaryId && /^[a-z0-9_]+$/u.test(id)) primaryId = id;
+    if (
+      (code !== null && (code === 401 || code === 403 || code === 429 || code >= 500)) ||
+      (id && HUNTER_NON_MISS_ERROR_ID_RE.test(id))
+    ) {
+      return {
+        kind: 'error',
+        errorCode: primaryId || 'provider_http_error',
+        detail: `hunter_http_${status}_${primaryId || 'error'}`,
+      };
+    }
+  }
+  return { kind: 'miss', id: primaryId || 'no_match' };
+}
+
 export class HunterProvider implements EmailEnrichmentAdapter {
   readonly key = 'hunter' as const;
   readonly domain = 'api.hunter.io';
@@ -274,6 +311,26 @@ export class HunterProvider implements EmailEnrichmentAdapter {
         detail: `hunter_http_${response.status}`,
       };
     }
+    if (HUNTER_DETERMINISTIC_4XX.has(response.status)) {
+      const json: unknown = await response.json().catch(() => null);
+      const parsed4xx = parseHunterDeterministic4xxError(json, response.status);
+      if (parsed4xx.kind === 'miss') {
+        return {
+          status: 'miss',
+          costMicrousd: 0,
+          latencyMs,
+          detail: `hunter_http_${response.status}_${parsed4xx.id}`,
+        };
+      }
+      return {
+        status: 'error',
+        errorCode: parsed4xx.errorCode,
+        retryable: false,
+        costMicrousd: 0,
+        latencyMs,
+        detail: parsed4xx.detail,
+      };
+    }
     if (!response.ok) {
       return {
         status: 'error',
@@ -312,7 +369,10 @@ export class HunterProvider implements EmailEnrichmentAdapter {
         detail: `hunter_${parsed.missReason ?? 'no_match'}`,
       };
     }
-    const email = normalizeEnrichedEmail(parsed.match.email, input.domain);
+    const email = normalizeEnrichedEmail(parsed.match.email, input.domain, {
+      allowCorporateGroup: true,
+      verifiedAliasDomains: input.verifiedAliasDomains,
+    });
     if (!email) {
       return {
         status: 'error',

@@ -46,7 +46,7 @@ export function resolveProspeoConfig(env: NodeJS.ProcessEnv = process.env): Pros
   return {
     apiKey: (env.PROSPEO_API_KEY ?? '').trim() || null,
     baseUrl: (env.PROSPEO_BASE_URL ?? 'https://api.prospeo.io').replace(/\/+$/u, ''),
-    timeoutMs: positiveInt(env.PROSPEO_TIMEOUT_MS, 8_000),
+    timeoutMs: positiveInt(env.PROSPEO_TIMEOUT_MS, 15_000),
     // $49/mo（2,000 credits）≈ $0.0245；年付 $0.0166–$0.0198 → 取月付口径 19800 微美元。
     costMicrousd: positiveInt(env.PROSPEO_COST_MICROUSD, 19_800),
     ...(minInterval > 0 ? { minIntervalMs: minInterval } : {}),
@@ -129,8 +129,47 @@ export function parseProspeoResponse(raw: unknown): ProspeoParse {
   return { ok: true, email, confidence: null, extra: { provider: 'prospeo' } };
 }
 
+const PROSPEO_DETERMINISTIC_4XX = new Set([400, 404, 422]);
 const PROSPEO_MAX_429_RETRIES = 2;
 const PROSPEO_RETRY_CAP_MS = 5_000;
+
+function resolveProspeoDeterministic4xx(
+  raw: unknown,
+  status: number,
+  latencyMs: number,
+): FindEmailOutcome {
+  const parsed = parseProspeoResponse(raw);
+  if (parsed.ok && parsed.email === null) {
+    const code =
+      typeof parsed.extra.error_code === 'string'
+        ? parsed.extra.error_code.toLowerCase()
+        : 'no_match';
+    return {
+      status: 'miss',
+      costMicrousd: 0,
+      latencyMs,
+      detail: `prospeo_http_${status}_${code}`,
+    };
+  }
+  if (!parsed.ok && parsed.errorCode !== 'malformed_response') {
+    return {
+      status: 'error',
+      errorCode: parsed.errorCode,
+      retryable: parsed.retryable,
+      costMicrousd: 0,
+      latencyMs,
+      detail: parsed.detail,
+    };
+  }
+  return {
+    status: 'error',
+    errorCode: 'provider_http_error',
+    retryable: false,
+    costMicrousd: 0,
+    latencyMs,
+    detail: `prospeo_http_${status}`,
+  };
+}
 
 function parseRetryAfterMs(header: string | null, attempt: number, baseMs: number): number {
   const fallback = Math.min(PROSPEO_RETRY_CAP_MS, baseMs * (attempt + 1));
@@ -247,6 +286,10 @@ export class ProspeoProvider implements EmailEnrichmentAdapter {
         latencyMs,
         detail: `prospeo_http_${response.status}`,
       };
+    }
+    if (PROSPEO_DETERMINISTIC_4XX.has(response.status)) {
+      const json: unknown = await response.json().catch(() => null);
+      return resolveProspeoDeterministic4xx(json, response.status, latencyMs);
     }
     if (!response.ok) {
       return {

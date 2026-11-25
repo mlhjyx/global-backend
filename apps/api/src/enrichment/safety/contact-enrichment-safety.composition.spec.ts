@@ -27,7 +27,7 @@ describe('native-pool safe preflight composition, fake database and zero physica
     const find = vi.spyOn(HunterProvider.prototype, 'findEmail').mockRejectedValue(new Error('must_not_invoke_during_preflight'));
     try {
       const x = world(); const result = await x.prepare(x.input); expect(result.status).toBe('PREPARED'); if (result.status !== 'PREPARED') throw new Error('expected prepared');
-      expect(x.tx.canonicalContact.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { companyId: C, contactPoints: { none: { type: 'email', verificationState: 'VALID' } } }, take: 10 }));
+      expect(x.tx.canonicalContact.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { companyId: C, OR: [{ title: null }, { NOT: { title: { equals: 'switchboard', mode: 'insensitive' } } }], contactPoints: { none: { type: 'email', verificationState: 'VALID' } } }, take: 10 }));
       expect(result.plan.targets[0]?.inputVersion).toBe(enrichmentInputVersion({ fullName: 'Synthetic Person', domain: 'company.example.invalid', companyName: 'Synthetic Company' }));
       expect(result.plan.slots.map((slot) => slot.provider)).toEqual(['hunter','millionverifier','emailable']); expect(result.plan.slots.map((slot) => slot.quoteMicrousd)).toEqual(['1700','1780','7600']);
       expect(result.plan.deadlineAtMs).toBe(601000); expect(JSON.stringify(result.plan)).not.toMatch(/Synthetic Person|company\.example\.invalid|fake-hunter/); expect(find).not.toHaveBeenCalled();
@@ -102,7 +102,7 @@ describe('full safety runtime composition drives bound steps through the origina
       reusableAttempt: vi.fn(async () => null),
       recordAttempt: vi.fn(async () => undefined),
       circuit: { load: vi.fn(async () => ({ status: 'CLOSED', windowStartedAt: null, windowSuccesses: 0, windowFailures: 0, consecutiveFailures: 0, openedAt: null, probeInFlight: false })), save: vi.fn(async () => undefined) } };
-    return { deps, events, broker, store, plan };
+    return { deps, events, broker, store, plan, queryRaw: tx.$queryRaw };
   }
   it('executes one admitted FINDER step through seal→broker before-physical-wire→persist without faking receipts', async () => {
     const x = world(); const runtime = createContactEnrichmentSafetyRuntime(x.deps as never);
@@ -110,10 +110,14 @@ describe('full safety runtime composition drives bound steps through the origina
     expect(result).toMatchObject({ admission: 'ADMITTED', operationRef: 'd'.repeat(64) });
     expect(x.events).toContain('BROKER_INVOKE'); expect(x.events.indexOf('SEAL')).toBeLessThan(x.events.indexOf('BROKER_INVOKE')); expect(x.store.persist).toHaveBeenCalled();
   });
-  it('does not persist or re-execute after a broker ACK loss and reports HOLD', async () => {
+  it('does not persist or re-execute after a broker ACK loss, releases unstarted ADMITTED steps, and reports HOLD', async () => {
     const x = world({ crash: true }); const runtime = createContactEnrichmentSafetyRuntime(x.deps as never);
     await expect(runtime.service.executeRun({ workspaceId: W, companyId: C, businessRunId: plan.businessRunId!, binding, lawfulBasis: { basis: 'legitimate_interest' }, remainingMicrousd: '250000', actorId: 'discovery-run:test' })).rejects.toThrow();
     expect(x.store.persist).not.toHaveBeenCalled(); expect(x.broker.invoke).toHaveBeenCalledTimes(1);
+    const releasedCalls = (x.deps.prisma.withWorkspace as ReturnType<typeof vi.fn>).mock.calls.length;
+    expect(releasedCalls).toBeGreaterThan(0);
+    const queries = (x.queryRaw as ReturnType<typeof vi.fn>).mock.calls.map(([strings]) => (strings as TemplateStringsArray).join('?'));
+    expect(queries.some((sql) => sql.includes("UPDATE public.contact_enrichment_execution_step SET dispatch_phase='RELEASED'") && sql.includes("dispatch_phase='ADMITTED' AND budget_operation_id IS NULL"))).toBe(true);
   });
 });
 

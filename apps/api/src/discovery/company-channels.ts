@@ -431,6 +431,13 @@ export async function loadLeadListChannelSummaries(
   return summaries;
 }
 
+/** 过滤历史总机占位行，只保留具名决策人联系人（供 `GET /canonical-companies/:id` 复用）。 */
+export function filterDecisionMakerContacts<
+  T extends { fullName?: string | null; title?: string | null },
+>(contacts: readonly T[]): T[] {
+  return contacts.filter((contact) => !isGenericSwitchboardContact(contact));
+}
+
 /** 读出单家公司的全渠道联系点与社媒（供 `GET /canonical-companies/:id` 复用，不污染主服务行数预算）。 */
 export async function loadCanonicalCompanyChannels(
   tx: Prisma.TransactionClient,
