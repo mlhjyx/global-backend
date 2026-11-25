@@ -204,7 +204,7 @@ describe('evaluateL0Gates：制裁新鲜度四态（J07）', () => {
 });
 
 describe('判定链动作：quickScanGateBlock / deepJudgeGateBlock（J07/J08）', () => {
-  it('G5 无域名 → 快扫任何模式都拦截进补数队列（UNKNOWN）', async () => {
+  it('G5 无域名 → 快扫任何模式都拦截（默认关闭死队列写入，显式开启时写补数任务）', async () => {
     const store = freshStore();
     const summary = await evaluateL0Gates(
       makeTx(
@@ -223,15 +223,33 @@ describe('判定链动作：quickScanGateBlock / deepJudgeGateBlock（J07/J08）
       reasonCode: 'GATE_DOMAIN_MISSING',
       verdict: 'UNKNOWN',
     });
-    // 门引擎同时写补数任务（queued）。
-    expect(store.tasks).toEqual([
-      expect.objectContaining({
-        canonicalCompanyId: COMPANY,
-        gateId: 'G_DOMAIN',
-        reasonCode: 'GATE_DOMAIN_MISSING',
-        status: 'queued',
-      }),
-    ]);
+    // 默认关闭无消费者的 gate_enrichment_task 写入，但 enrichmentGates 读侧语义不变。
+    expect(summary.enrichmentGates.map((g) => g.gateId)).toEqual(['G_DOMAIN']);
+    expect(store.tasks).toHaveLength(0);
+
+    vi.stubEnv('GATE_ENRICHMENT_TASK_WRITE_ENABLED', 'on');
+    try {
+      const enabledStore = freshStore();
+      await evaluateL0Gates(
+        makeTx(
+          happyWorld({
+            company: { ...happyWorld().company, domain: null },
+          }),
+          enabledStore,
+        ),
+        CTX,
+      );
+      expect(enabledStore.tasks).toEqual([
+        expect.objectContaining({
+          canonicalCompanyId: COMPANY,
+          gateId: 'G_DOMAIN',
+          reasonCode: 'GATE_DOMAIN_MISSING',
+          status: 'queued',
+        }),
+      ]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it('G5 DEAD → 通过 domainStatus 注入同样进补数队列', async () => {

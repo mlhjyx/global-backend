@@ -1,21 +1,14 @@
 /**
- * GET /metrics/billing-reconciliation（获客 vNext W3）：用量 ↔ 结算 ↔ 余额三方对账视图。
+ * GET /metrics/billing-reconciliation（获客 vNext W3 + Phase 2B 三账对齐）：
+ * AI Trace ↔ 用量（usage_ledger）↔ 结算（tool_budget_operation）↔ 余额包络（tool_budget_account）对账视图。
  *
- * 三方的权威口径（响应里逐项标注，不混用）：
- *   1. 用量（usage）：usage_ledger 的 cost_usd 记账（Float USD，AI tokens 与
- *      provider 调用按 resource_type 分行）。它是应用层「发生过的花费」账；
- *   2. 结算（settled）：tool_budget_operation 的实扣 microusd，口径与
- *      ExecutionBudgetWindowUsageService 完全一致——SETTLED/RESULT_UNKNOWN 且
- *      settled_at 落在窗口内取 charged（缺失回退 reserved；cent 计价旧行 ×10000），
- *      仍在途（RESERVED 且 created_at 在窗口内）的 reserved 单列。这是**窗口花费的
- *      唯一权威口径**（ch08 §3.1.1 C1a）；
- *   3. 余额（envelope）：tool_budget_account（未关闭账户）的授权包络状态——
- *      authorized_cap / charged / reserved。**余额来源表 = tool_budget_account**，
- *      它是引擎侧执行包络，不是客户钱包；客户余额与充值以 gain-saas 计费侧为准，
- *      本引擎不持有该真值。账户侧是累计快照，不与窗口口径直接相减。
- *
- * 对账信号 = usage − settled（同窗口）：非零不代表错误（usage_ledger 覆盖模型调用、
- * 结算可能跨窗口落到下一期），它是「何时需要人看一眼」的指针。
+ * 四方权威口径（响应里逐项标注，不混用）：
+ *   1. ai_trace：模型调用明细账（与 usage_ledger 共享同一 settledCost 口径）；
+ *   2. usage_ledger：应用层已记费用账（AI tokens + 外部 provider 调用）；
+ *   3. tool_budget_operation：工具与模型预留/实扣 microusd；额外拆出
+ *      `externalSettledMicrousd` 与 `selfHostedExcludedMicrousd`，将历史自托管工具
+ *      （crawl4ai.fetch / crawl4ai.render / social.fetch 等）的 1¢ 虚扣与真实外部支出分离；
+ *   4. tool_budget_account：未关闭执行包络的累计快照（余额真值仍在 gain-saas 计费侧）。
  */
 import { Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
@@ -23,17 +16,34 @@ import { PrismaService } from "../prisma/prisma.service";
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
+/** 自托管零外部边际成本工具的结果 schema 闭集，对账时单列剔除，不与外部付费调用混算。 */
+export const SELF_HOSTED_FREE_RESULT_SCHEMAS = Object.freeze([
+  "crawl4ai-fetch/v1",
+  "crawl4ai-render/v1",
+  "social-fetch/v1",
+  "searxng-search/v1",
+  "http-get/v1",
+  "smtp-probe-verdict/v1",
+] as const);
+
 export class BillingReconciliationInputError extends Error {}
 
 export interface BillingReconciliation {
   from: string | null;
   to: string | null;
+  aiTrace: {
+    rowCount: number;
+    nullCostRowCount: number;
+    totalMicrousd: number;
+  };
   usage: {
     totalMicrousd: number;
     byResourceType: Array<{ resourceType: string; rows: number; microusd: number }>;
   };
   settled: {
     settledMicrousd: number;
+    externalSettledMicrousd: number;
+    selfHostedExcludedMicrousd: number;
     inFlightMicrousd: number;
     byPurpose: Array<{ purpose: string; settledMicrousd: number }>;
   };
@@ -46,9 +56,14 @@ export interface BillingReconciliation {
     /** 账户侧是累计快照（charged 为 lifetime），不与窗口用量直接相减。 */
     lifetimeCumulative: true;
   };
-  /** usage − settled（同窗口）；正 = 记了账但未结算（或结算跨期），负 = 结算多于记账。 */
+  /** ai_trace − usage_ledger（同窗口）；统一记账口径后理想值为 0（仅允许跨表异步延迟）。 */
+  deltaAiTraceMinusUsageMicrousd: number;
+  /** usage − settled（同窗口全量，向后兼容既有字段）。 */
   deltaUsageMinusSettledMicrousd: number;
+  /** usage − externalSettled（剔除历史自托管工具虚扣后的真实外部费用差额）。 */
+  deltaUsageMinusExternalSettledMicrousd: number;
   sources: {
+    aiTraceTable: "ai_trace";
     usageTable: "usage_ledger";
     settleTable: "tool_budget_operation";
     balanceTable: "tool_budget_account";
@@ -56,12 +71,31 @@ export interface BillingReconciliation {
   };
 }
 
-/** 对账差额（纯函数，单测覆盖）。 */
+/** 对账差额（纯函数，保持旧签名与返回结构 100% 兼容）。 */
 export function reconcileSides(input: {
   usageMicrousd: number;
   settledMicrousd: number;
 }): { deltaMicrousd: number } {
   return { deltaMicrousd: input.usageMicrousd - input.settledMicrousd };
+}
+
+/** 三账对账差额（纯函数：ai_trace ↔ usage_ledger ↔ external/full settled）。 */
+export function reconcileThreeLedgers(input: {
+  aiTraceMicrousd: number;
+  usageMicrousd: number;
+  settledMicrousd: number;
+  externalSettledMicrousd: number;
+}): {
+  deltaUsageMinusSettledMicrousd: number;
+  deltaAiTraceMinusUsageMicrousd: number;
+  deltaUsageMinusExternalSettledMicrousd: number;
+} {
+  return {
+    deltaUsageMinusSettledMicrousd: reconcileSides(input).deltaMicrousd,
+    deltaAiTraceMinusUsageMicrousd: input.aiTraceMicrousd - input.usageMicrousd,
+    deltaUsageMinusExternalSettledMicrousd:
+      input.usageMicrousd - input.externalSettledMicrousd,
+  };
 }
 
 @Injectable()
@@ -83,6 +117,19 @@ export class BillingReconciliationService {
     const to = input.to ? new Date(`${input.to}T23:59:59.999Z`) : null;
 
     return this.prisma.withWorkspace(input.workspaceId, async (tx) => {
+      const [aiTraceRow] = await tx.$queryRaw<
+        Array<{ row_count: number; null_cost_rows: number; cost_usd: number }>
+      >(Prisma.sql`
+        SELECT
+          COUNT(*)::int AS row_count,
+          COUNT(*) FILTER (WHERE cost_usd IS NULL)::int AS null_cost_rows,
+          COALESCE(SUM(cost_usd), 0)::float8 AS cost_usd
+        FROM ai_trace
+        WHERE workspace_id = ${input.workspaceId}::uuid
+          AND (${from}::timestamptz IS NULL OR created_at >= ${from}::timestamptz)
+          AND (${to}::timestamptz IS NULL OR created_at <= ${to}::timestamptz)
+      `);
+
       const usageRows = await tx.$queryRaw<
         Array<{ resource_type: string; row_count: number; cost_usd: number }>
       >(Prisma.sql`
@@ -96,7 +143,12 @@ export class BillingReconciliationService {
       `);
 
       const settleRows = await tx.$queryRaw<
-        Array<{ purpose: string; settled: bigint; in_flight: bigint }>
+        Array<{
+          purpose: string;
+          settled: bigint;
+          self_hosted_settled: bigint;
+          in_flight: bigint;
+        }>
       >(Prisma.sql`
         SELECT
           COALESCE(a.purpose::text, 'unknown') AS purpose,
@@ -113,6 +165,20 @@ export class BillingReconciliationService {
               ELSE 0
             END
           ), 0)::bigint AS settled,
+          COALESCE(SUM(
+            CASE
+              WHEN o.status IN ('SETTLED', 'RESULT_UNKNOWN')
+                AND o.result_schema IN (${Prisma.join(SELF_HOSTED_FREE_RESULT_SCHEMAS)})
+                AND (${from}::timestamptz IS NULL OR o.settled_at >= ${from}::timestamptz)
+                AND (${to}::timestamptz IS NULL OR o.settled_at <= ${to}::timestamptz)
+              THEN CASE
+                WHEN o.amount_unit = 'microusd'
+                  THEN COALESCE(o.charged_microusd, o.reserved_microusd, 0)
+                ELSE COALESCE(o.charged_cents, o.reserved_cents, 0) * 10000
+              END
+              ELSE 0
+            END
+          ), 0)::bigint AS self_hosted_settled,
           COALESCE(SUM(
             CASE
               WHEN o.status = 'RESERVED'
@@ -152,6 +218,8 @@ export class BillingReconciliationService {
           AND closed_at IS NULL
       `);
 
+      const aiTraceMicrousd = Math.round((aiTraceRow?.cost_usd ?? 0) * 1e6);
+
       const byResourceType = usageRows.map((row) => ({
         resourceType: row.resource_type,
         rows: row.row_count,
@@ -163,16 +231,41 @@ export class BillingReconciliationService {
         .map((row) => ({ purpose: row.purpose, settledMicrousd: Number(row.settled) }))
         .filter((row) => row.settledMicrousd !== 0);
       const settledMicrousd = byPurpose.reduce((sum, row) => sum + row.settledMicrousd, 0);
+      const selfHostedExcludedMicrousd = settleRows.reduce(
+        (sum, row) => sum + Number(row.self_hosted_settled ?? 0n),
+        0,
+      );
+      const externalSettledMicrousd = Math.max(
+        0,
+        settledMicrousd - selfHostedExcludedMicrousd,
+      );
       const inFlightMicrousd = settleRows.reduce((sum, row) => sum + Number(row.in_flight), 0);
 
       const cap = Number(envelope?.cap_microusd ?? 0n);
       const charged = Number(envelope?.charged_microusd ?? 0n);
+      const deltas = reconcileThreeLedgers({
+        aiTraceMicrousd,
+        usageMicrousd,
+        settledMicrousd,
+        externalSettledMicrousd,
+      });
 
       return {
         from: input.from ?? null,
         to: input.to ?? null,
+        aiTrace: {
+          rowCount: aiTraceRow?.row_count ?? 0,
+          nullCostRowCount: aiTraceRow?.null_cost_rows ?? 0,
+          totalMicrousd: aiTraceMicrousd,
+        },
         usage: { totalMicrousd: usageMicrousd, byResourceType },
-        settled: { settledMicrousd, inFlightMicrousd, byPurpose },
+        settled: {
+          settledMicrousd,
+          externalSettledMicrousd,
+          selfHostedExcludedMicrousd,
+          inFlightMicrousd,
+          byPurpose,
+        },
         envelope: {
           openAccounts: envelope?.open_accounts ?? 0,
           authorizedCapMicrousd: cap,
@@ -181,15 +274,16 @@ export class BillingReconciliationService {
           remainingMicrousd: cap - charged,
           lifetimeCumulative: true,
         },
-        deltaUsageMinusSettledMicrousd: reconcileSides({
-          usageMicrousd,
-          settledMicrousd,
-        }).deltaMicrousd,
+        deltaAiTraceMinusUsageMicrousd: deltas.deltaAiTraceMinusUsageMicrousd,
+        deltaUsageMinusSettledMicrousd: deltas.deltaUsageMinusSettledMicrousd,
+        deltaUsageMinusExternalSettledMicrousd:
+          deltas.deltaUsageMinusExternalSettledMicrousd,
         sources: {
+          aiTraceTable: "ai_trace",
           usageTable: "usage_ledger",
           settleTable: "tool_budget_operation",
           balanceTable: "tool_budget_account",
-          note: "余额=引擎执行包络（tool_budget_account，累计快照）；客户钱包余额真值在 gain-saas 计费侧，不在本引擎。",
+          note: "余额=引擎执行包络（tool_budget_account，累计快照）；自托管免费工具（crawl4ai 等）已单独剔除于 externalSettledMicrousd；客户钱包余额真值在 gain-saas 计费侧。",
         },
       };
     });

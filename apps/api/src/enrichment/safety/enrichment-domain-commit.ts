@@ -20,6 +20,7 @@ import type { EmailVerificationProviderResult } from "../verification/email-veri
 import type { ProviderEmailPointSnapshot } from "../../discovery/contact-point-writer";
 import { contactTargetBeforeDigest } from "./enrichment-target-snapshot";
 import { assertSupportedEnrichmentSlot } from "./enrichment-call-plan";
+import { isActiveOriginalEnrichmentFact } from "./enrichment-safety-policy";
 import { canonicalSafetyJson, deepFreezeSafety, denseSafetyArray, parseEnrichmentCandidateRef } from "./enrichment-safety.contract";
 import { buildContactQualityFact, type ContactQualityFact, type ContactQualityNewPoint, type ContactQualityPoint } from "./enrichment-quality-facts";
 import type { Prisma } from "@prisma/client";
@@ -122,8 +123,7 @@ export class EnrichmentDomainCommitter {
     });
   }
   private activeOriginalFacts(state: LockedEnrichmentContactCommitState): readonly NonNullable<LockedEnrichmentContactCommitState["originalFacts"]>[number][] {
-    return (state.originalFacts ?? []).filter((fact) => fact.operationId !== null && fact.status !== "RELEASED" &&
-      !(fact.status === "SETTLED" && (fact.dispatchPhase === "SETTLED" || fact.dispatchPhase === "SETTLED_WAITING_APPLY") && fact.domainState === "APPLIED"));
+    return (state.originalFacts ?? []).filter(isActiveOriginalEnrichmentFact);
   }
   private committedCoherent(state: LockedEnrichmentContactCommitState): boolean {
     return this.activeOriginalFacts(state).length === 0;

@@ -176,11 +176,15 @@ function tool(
   ) {
     return unavailable();
   }
+  // 自托管非外部工具（external: false，如 crawl4ai.fetch / crawl4ai.render / social.fetch）
+  // 不产生外部按次边际 API 费用，workspace 技术报价按 0¢ 计入，避免虚高包络与假扣费。
+  const workspaceEstimatedCents =
+    contract.cost.external === false ? 0 : contract.cost.estimatedCents;
   return Object.freeze({
     toolId: contract.id,
     version: contract.version,
     maxPhysicalInvocations,
-    estimatedCents: contract.cost.estimatedCents,
+    estimatedCents: workspaceEstimatedCents,
     costUnit: contract.cost.unit,
   });
 }

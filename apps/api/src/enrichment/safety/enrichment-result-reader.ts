@@ -14,9 +14,12 @@ import { parseDurableExecutionReceipt } from "../../durable-results/durable-exec
 import { parseArtifactReference } from "../../durable-results/artifact/artifact-reference.schema";
 import { isCanonicalArtifactUuid } from "../../durable-results/artifact/artifact.types";
 import { isTypedProjectionSchema } from "../../durable-results/durable-result-strategy";
-import { CONTACT_EMAIL_VERIFICATION_SCHEMAS } from "../../durable-results/contact-email-verification-projections";
 import { ExecutionControlError } from "../../execution-budget/execution-control-error";
 import { assertSupportedEnrichmentSlot } from "./enrichment-call-plan";
+import {
+  controlledVerificationResultSchema,
+  isControlledEnrichmentVerifier,
+} from "./enrichment-safety-policy";
 import { deepFreezeSafety, safetyDigest } from "./enrichment-safety.contract";
 import type { SettledEnrichmentStepReference } from "./enrichment-safety.contract";
 import type { BudgetStore, BudgetReservation } from "../../tools/budget-store";
@@ -148,12 +151,7 @@ export class EnrichmentResultReader {
           },
         });
       }
-      if (
-        step.provider !== "millionverifier" &&
-        step.provider !== "emailable" &&
-        step.provider !== "zerobounce"
-      )
-        return null;
+      if (!isControlledEnrichmentVerifier(step.provider)) return null;
       return deepFreezeSafety({
         phase: "VERIFY" as const,
         step,
@@ -309,16 +307,10 @@ export class EnrichmentResultReader {
       }>
   > {
     const step = binding.step;
-    const schema =
-      step.phase === "SMTP"
-        ? "smtp-probe-verdict/v1"
-        : step.provider === "millionverifier"
-          ? CONTACT_EMAIL_VERIFICATION_SCHEMAS.millionverifier
-          : step.provider === "emailable"
-            ? CONTACT_EMAIL_VERIFICATION_SCHEMAS.emailable
-            : step.provider === "zerobounce"
-              ? CONTACT_EMAIL_VERIFICATION_SCHEMAS.zerobounce
-              : null;
+    const schema = controlledVerificationResultSchema(
+      step.phase === "SMTP" ? "SMTP" : "VERIFY",
+      step.provider,
+    );
     if (
       !schema ||
       !isTypedProjectionSchema(schema) ||

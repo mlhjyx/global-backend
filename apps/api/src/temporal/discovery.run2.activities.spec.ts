@@ -568,7 +568,28 @@ describe('M0③ quickJudgeBatch', () => {
  * 零容器：假事务模拟两张门表的表达式唯一索引（同键第二次写入被跳过）。
  */
 describe('P3 J08 快扫 G5 域名门与补数队列', () => {
-  it('无域名公司写 gate_enrichment_task(queued) 且不进模型批量', async () => {
+  it('默认关闭无消费者死队列写入时仍拦截无域名公司不进模型批量', async () => {
+    const { activities, jobUpdates, enrichmentTasks } = makeActivities({
+      jobs: [
+        { id: 'j1', canonicalCompanyId: 'c1' },
+        { id: 'j2', canonicalCompanyId: 'c2' },
+      ],
+      companies: [company('c1'), company('c2', { domain: null })],
+    });
+    mocks.judgeFitCompany.mockResolvedValue({ verdict: 'weak' });
+
+    const result = await activities.quickJudgeBatch(ARGS);
+    expect(result).toMatchObject({ judged: 1, gated: 1 });
+    expect(enrichmentTasks).toHaveLength(0);
+    expect(jobUpdates.find((update) => update.where.id === 'j2')?.data).toMatchObject({
+      stage: 'skipped',
+      lastErrorCode: 'GATE_DOMAIN_MISSING',
+    });
+  });
+
+  it('无域名公司写 gate_enrichment_task(queued) 且不进模型批量（显式开启开关）', async () => {
+    vi.stubEnv('GATE_ENRICHMENT_TASK_WRITE_ENABLED', 'on');
+    try {
     const { activities, jobUpdates, enrichmentTasks, events } = makeActivities({
       jobs: [
         { id: 'j1', canonicalCompanyId: 'c1' },
@@ -615,9 +636,14 @@ describe('P3 J08 快扫 G5 域名门与补数队列', () => {
       reasonCode: 'GATE_DOMAIN_MISSING',
       verdict: 'UNKNOWN',
     });
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
-  it('DEAD 域名同样进补数队列（P2 域名存活结果的接入缝）', async () => {
+  it('DEAD 域名同样进补数队列（P2 域名存活结果的接入缝，显式开启开关）', async () => {
+    vi.stubEnv('GATE_ENRICHMENT_TASK_WRITE_ENABLED', 'on');
+    try {
     const { activities, enrichmentTasks, jobUpdates } = makeActivities(
       {
         jobs: [
@@ -648,6 +674,9 @@ describe('P3 J08 快扫 G5 域名门与补数队列', () => {
       stage: 'skipped',
       lastErrorCode: 'GATE_DOMAIN_DEAD',
     });
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it('allow_domainless=true 的 ICP：无域名照常判（NOT_APPLICABLE）', async () => {
@@ -675,7 +704,9 @@ describe('P3 J08 快扫 G5 域名门与补数队列', () => {
     expect((mocks.execute.mock.calls[0]![1] as { prompt: string }).prompt).toContain('Company c2');
   });
 
-  it('replay 幂等：同一 (company, icp, gate) 重跑不重复建补数任务', async () => {
+  it('replay 幂等：同一 (company, icp, gate) 重跑不重复建补数任务（显式开启开关）', async () => {
+    vi.stubEnv('GATE_ENRICHMENT_TASK_WRITE_ENABLED', 'on');
+    try {
     const state = {
       jobs: [{ id: 'j1', canonicalCompanyId: 'c1' }],
       companies: [company('c1', { domain: null })],
@@ -686,6 +717,9 @@ describe('P3 J08 快扫 G5 域名门与补数队列', () => {
     await activities.quickJudgeBatch(ARGS);
 
     expect(enrichmentTasks).toHaveLength(1);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
 

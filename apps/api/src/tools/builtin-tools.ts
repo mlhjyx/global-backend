@@ -24,6 +24,7 @@ import {
   SearxResult,
   SearxCategory,
 } from "../adapters/searxng";
+import { executeWithSearxngFallback } from "../adapters/searxng-fallback";
 import { crawlUrl } from "../adapters/web-crawler";
 import {
   fetchPageHttpFirst,
@@ -181,18 +182,28 @@ export const searxngSearchTool: Tool<
       return { healthy: false };
     }
   },
-  execute: async (input) => {
-    const results = await searxSearchPaged(
+  execute: async (input, ctx) => {
+    const query = {
+      q: input.q,
+      categories: input.categories,
+      engines: input.engines,
+      language: input.language,
+      timeRange: input.timeRange,
+    };
+    const pages = input.pages ?? 1;
+    const outcome = await executeWithSearxngFallback(
+      () => searxSearchPaged(query, pages),
+      query,
       {
-        q: input.q,
-        categories: input.categories,
-        engines: input.engines,
-        language: input.language,
-        timeRange: input.timeRange,
+        pages,
+        beforeRequest: beforeExternalRequest(ctx),
       },
-      input.pages ?? 1,
     );
-    return { data: { results: durableSearxResults(results) }, costCents: 0 };
+    return {
+      data: { results: durableSearxResults(outcome.results) },
+      costCents: 0,
+      ...(outcome.fallbackUsed ? { degraded: true } : {}),
+    };
   },
 };
 
@@ -233,7 +244,7 @@ export const socialFetchTool: Tool<
   version: "1.0.0",
   category: "fetch",
   sourceClass: "public_intelligence",
-  cost: { unit: "page", estimatedCents: 1, external: false },
+  cost: { unit: "page", estimatedCents: 0, external: false },
   rateLimit: { rps: 2, concurrency: 2, perDomainCrawlDelayMs: 3000 },
   compliance: {
     sourcePolicy: "advisory",
@@ -428,6 +439,8 @@ export function createCrawl4aiFetchTool(
     version: "1.0.0",
     category: "fetch",
     sourceClass: "public_intelligence",
+    // 保留 estimatedCents=1 以兼容跨仓冻结的 Site Builder 报价金标（site-build-budget.v1.json）；
+    // 实际 execute() 结算固定 costCents=0，且获客工作区报价包络对 external:false 工具按 0¢ 计价。
     cost: { unit: "page", estimatedCents: 1, external: false },
     rateLimit: readCrawl4aiFetchLimits(),
     // advisory：标的=任意公司官网（未登记放行，登记即强制 SUSPENDED/用途门）；robots 在 execute 内强制。
@@ -605,7 +618,8 @@ export function createCrawl4aiFetchTool(
       }
       return {
         data: { url: input.url, text, contentHash: hash(text) },
-        costCents: 1,
+        // 自托管 Crawl4AI 无外部按次边际 API 费用，统一按 0¢ 结算。
+        costCents: 0,
         provenance: {
           sourceUrl: input.url,
           fetchedAt: new Date().toISOString(),

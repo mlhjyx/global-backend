@@ -8,6 +8,10 @@ import {
   canonicalGatewayCredential,
   parseModelGatewayRequestTimeout,
 } from './gateway-credential-boundary';
+import {
+  resolveModelGatewayBaseUrl,
+  validateModelGatewayEndpoint,
+} from '../adapters/model-gateway-endpoint';
 
 export interface GatewayEvaluationConfig {
   /**
@@ -28,12 +32,18 @@ export function buildGatewayProvider(
   env: NodeJS.ProcessEnv = process.env,
   evaluation: GatewayEvaluationConfig = {},
 ): ModelProvider | null {
-  const baseUrl = env.MODEL_GATEWAY_URL;
+  const baseUrl = resolveModelGatewayBaseUrl(env);
   const apiKey = canonicalGatewayCredential(env.MODEL_GATEWAY_KEY);
   const requestTimeoutMs = parseModelGatewayRequestTimeout(
     env.MODEL_TIMEOUT_MS,
   );
   if (!baseUrl || !apiKey || requestTimeoutMs === undefined) return null;
+  const validated = validateModelGatewayEndpoint(baseUrl, {
+    allowInternalServiceHttp: true,
+    allowPlainHttpHostnames: true,
+    env,
+  });
+  if (!validated.ok) return null;
   return new OpenAICompatibleProvider({
     id: 'gateway',
     baseUrl,

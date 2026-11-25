@@ -72,7 +72,8 @@ describe("manufacturer execution signed authority", () => {
           old.policy.tools.find((t) => t.toolId === id)!.maxPhysicalInvocations,
       ).toBe(50);
     }
-    expect(next.requiredCapMicrousd - old.requiredCapMicrousd).toBe(500000n);
+    // Self-hosted searxng.search + crawl4ai.fetch add 0 external cost while still expanding maxPhysicalInvocations by 50.
+    expect(next.requiredCapMicrousd - old.requiredCapMicrousd).toBe(0n);
     expect(next.policy.executionLimits.manufacturerNetworkCompanies).toBe(50);
     expect(old.policy.executionLimits).not.toHaveProperty(
       "manufacturerNetworkCompanies",

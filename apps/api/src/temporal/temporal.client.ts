@@ -6,6 +6,12 @@ import {
 } from "../platform-authority/machine-token-runtime";
 import type { MachineTokenClient } from "../platform-authority/machine-token-client";
 import { currentRuntimeReleaseIdentity } from "../runtime/runtime-release-identity";
+import {
+  resolveCustomerTemporalConfig,
+  resolveCustomerTemporalTlsEnv,
+  validateCustomerTemporalReadiness,
+  type CustomerTemporalReadinessReport,
+} from "./temporal-config";
 
 /** Thin wrapper so services (e.g. the relay) can start workflows via DI. */
 @Injectable()
@@ -18,6 +24,12 @@ export class TemporalClient implements OnModuleInit, OnModuleDestroy {
   private machineToken?: MachineTokenClient;
   private connect = async (): Promise<Connection> => {
     this.machineToken?.close();
+    const readiness = validateCustomerTemporalReadiness(process.env);
+    if (!readiness.ok) {
+      throw new Error(
+        `TEMPORAL_CUSTOMER_CONFIG_INVALID:${readiness.issues.join(",")}`,
+      );
+    }
     const release = await currentRuntimeReleaseIdentity();
     if (!release.attested)
       throw new Error("RUNTIME_RELEASE_IDENTITY_UNAVAILABLE");
@@ -29,7 +41,9 @@ export class TemporalClient implements OnModuleInit, OnModuleDestroy {
     this.machineToken = client;
     try {
       return await Connection.connect({
-        ...(await temporalTlsConfiguration()),
+        ...(await temporalTlsConfiguration(
+          resolveCustomerTemporalTlsEnv(process.env),
+        )),
         apiKey: () => client.currentToken(),
       });
     } catch (error) {
@@ -37,6 +51,13 @@ export class TemporalClient implements OnModuleInit, OnModuleDestroy {
       throw error;
     }
   };
+
+  /** Exposes current customer Temporal dual-mode readiness without mutating connection state. */
+  inspectCustomerConfiguration(
+    env: NodeJS.ProcessEnv = process.env,
+  ): CustomerTemporalReadinessReport {
+    return validateCustomerTemporalReadiness(env);
+  }
 
   async onModuleInit(): Promise<void> {
     this.bootstrapAttempted = true;
@@ -68,10 +89,11 @@ export class TemporalClient implements OnModuleInit, OnModuleDestroy {
         await connection.close();
         return false;
       }
+      const config = resolveCustomerTemporalConfig(process.env);
       this.connection = connection;
       this.client = new Client({
         connection: this.connection,
-        namespace: "default",
+        namespace: config.namespace,
       });
       return true;
     } catch {
