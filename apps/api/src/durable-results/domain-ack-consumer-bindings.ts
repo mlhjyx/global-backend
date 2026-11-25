@@ -48,6 +48,7 @@ export const DOMAIN_ACK_PRODUCT_CONSUMER_BINDINGS = Object.freeze([
   // WEB-1：deepseek.search 是模型联网搜索的可选执行器（与 searxng 同形投影：url+title）。
   { producerId: 'deepseek.search', consumer: 'SearchDiscoveryProvider', domainAggregateType: 'SearchResultEvidence', identity: 'result-url-and-query-digest', resultStrategy: 'typed_projection', resultSchema: 'deepseek-search/v1' },
   { producerId: 'serper.search', consumer: 'SearchDiscoveryProvider', domainAggregateType: 'SearchResultEvidence', identity: 'result-url-and-query-digest', resultStrategy: 'typed_projection', resultSchema: 'serper-search/v1' },
+  { producerId: 'brave.search', consumer: 'SearchDiscoveryProvider', domainAggregateType: 'SearchResultEvidence', identity: 'result-url-and-query-digest', resultStrategy: 'typed_projection', resultSchema: 'brave-search/v1' },
   { producerId: 'exa.search', consumer: 'SearchDiscoveryProvider', domainAggregateType: 'SearchResultEvidence', identity: 'result-url-and-query-digest', resultStrategy: 'typed_projection', resultSchema: 'exa-search/v1' },
   { producerId: 'google_places.search', consumer: 'SearchDiscoveryProvider', domainAggregateType: 'LocationEvidence', identity: 'google-place-id', resultStrategy: 'typed_projection', resultSchema: 'google-places-search/v1' },
   { producerId: 'social.search', consumer: 'SocialPresenceContactAdapter', domainAggregateType: 'SearchResultEvidence', identity: 'result-url-and-query-digest', resultStrategy: 'typed_projection', resultSchema: 'social-search/v1' },
@@ -92,6 +93,8 @@ const DISCOVERY_GOVERNED_COMPANY_ACK_BINDINGS = Object.freeze([
   { producerId: 'companies_house.search', consumer: 'CompaniesHouseRegistryDiscoveryProvider', domainAggregateType: 'RawSourceRecord', identity: 'run-provider-operation-result-digest', resultStrategy: 'typed_projection', resultSchema: 'companies-house-search/v1' },
   // A 方案（local_query）：回执由 registry 适配器确定性构造（无物理调用，成本 0）。
   { producerId: 'registry.query', consumer: 'RegistryFrameDiscoveryProvider', domainAggregateType: 'RawSourceRecord', identity: 'run-provider-operation-result-digest', resultStrategy: 'typed_projection', resultSchema: 'registry-query/v1' },
+  // Batch 1.4-B（local_query）：本地已审渠道库 `source_channel_record` 零出网回执。
+  { producerId: 'channel_catalog.query', consumer: 'ChannelCatalogDiscoveryProvider', domainAggregateType: 'RawSourceRecord', identity: 'run-provider-operation-result-digest', resultStrategy: 'typed_projection', resultSchema: 'channel-catalog-query/v1' },
   // WEB-1：模型联网搜索的公司回执来自结构确认任务的持久投影（任务 id 即 producer）。
   // consumer 必须与 discovery-query-governed-lineage.ts 的 PROVIDER_CONTRACT 一致。
   { producerId: 'discovery.web_search_candidates', consumer: 'ModelWebSearchDiscoveryProvider', domainAggregateType: 'RawSourceRecord', identity: 'run-provider-operation-result-digest', resultStrategy: 'typed_projection', resultSchema: 'discovery-web-search-candidates/v1' },

@@ -16,6 +16,9 @@
   "registry_frame": [
     "company_registry"
   ],
+  "channel_catalog": [
+    "industry_data"
+  ],
   "directory": [
     "industry_data"
   ],

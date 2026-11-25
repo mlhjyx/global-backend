@@ -32,7 +32,7 @@ export const EXPECTED_TOOL_IDS = Object.freeze([
   'inpi_rne.search', 'google_patents.search', 'tradefair.algolia',
   'mapyourshow.fetch', 'samgov.search', 'opencorporates.search', 'sanctions.download',
   'deepseek.search', 'deepseek.fetch',
-  'serper.search', 'exa.search', 'google_places.search',
+  'serper.search', 'brave.search', 'exa.search', 'google_places.search',
   'contact_email.find.hunter', 'contact_email.verify.millionverifier',
   'contact_email.verify.emailable', 'contact_email.verify.zerobounce',
 ]);

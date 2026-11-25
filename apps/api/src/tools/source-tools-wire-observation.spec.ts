@@ -40,6 +40,7 @@ vi.mock("../adapters/guarded-http", async (importOriginal) => ({
  * touch guarded-http; deepseek-tools.spec.ts proves their wires instead.
  */
 const DECLARED = [
+  "brave.search",
   "crawl4ai.render",
   "deepseek.fetch",
   "deepseek.search",

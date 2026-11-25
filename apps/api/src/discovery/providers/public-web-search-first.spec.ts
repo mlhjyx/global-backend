@@ -421,7 +421,7 @@ describe('PublicWebDiscoveryProvider search-first discovery (G3 5.3)', () => {
 
   it('allows the extract task only search tools (never page fetch)', () => {
     const allowed = getTask('discovery.extract_company')?.allowedTools;
-    expect(allowed).toEqual(['searxng.search', 'serper.search', 'exa.search', 'google_places.search']);
+    expect(allowed).toEqual(['searxng.search', 'serper.search', 'brave.search', 'exa.search', 'google_places.search']);
     expect(allowed).not.toContain('crawl4ai.fetch');
   });
 });

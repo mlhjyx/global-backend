@@ -32,11 +32,13 @@ import type {
   SearchProviderOutput,
 } from '../../tools/search-provider-tools';
 import {
+  resolveBraveSearchApiKey,
   resolveExaApiKey,
   resolveGoogleMapsApiKey,
   resolveSerperApiKey,
 } from '../../adapters/search-providers';
 import { buildEcosystemSniperQueries } from '../ecosystem-sniper';
+import { fuseSearchEngineHits, type SearchSourceBucket } from '../cross-source-fusion';
 import type { CrawlResult } from '../../adapters/web-crawler';
 import { extractSameSiteLinks } from '../../adapters/site-links';
 import { extractPublicContacts, type PublicContact } from '../../adapters/contact-extractor';
@@ -49,6 +51,7 @@ import { isAllowedByRobots } from '../../adapters/robots';
 import { normalizeDomain } from '../identity';
 import { companyProjectPageUrl } from '../website-profile/project-page-evidence';
 import {
+  MAX_GOOGLE_PLACES_SEARCHES_PER_QUERY,
   MAX_PUBLIC_WEB_CONTACT_LINKED_PAGES,
   MAX_PUBLIC_WEB_DOMAINS_PER_QUERY,
 } from '../execution-envelope';
@@ -264,7 +267,7 @@ export class PublicWebDiscoveryProvider
     };
   }
 
-  /** 多引擎 L0 搜索（SearXNG 基线 + 已配置 key 时的 Serper / Exa 融合），语言随目标国。 */
+  /** 多引擎 L0 搜索（SearXNG 基线 + 已配置 key 时的 Serper / Brave / Exa，按 RRF 共识加权融合），语言随目标国。 */
   private async search(
     q: string,
     language: string,
@@ -277,7 +280,9 @@ export class PublicWebDiscoveryProvider
       { q, language },
       toolCtx,
     );
-    const merged: SearxngSearchResult[] = [...res.data.results.slice(0, 20)];
+    const buckets: SearchSourceBucket[] = [
+      { source: 'searxng', hits: res.data.results.slice(0, 20) },
+    ];
     if (resolveSerperApiKey()) {
       const serperHits = await this.invokeOptionalSearch(
         () =>
@@ -291,7 +296,27 @@ export class PublicWebDiscoveryProvider
           ),
         'serper.search',
       );
-      merged.push(...serperHits);
+      if (serperHits.length > 0) buckets.push({ source: 'serper', hits: serperHits });
+    }
+    if (resolveBraveSearchApiKey()) {
+      const braveHits = await this.invokeOptionalSearch(
+        () =>
+          this.deps.broker!.invoke<
+            { query: string; count?: number; country?: string; searchLang?: string },
+            SearchProviderOutput
+          >(
+            'brave.search',
+            {
+              query: q,
+              count: 10,
+              ...(countryIso ? { country: countryIso.toUpperCase() } : {}),
+              searchLang: language,
+            },
+            toolCtx,
+          ),
+        'brave.search',
+      );
+      if (braveHits.length > 0) buckets.push({ source: 'brave', hits: braveHits });
     }
     if (resolveExaApiKey()) {
       const exaHits = await this.invokeOptionalSearch(
@@ -306,9 +331,9 @@ export class PublicWebDiscoveryProvider
           ),
         'exa.search',
       );
-      merged.push(...exaHits);
+      if (exaHits.length > 0) buckets.push({ source: 'exa', hits: exaHits });
     }
-    return dedupeSearchResults(merged);
+    return fuseSearchEngineHits(buckets);
   }
 
   private async invokeOptionalSearch(
@@ -361,28 +386,36 @@ export class PublicWebDiscoveryProvider
     }
 
     if (resolveGoogleMapsApiKey() && searches[0]) {
-      try {
-        const placesRes = await this.deps.broker!.invoke<
-          { textQuery: string; maxResultCount?: number; regionCode?: string; languageCode?: string },
-          GooglePlacesToolOutput
-        >(
-          'google_places.search',
-          {
-            textQuery: searches[0],
-            maxResultCount: 10,
-            ...(countryIso ? { regionCode: countryIso } : {}),
-            languageCode: language,
-          },
-          toolCtx,
-        );
-        for (const place of placesRes.data?.places ?? []) {
-          if (place.websiteUri) {
-            out.push({ url: place.websiteUri, ...(place.name ? { title: place.name } : {}) });
+      const placeQueries = buildGooglePlacesGridQueries(
+        searches[0],
+        filters.cities,
+        countryIso,
+        MAX_GOOGLE_PLACES_SEARCHES_PER_QUERY,
+      );
+      for (const textQuery of placeQueries) {
+        try {
+          const placesRes = await this.deps.broker!.invoke<
+            { textQuery: string; maxResultCount?: number; regionCode?: string; languageCode?: string },
+            GooglePlacesToolOutput
+          >(
+            'google_places.search',
+            {
+              textQuery,
+              maxResultCount: 10,
+              ...(countryIso ? { regionCode: countryIso } : {}),
+              languageCode: language,
+            },
+            toolCtx,
+          );
+          for (const place of placesRes.data?.places ?? []) {
+            if (place.websiteUri) {
+              out.push({ url: place.websiteUri, ...(place.name ? { title: place.name } : {}) });
+            }
           }
+        } catch (error) {
+          if (isExecutionControlError(error)) throw error;
+          this.log(`optional google_places.search degraded: ${String(error).slice(0, 100)}`);
         }
-      } catch (error) {
-        if (isExecutionControlError(error)) throw error;
-        this.log(`optional google_places.search degraded: ${String(error).slice(0, 100)}`);
       }
     }
     return dedupeSearchResults(out);
@@ -979,4 +1012,49 @@ function resolveTargetCountryIso(query: CompanyDiscoveryQuery): string | undefin
   const raw = query.filters?.country;
   if (typeof raw !== 'string') return undefined;
   return countryIso(raw);
+}
+
+/** 重点出口国的工业/商贸枢纽城市（Google Places 多城市网格召回用，最多取前 2 城配基准检索串）。 */
+const COUNTRY_INDUSTRIAL_HUBS: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  DE: ['München', 'Frankfurt'],
+  IT: ['Milano', 'Bologna'],
+  ES: ['Madrid', 'Barcelona'],
+  FR: ['Lyon', 'Paris'],
+  NL: ['Rotterdam', 'Eindhoven'],
+  PL: ['Warszawa', 'Kraków'],
+  GB: ['Birmingham', 'London'],
+  BR: ['São Paulo', 'Curitiba'],
+  MX: ['Monterrey', 'Ciudad de México'],
+  US: ['Houston', 'Los Angeles'],
+  TR: ['İstanbul', 'İzmir'],
+  AE: ['Dubai', 'Abu Dhabi'],
+  AU: ['Sydney', 'Melbourne'],
+  JP: ['Tokyo', 'Osaka'],
+  IN: ['Mumbai', 'Bengaluru'],
+});
+
+export function buildGooglePlacesGridQueries(
+  baseQuery: string,
+  rawCities: unknown,
+  countryIsoCode: string | undefined,
+  maxQueries: number = MAX_GOOGLE_PLACES_SEARCHES_PER_QUERY,
+): string[] {
+  const trimmedBase = baseQuery.trim();
+  if (!trimmedBase || maxQueries < 1) return [];
+  const explicitCities = (Array.isArray(rawCities) ? rawCities : typeof rawCities === 'string' ? [rawCities] : [])
+    .filter((item): item is string => typeof item === 'string' && item.trim().length > 1)
+    .map((city) => city.trim());
+  const hubs = explicitCities.length > 0
+    ? explicitCities
+    : countryIsoCode
+      ? [...(COUNTRY_INDUSTRIAL_HUBS[countryIsoCode.toUpperCase()] ?? [])]
+      : [];
+  const queries = [trimmedBase];
+  const lowerBase = trimmedBase.toLowerCase();
+  for (const city of hubs) {
+    if (queries.length >= maxQueries) break;
+    if (lowerBase.includes(city.toLowerCase())) continue;
+    queries.push(`${trimmedBase} ${city}`.slice(0, 300));
+  }
+  return queries.slice(0, maxQueries);
 }

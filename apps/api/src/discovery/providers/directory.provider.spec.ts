@@ -144,5 +144,19 @@ describe('名录发现检索串构造', () => {
     expect(isDirectoryListingShaped('https://x.example.com/a', '中国电子元件企业大全')).toBe(true);
     expect(isDirectoryListingShaped('https://x.example.com/a', '参展商名单 | 2026 展会')).toBe(true);
     expect(isDirectoryListingShaped('https://baike.baidu.com/item/电子', '电子元件 - 百科')).toBe(false);
+    // 多语种欧洲名录信号（IT/ES/FR/PL/TR）
+    expect(isDirectoryListingShaped('https://www.key-expo.com/catalogo-espositori', '')).toBe(true);
+    expect(isDirectoryListingShaped('https://example.fr/annuaire-exposants', '')).toBe(true);
+    expect(isDirectoryListingShaped('https://example.pl/lista-wystawcow', '')).toBe(true);
+  });
+
+  it('意大利/西班牙等市场启用本地化名录意图词，并自动注入匹配的全球旗舰展会检索', () => {
+    const searches = buildDirectorySearches(
+      q({ industry: 'photovoltaic', country: 'Italy' }, ['solar module', 'EPC']),
+    );
+    expect(searches.length).toBeGreaterThan(0);
+    expect(searches.length).toBeLessThanOrEqual(4);
+    expect(searches.some((s) => /elenco aziende|espositori/i.test(s))).toBe(true);
+    expect(searches.some((s) => /KEY - The Energy Transition Expo|Intersolar/i.test(s))).toBe(true);
   });
 });

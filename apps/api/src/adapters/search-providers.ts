@@ -17,6 +17,7 @@ import {
 } from './bounded-fetch-response';
 
 const DEFAULT_SERPER_URL = 'https://google.serper.dev';
+const DEFAULT_BRAVE_URL = 'https://api.search.brave.com';
 const DEFAULT_EXA_URL = 'https://api.exa.ai';
 const DEFAULT_GOOGLE_PLACES_URL = 'https://places.googleapis.com';
 const REQUEST_TIMEOUT_MS = 20_000;
@@ -60,6 +61,13 @@ export function resolveSerperApiKey(
   env: NodeJS.ProcessEnv = process.env,
 ): string | undefined {
   const key = env.SERPER_API_KEY?.trim();
+  return key ? key : undefined;
+}
+
+export function resolveBraveSearchApiKey(
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  const key = env.BRAVE_SEARCH_API_KEY?.trim();
   return key ? key : undefined;
 }
 
@@ -121,6 +129,51 @@ async function postJson(args: {
           ...args.headers,
         },
         body: JSON.stringify(args.body),
+        redirect: 'error',
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+    } catch (error) {
+      lastError = error;
+      if (attempt === MAX_RETRIES) {
+        throw new Error(`${args.prefix}_NETWORK_ERROR`, { cause: error });
+      }
+      await sleep(retryDelayMs(undefined, attempt));
+      continue;
+    }
+    if (retryable(response.status) && attempt < MAX_RETRIES) {
+      await response.body?.cancel().catch(() => undefined);
+      await sleep(retryDelayMs(response, attempt));
+      continue;
+    }
+    if (!response.ok) throw statusError(args.prefix, response.status);
+    return readFetchResponseBodyBounded(
+      response,
+      MAX_SEARCH_RESPONSE_BYTES,
+      `${args.prefix}_RESPONSE_TOO_LARGE`,
+    );
+  }
+  throw new Error(`${args.prefix}_NETWORK_ERROR`, { cause: lastError });
+}
+
+async function getJson(args: {
+  url: string;
+  headers: Record<string, string>;
+  prefix: string;
+  deps: SearchProviderDeps;
+}): Promise<Buffer> {
+  const fetchImpl = args.deps.fetchImpl ?? fetch;
+  const sleep = args.deps.sleep ?? sleepDefault;
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
+    await args.deps.beforeRequest?.();
+    let response: Response;
+    try {
+      response = await fetchImpl(args.url, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          ...args.headers,
+        },
         redirect: 'error',
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
@@ -224,6 +277,61 @@ export async function serperSearch(
   for (const item of organic) {
     if (!item || typeof item !== 'object') continue;
     const url = sanitizeSearchProviderUrl((item as { link?: unknown }).link);
+    if (!url) continue;
+    const rawTitle = (item as { title?: unknown }).title;
+    hits.push(
+      typeof rawTitle === 'string' && rawTitle.trim().length > 0
+        ? { url, title: rawTitle.trim() }
+        : { url },
+    );
+  }
+  return { hits, billed: true };
+}
+
+export interface BraveSearchInput {
+  query: string;
+  count?: number;
+  country?: string;
+  searchLang?: string;
+}
+
+/** Brave Web Search API（独立索引，仅保留去噪后的 url + title）。 */
+export async function braveSearch(
+  input: BraveSearchInput,
+  deps: SearchProviderDeps = {},
+): Promise<SearchProviderResponse> {
+  const apiKey = deps.apiKey ?? resolveBraveSearchApiKey();
+  if (!apiKey) throw new Error('BRAVE_SEARCH_API_KEY_NOT_CONFIGURED');
+  const base = (deps.baseUrl ?? process.env.BRAVE_SEARCH_API_URL ?? DEFAULT_BRAVE_URL).replace(/\/+$/u, '');
+  const params = new URLSearchParams({
+    q: input.query,
+    count: String(Math.min(20, Math.max(1, Math.trunc(input.count ?? 10)))),
+  });
+  if (input.country && /^[a-z]{2}$/iu.test(input.country)) {
+    params.set('country', input.country.toUpperCase());
+  }
+  if (input.searchLang && /^[a-z]{2}(?:-[a-z]{2})?$/iu.test(input.searchLang)) {
+    params.set('search_lang', input.searchLang.toLowerCase());
+  }
+
+  const bytes = await getJson({
+    url: `${base}/res/v1/web/search?${params.toString()}`,
+    headers: { 'X-Subscription-Token': apiKey },
+    prefix: 'BRAVE_SEARCH',
+    deps,
+  });
+  const payload = decodeJsonBytes<{ web?: { results?: unknown } }>(
+    bytes,
+    'BRAVE_SEARCH_RESPONSE_INVALID',
+  );
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('BRAVE_SEARCH_RESPONSE_INVALID');
+  }
+  const results = Array.isArray(payload.web?.results) ? payload.web.results : [];
+  const hits: SearchProviderHit[] = [];
+  for (const item of results) {
+    if (!item || typeof item !== 'object') continue;
+    const url = sanitizeSearchProviderUrl((item as { url?: unknown }).url);
     if (!url) continue;
     const rawTitle = (item as { title?: unknown }).title;
     hits.push(

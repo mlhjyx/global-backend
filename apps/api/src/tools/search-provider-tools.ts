@@ -13,9 +13,11 @@
 import { createHash } from 'node:crypto';
 import { CATALOG_RESULT_PROJECTION_SCHEMAS } from '../durable-results/catalog-result-projections';
 import {
+  braveSearch,
   exaFindSimilar,
   exaSearch,
   googlePlacesSearchText,
+  resolveBraveSearchApiKey,
   resolveExaApiKey,
   resolveGoogleMapsApiKey,
   resolveSerperApiKey,
@@ -39,6 +41,7 @@ const TITLE_MAX_CHARS = 2000;
 const PLACE_ID_MAX_CHARS = 256;
 const PLACE_NAME_MAX_CHARS = 500;
 const SERPER_REQUEST_COST_CENTS = 1;
+const BRAVE_REQUEST_COST_CENTS = 1;
 const EXA_REQUEST_COST_CENTS = 1;
 /** Google Places New Text Search (Enterprise field websiteUri ≈ $0.035/req → ceil 4¢). */
 const GOOGLE_PLACES_REQUEST_COST_CENTS = 4;
@@ -51,6 +54,13 @@ export interface SerperSearchToolInput {
   num?: number;
   gl?: string;
   hl?: string;
+}
+
+export interface BraveSearchToolInput {
+  query: string;
+  count?: number;
+  country?: string;
+  searchLang?: string;
 }
 
 export interface ExaSearchToolInput {
@@ -417,9 +427,87 @@ export function createGooglePlacesSearchTool(
 
 export const googlePlacesSearchTool = createGooglePlacesSearchTool();
 
+export interface BraveSearchToolDependencies {
+  braveSearch: typeof braveSearch;
+  resolveApiKey?: typeof resolveBraveSearchApiKey;
+}
+
+export function createBraveSearchTool(
+  dependencies: BraveSearchToolDependencies = { braveSearch },
+): Tool<BraveSearchToolInput, SearchProviderOutput> {
+  const getKey = dependencies.resolveApiKey ?? resolveBraveSearchApiKey;
+  return {
+    id: "brave.search",
+    version: '1.0.0',
+    category: 'search',
+    sourceClass: 'public_intelligence',
+    cost: { unit: 'request', estimatedCents: BRAVE_REQUEST_COST_CENTS, external: true },
+    rateLimit: { rps: 5, concurrency: 5 },
+    compliance: {
+      sourcePolicy: 'none',
+      respectsRobots: false,
+      personalData: false,
+      allowedPurpose: ['discovery'],
+      reversible: true,
+      authRequired: true,
+      risk: 'low',
+    },
+    capabilities: { produces: ['domain'], accepts: ['keywords'] },
+    idempotencyKey: (input) => `brave.search:${stableKey(input)}`,
+    durableResultStrategy: {
+      kind: "typed_projection",
+      schema: CATALOG_RESULT_PROJECTION_SCHEMAS["brave.search"],
+    },
+    durableReplayResult: (result) => ({
+      data: {
+        results: result.data.results.flatMap((item) => {
+          const url = publicOrigin(item.url);
+          return url ? [{ url }] : [];
+        }),
+      },
+      costCents: result.costCents,
+      ...(result.degraded === undefined ? {} : { degraded: result.degraded }),
+    }),
+    healthCheck: async () =>
+      getKey()
+        ? { healthy: true, detail: 'brave' }
+        : { healthy: false, detail: 'BRAVE_SEARCH_API_KEY not configured' },
+    physicalWireObservation: 'before_each_wire',
+    execute: async (input, ctx) => {
+      if (!input || typeof input !== 'object') {
+        throw new Error('BRAVE_SEARCH_INPUT_INVALID: input must be an object');
+      }
+      const query = normalizeQueryString(input.query, 'BRAVE_SEARCH_INPUT_INVALID');
+      const count = normalizeBoundedCount(input.count, 10, 'BRAVE_SEARCH_INPUT_INVALID');
+      const apiKey = getKey();
+      if (!apiKey) {
+        return { data: { results: [] }, costCents: 0, degraded: true };
+      }
+      await assertToolExternalActionAuthorized(ctx);
+      const response = await dependencies.braveSearch(
+        { query, count, country: input.country, searchLang: input.searchLang },
+        {
+          apiKey,
+          beforeRequest: async () => {
+            await assertToolExternalActionAuthorized(ctx);
+            await ctx.beforePhysicalWire?.();
+          },
+        },
+      );
+      return {
+        data: { results: durableSearchHits(response.hits) },
+        costCents: response.billed ? BRAVE_REQUEST_COST_CENTS : 0,
+      };
+    },
+  };
+}
+
+export const braveSearchTool = createBraveSearchTool();
+
 /** 注册 L0 实时付费搜索/地点工具（由 registerBuiltinTools 调用）。 */
 export function registerSearchProviderTools(registry: ToolRegistry): ToolRegistry {
   registry.register(serperSearchTool as Tool);
+  registry.register(braveSearchTool as Tool);
   registry.register(exaSearchTool as Tool);
   registry.register(googlePlacesSearchTool as Tool);
   return registry;

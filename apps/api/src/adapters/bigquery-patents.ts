@@ -239,23 +239,86 @@ export interface BigQueryPatentsDeps {
   makeClient?: () => BigQueryLike;
 }
 
+export type ResolvedBigQueryCredentials =
+  | { kind: 'inline'; projectId: string; credentials: { client_email: string; private_key: string; [key: string]: unknown } }
+  | { kind: 'keyfile'; projectId: string; keyFilename: string };
+
+/**
+ * 解析 BigQuery 专利数据源鉴权（纯函数）：
+ *  1) 优先 `GOOGLE_PATENTS_SA_JSON_B64`（Base64 编码的 SA JSON，适合 Docker `.env` 注入、零宿主挂载漂移）；
+ *  2) 其次 `GOOGLE_PATENTS_SA_JSON`：若以 `{` 开头则解析为内联 JSON，否则按文件路径 `keyFilename` 使用；
+ *  3) 回退 `GOOGLE_APPLICATION_CREDENTIALS` 文件路径；
+ * 缺 projectId 或解析失败一律返回 null（fail-closed、绝不在日志里吐出凭据原文）。
+ */
+export function resolveBigQueryPatentsCredentials(
+  env: NodeJS.ProcessEnv = process.env,
+): ResolvedBigQueryCredentials | null {
+  const projectId = env.GOOGLE_PATENTS_PROJECT?.trim();
+  if (!projectId) return null;
+
+  const parseInline = (rawJson: string): ResolvedBigQueryCredentials | null => {
+    try {
+      const parsed: unknown = JSON.parse(rawJson);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+      const rec = parsed as Record<string, unknown>;
+      if (typeof rec.client_email !== 'string' || !rec.client_email.trim()) return null;
+      if (typeof rec.private_key !== 'string' || !rec.private_key.includes('PRIVATE KEY')) return null;
+      return {
+        kind: 'inline',
+        projectId,
+        credentials: rec as { client_email: string; private_key: string; [key: string]: unknown },
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  const b64 = env.GOOGLE_PATENTS_SA_JSON_B64?.trim();
+  if (b64) {
+    try {
+      const decoded = Buffer.from(b64, 'base64').toString('utf8').trim();
+      return parseInline(decoded);
+    } catch {
+      return null;
+    }
+  }
+
+  const sa = env.GOOGLE_PATENTS_SA_JSON?.trim();
+  if (sa) {
+    if (sa.startsWith('{')) return parseInline(sa);
+    return { kind: 'keyfile', projectId, keyFilename: sa };
+  }
+
+  const adc = env.GOOGLE_APPLICATION_CREDENTIALS?.trim();
+  if (adc) return { kind: 'keyfile', projectId, keyFilename: adc };
+
+  return null;
+}
+
 export class BigQueryPatentsClient {
   private client: BigQueryLike | null = null;
 
   constructor(private readonly deps: BigQueryPatentsDeps = {}) {}
 
-  /** 惰性建 client：SA key 文件 + project 齐才建；缺任一 → null（fail-safe 空，同 EPO 无 creds）。 */
+  /** 惰性建 client：SA key（内联/B64/文件）+ project 齐才建；缺任一 → null（fail-safe 空，同 EPO 无 creds）。 */
   private getClient(): BigQueryLike | null {
     if (this.client) return this.client;
     if (this.deps.makeClient) {
       this.client = this.deps.makeClient();
       return this.client;
     }
-    const keyFile = process.env.GOOGLE_PATENTS_SA_JSON || process.env.GOOGLE_APPLICATION_CREDENTIALS;
-    const projectId = process.env.GOOGLE_PATENTS_PROJECT;
-    if (!keyFile || !projectId) return null;
-    this.client = new BigQuery({ keyFilename: keyFile, projectId,
-    }) as unknown as BigQueryLike;
+    const resolved = resolveBigQueryPatentsCredentials();
+    if (!resolved) return null;
+    this.client =
+      resolved.kind === 'inline'
+        ? (new BigQuery({
+            credentials: resolved.credentials,
+            projectId: resolved.projectId,
+          }) as unknown as BigQueryLike)
+        : (new BigQuery({
+            keyFilename: resolved.keyFilename,
+            projectId: resolved.projectId,
+          }) as unknown as BigQueryLike);
     return this.client;
   }
 

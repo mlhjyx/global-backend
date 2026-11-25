@@ -492,6 +492,22 @@
       }
     },
     {
+      "id": "brave.search",
+      "declarationPath": "apps/api/src/tools/search-provider-tools.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "brave-search/v1",
+      "operationIdentity": "tool:brave.search:<version>:<idempotencyKey>",
+      "privacyClass": "PUBLIC_ORGANIZATION",
+      "domainAck": {
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
+        "consumer": "SearchDiscoveryProvider",
+        "domainAggregateType": "SearchResultEvidence",
+        "identitySource": "query-digest-and-result-url",
+        "subjectRefRequired": false,
+        "personalDataDsrCompatible": false
+      }
+    },
+    {
       "id": "exa.search",
       "declarationPath": "apps/api/src/tools/search-provider-tools.ts",
       "resultStrategy": "typed_projection",

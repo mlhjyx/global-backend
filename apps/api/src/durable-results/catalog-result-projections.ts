@@ -20,7 +20,7 @@ export const CATALOG_RESULT_TOOL_IDS = Object.freeze([
   'wikidata.entity', 'gleif.fetch', 'companies_house.search', 'inpi_rne.search',
   'google_patents.search', 'tradefair.algolia', 'mapyourshow.fetch',
   'deepseek.search', 'deepseek.fetch',
-  'serper.search', 'exa.search', 'google_places.search',
+  'serper.search', 'brave.search', 'exa.search', 'google_places.search',
 ] as const);
 export type CatalogResultToolId = (typeof CATALOG_RESULT_TOOL_IDS)[number];
 export const CATALOG_RESULT_PROJECTION_SCHEMAS = Object.freeze({
@@ -39,6 +39,7 @@ export const CATALOG_RESULT_PROJECTION_SCHEMAS = Object.freeze({
   'deepseek.search': 'deepseek-search/v1',
   'deepseek.fetch': 'deepseek-fetch/v1',
   'serper.search': 'serper-search/v1',
+  'brave.search': 'brave-search/v1',
   'exa.search': 'exa-search/v1',
   'google_places.search': 'google-places-search/v1',
 } satisfies Readonly<Record<CatalogResultToolId, TypedProjectionSchema>>);
@@ -930,6 +931,7 @@ const deepseekFetchDefinition = definition(
   (value) => mapClosedRecord(value, ['url', 'title', 'content'], ['url', 'content']),
 );
 const serperSearchDefinition = searchResultDefinition('serper-search/v1');
+const braveSearchDefinition = searchResultDefinition('brave-search/v1');
 const exaSearchDefinition = searchResultDefinition('exa-search/v1');
 const GOOGLE_PLACE_KEYS = ['placeId', 'name', 'websiteUri', 'countryCode'] as const;
 const googlePlaceSchema = objectSchema(
@@ -949,7 +951,7 @@ export const CATALOG_RESULT_PROJECTION_DEFINITIONS = Object.freeze([
   osmDefinition, wikidataEntityDefinition, gleifDefinition, companiesHouseDefinition,
   inpiDefinition, googlePatentsDefinition, tradeFairDefinition, mapYourShowDefinition,
   deepseekSearchDefinition, deepseekFetchDefinition,
-  serperSearchDefinition, exaSearchDefinition, googlePlacesSearchDefinition,
+  serperSearchDefinition, braveSearchDefinition, exaSearchDefinition, googlePlacesSearchDefinition,
 ] as const);
 
 export function getCatalogResultProjectionSchema(toolId: string): TypedProjectionSchema {

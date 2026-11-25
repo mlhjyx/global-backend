@@ -61,12 +61,12 @@ describe('AI task registry model execution policy invariants', () => {
       'discovery.extract_company': {
         // G3 5.3: discovery judges from search results only; no pre-identity fetch.
         model: 'deepseek-flash', risk: 'low', humanGate: false,
-        allowedTools: ['searxng.search', 'serper.search', 'exa.search', 'google_places.search'], maxCostCents: 3,
+        allowedTools: ['searxng.search', 'serper.search', 'brave.search', 'exa.search', 'google_places.search'], maxCostCents: 3,
         timeoutMs: 180000,
       },
       'discovery.extract_list': {
         model: 'deepseek-flash', risk: 'low', humanGate: false,
-        allowedTools: ['searxng.search', 'serper.search', 'crawl4ai.fetch'], maxCostCents: 5,
+        allowedTools: ['searxng.search', 'serper.search', 'brave.search', 'crawl4ai.fetch'], maxCostCents: 5,
         timeoutMs: 180000,
       },
       'discovery.classify_trade_role': {
@@ -305,7 +305,7 @@ const B2_LEGACY_SCHEMA_BYTES = {
   },
   "discovery.extract_company": {
     "output": "e1e158cda13100c8c204668115faeb19416a4ba2dd2157989792a9b642133224",
-    "contract": "e41f65548a1cab8050c2c3710c602bfb538c8fc9277802a8b66dc698589e979b"
+    "contract": "84a5733af88571962d478a8a61fcac709437571f53df4e4fbf7bc50ce35bdf0c"
   },
   "discovery.classify_trade_role": {
     "output": "26c61256e97019ee6bdbecb76aededa991a5f8c100fa820c7d86e1c60ee134a3",
@@ -313,7 +313,7 @@ const B2_LEGACY_SCHEMA_BYTES = {
   },
   "discovery.web_search_candidates": {
     "output": "3ba5f1c67e332287da4fe3ee36ee4556b9165c8c649300389f24076c10b6f189",
-    "contract": "f7532033b11fbc88fa019cf35517627e3c5b2b4a9dc27838cb26c75d3dcddee0"
+    "contract": "56116cafcf3c5ed5da1506e7872e5d2a5e60eeeb0b2fd13a35e2b877251d84d8"
   },
   "contact.find_decision_makers": {
     "output": "946b9114a0d3997f6cff641e19bf155421f1b856dbaefdc2fe9e55a506d61ec2",
@@ -321,7 +321,7 @@ const B2_LEGACY_SCHEMA_BYTES = {
   },
   "discovery.extract_list": {
     "output": "518011f7bbf4096c36a8891cbd2459196b9d2fae0fb2c65f62ed84e4f462fa8b",
-    "contract": "bccd132554b5331173c4cd8c59ec432db7ac8172ea9bb1edf6040cb1a62bd474"
+    "contract": "537651db21473fbce493957d8ff4eab31ed6fd6adc184c62eed33ec44e2dd048"
   },
   "taxonomy.normalize": {
     "output": "3fd0aff6cb2f332c19683f4ae8c8f5ac1431cdf62ac77fe10cfce9e3c1c266fc",

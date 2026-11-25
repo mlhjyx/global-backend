@@ -55,11 +55,13 @@ const GOVERNED_PROVIDERS = new Set([
   "opencorporates",
   "companies_house_registry",
   "model_web_search",
+  "channel_catalog",
 ]);
 const LICENSES_BY_PROVIDER: Readonly<Record<string, ReadonlySet<string>>> =
   Object.freeze({
     registry: new Set(["public", "licensed", "byo"]),
     directory: new Set(["public", "licensed", "byo"]),
+    channel_catalog: new Set(["public", "licensed", "byo"]),
     wikidata: new Set(["CC0-1.0"]),
     openstreetmap: new Set(["ODbL-1.0"]),
     trade_fair: new Set(["SOURCE_SPECIFIC_RESTRICTED", "public"]),
@@ -287,6 +289,8 @@ function validExternalId(providerKey: string, value: unknown): value is string {
     case "companies_house_registry":
       // UK 注册号：8 位数字或 2 字母前缀 + 6 位（SC/NI/OC/FC…），大写字母数字。
       return /^companies_house_registry:[A-Z0-9]{1,12}$/u.test(value);
+    case "channel_catalog":
+      return /^channel_catalog:[0-9a-f-]{36}:[0-9a-f-]{36}$/iu.test(value);
     default:
       return validGenericExternalId(value);
   }
@@ -652,7 +656,7 @@ function validModelWebSearchAttributes(value: JsonRecord): boolean {
     value.evidenceUrls.length >= 1 &&
     value.evidenceUrls.length <= 3 &&
     value.evidenceUrls.every((url) => isStableSafeHttpsUrl(url)) &&
-    ["deepseek", "searxng"].includes(String(value.searchExecutor)) &&
+    ["deepseek", "searxng", "serper", "brave", "exa"].includes(String(value.searchExecutor)) &&
     (value.searchQuery === undefined ||
       value.searchQuery === null ||
       (typeof value.searchQuery === "string" &&
@@ -687,6 +691,15 @@ function validAttributes(providerKey: string, value: unknown): boolean {
       return validCompaniesHouseRegistryAttributes(input);
     case "model_web_search":
       return validModelWebSearchAttributes(input);
+    case "channel_catalog":
+      return (
+        exactKeys(input, ["channel_id", "record_id", "source_class"]) &&
+        typeof input.channel_id === "string" &&
+        UUID.test(input.channel_id) &&
+        typeof input.record_id === "string" &&
+        UUID.test(input.record_id) &&
+        input.source_class === "industry_data"
+      );
     default:
       return false;
   }

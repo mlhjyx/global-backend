@@ -6,6 +6,7 @@ import {
   MAX_APPLICANTS_PER_PATENT,
   assigneeLikeAnchor,
   normalizeRow,
+  resolveBigQueryPatentsCredentials,
 } from './bigquery-patents';
 
 const GB = 1024 ** 3;
@@ -140,10 +141,12 @@ describe('BigQueryPatents · searchPatentsByAssignee', () => {
   it('无 creds（无 makeClient 且无 env）→ 空（天然 no-op，同 EPO 无 key）', async () => {
     const saved = {
       sa: process.env.GOOGLE_PATENTS_SA_JSON,
+      saB64: process.env.GOOGLE_PATENTS_SA_JSON_B64,
       adc: process.env.GOOGLE_APPLICATION_CREDENTIALS,
       proj: process.env.GOOGLE_PATENTS_PROJECT,
     };
     delete process.env.GOOGLE_PATENTS_SA_JSON;
+    delete process.env.GOOGLE_PATENTS_SA_JSON_B64;
     delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
     delete process.env.GOOGLE_PATENTS_PROJECT;
     try {
@@ -151,9 +154,42 @@ describe('BigQueryPatents · searchPatentsByAssignee', () => {
       expect(await client.searchPatentsByAssignee('Siemens', { fromYear: 2021, toYear: 2026 })).toEqual([]);
     } finally {
       if (saved.sa) process.env.GOOGLE_PATENTS_SA_JSON = saved.sa;
+      if (saved.saB64) process.env.GOOGLE_PATENTS_SA_JSON_B64 = saved.saB64;
       if (saved.adc) process.env.GOOGLE_APPLICATION_CREDENTIALS = saved.adc;
       if (saved.proj) process.env.GOOGLE_PATENTS_PROJECT = saved.proj;
     }
+  });
+
+  it('resolveBigQueryPatentsCredentials 支持 Base64 / 内联 JSON / 文件路径且对畸形 JSON fail-closed', () => {
+    const validSa = JSON.stringify({
+      client_email: 'patents@demo.iam.gserviceaccount.com',
+      private_key: '-----BEGIN PRIVATE KEY-----\nTEST\n-----END PRIVATE KEY-----\n',
+    });
+    const b64 = Buffer.from(validSa, 'utf8').toString('base64');
+    expect(
+      resolveBigQueryPatentsCredentials({
+        GOOGLE_PATENTS_PROJECT: 'proj-1',
+        GOOGLE_PATENTS_SA_JSON_B64: b64,
+      }),
+    ).toMatchObject({ kind: 'inline', projectId: 'proj-1' });
+    expect(
+      resolveBigQueryPatentsCredentials({
+        GOOGLE_PATENTS_PROJECT: 'proj-1',
+        GOOGLE_PATENTS_SA_JSON: validSa,
+      }),
+    ).toMatchObject({ kind: 'inline', projectId: 'proj-1' });
+    expect(
+      resolveBigQueryPatentsCredentials({
+        GOOGLE_PATENTS_PROJECT: 'proj-1',
+        GOOGLE_PATENTS_SA_JSON: '/secrets/sa.json',
+      }),
+    ).toEqual({ kind: 'keyfile', projectId: 'proj-1', keyFilename: '/secrets/sa.json' });
+    expect(
+      resolveBigQueryPatentsCredentials({
+        GOOGLE_PATENTS_PROJECT: 'proj-1',
+        GOOGLE_PATENTS_SA_JSON_B64: Buffer.from('{bad-json', 'utf8').toString('base64'),
+      }),
+    ).toBeNull();
   });
 
   it('maxRows clamp（超顶 → 内联进 SQL 的 LIMIT 受控）', async () => {

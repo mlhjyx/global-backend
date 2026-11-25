@@ -19,6 +19,7 @@ import { OpenCorporatesDiscoveryProvider } from './providers/opencorporates.prov
 import { CompaniesHouseRegistryDiscoveryProvider } from './providers/companies-house-registry.provider';
 import { ModelWebSearchDiscoveryProvider } from './providers/model-web-search.provider';
 import { RegistryFrameDiscoveryProvider } from './providers/registry-frame.provider';
+import { ChannelCatalogDiscoveryProvider } from './providers/channel-catalog.provider';
 import { DecisionMakerContactAdapter } from './providers/decision-maker.provider';
 import { SocialPresenceContactAdapter } from './providers/social-presence.provider';
 import { CompaniesHouseContactProvider } from './providers/companies-house.provider';
@@ -155,6 +156,15 @@ export class DiscoveryProviderRegistry {
       new RegistryFrameDiscoveryProvider({
         prisma,
         lineageEnabled: process.env.REGISTRY_FRAME_PROVIDER === 'on',
+      }),
+    );
+    // channel_catalog = 本地已审渠道库（source_channel_record）枚举（零出网零成本，Batch 1.4-B）。
+    // CHANNEL_CATALOG_PROVIDER=on 时声明 local_query 血缘并报送确定性回执（channel_catalog.query）；
+    // data_provider.channel_catalog 默认 DISABLED 是第二道 kill switch。
+    this.discovery.push(
+      new ChannelCatalogDiscoveryProvider({
+        prisma,
+        lineageEnabled: process.env.CHANNEL_CATALOG_PROVIDER === 'on',
       }),
     );
     // UK Companies House 董事发现（待办 3 第一个身份源；官方注册处 API，Basic auth）——contact_discovery 类。
@@ -836,6 +846,12 @@ export class DiscoveryProviderRegistry {
       where: { key: 'registry_frame' },
       update: {},
       create: { key: 'registry_frame', class: 'company_registry', status: 'DISABLED', costPerCallCents: 0 },
+    });
+    // channel_catalog（Batch 1.4-B）：本地已审渠道库（source_channel_record），零出网零成本。
+    await db.dataProvider.upsert({
+      where: { key: 'channel_catalog' },
+      update: {},
+      create: { key: 'channel_catalog', class: 'industry_data', status: 'DISABLED', costPerCallCents: 0 },
     });
   }
 

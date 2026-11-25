@@ -19,7 +19,9 @@ import { getTask } from '../../ai-tasks/task-registry';
 import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
 import type { SearxngSearchOutput } from '../../tools/builtin-tools';
 import type { SearchProviderOutput } from '../../tools/search-provider-tools';
-import { resolveSerperApiKey } from '../../adapters/search-providers';
+import { resolveBraveSearchApiKey, resolveSerperApiKey } from '../../adapters/search-providers';
+import { fuseSearchEngineHits, type SearchSourceBucket } from '../cross-source-fusion';
+import { buildTradeFairSearchQueries, selectCatalogFairs } from '../trade-fair-catalog';
 import type { CrawlResult } from '../../adapters/web-crawler';
 import { extractSameSiteLinks } from '../../adapters/site-links';
 import { isAllowedByRobots } from '../../adapters/robots';
@@ -46,7 +48,13 @@ import {
   MAX_DIRECTORY_PAGINATION,
   MAX_DIRECTORY_SEARCHES_PER_QUERY,
 } from '../execution-envelope';
-import { searchCountryName, searchLanguageFor, searchableTerms, type SearchLanguage } from '../search-localization';
+import {
+  searchCountryName,
+  searchLanguageFor,
+  searchableTerms,
+  targetCountryCodes,
+  type SearchLanguage,
+} from '../search-localization';
 
 const PARSER_VERSION = 'directory/v1';
 
@@ -58,13 +66,22 @@ const NOISE_DOMAINS = [
   'yelp.com', 'trustpilot.com', 'indeed.com', 'stepstone.de', 'google.com',
 ];
 
-/** 定位名录/列表页的检索意图词（按目标市场语言选族；zh 用中文名录词，其余沿用 EN + DE）。 */
+/** 定位名录/列表页的检索意图词（按目标市场语言选族，覆盖主流出口语种）。 */
 const DIRECTORY_INTENTS_EN = ['members directory', 'member companies', 'exhibitor list', 'industry directory'];
 const DIRECTORY_INTENTS_DE = ['Mitgliederverzeichnis', 'Mitglieder', 'Ausstellerverzeichnis', 'Aussteller'];
 const DIRECTORY_INTENTS_ZH = ['企业名录', '企业黄页', '参展商名单', '供应商目录'];
+const DIRECTORY_INTENTS_BY_LANG: Readonly<Partial<Record<SearchLanguage, readonly string[]>>> = Object.freeze({
+  it: ['elenco aziende', 'espositori', 'soci associazione', 'catalogo espositori'],
+  es: ['directorio empresas', 'expositores', 'socios asociación', 'catálogo expositores'],
+  pt: ['diretório empresas', 'expositores', 'associados', 'catálogo expositores'],
+  fr: ['annuaire entreprises', 'exposants', 'membres association', 'liste exposants'],
+  nl: ['bedrijvengids', 'exposanten', 'ledenlijst', 'deelnemerslijst'],
+  pl: ['katalog firm', 'wystawcy', 'lista członków', 'lista wystawców'],
+  tr: ['firma rehberi', 'katılımcı listesi', 'üye listesi', 'fuar katılımcıları'],
+});
 
-/** 列表页 URL/标题的正向信号（用于从搜索命中里挑真正的名录页）。含中文名录/黄页词。 */
-const LISTING_HINT = /member|mitglied|exhibitor|aussteller|directory|verzeichnis|list|catalog|katalog|branchenbuch|名录|黄页|企业库|企业大全|参展商|会员企业|供应商目录/i;
+/** 列表页 URL/标题的正向信号（用于从搜索命中里挑真正的名录页）。含多语种名录/参展商词。 */
+const LISTING_HINT = /member|mitglied|exhibitor|aussteller|directory|verzeichnis|list|catalog|katalog|branchenbuch|elenco|espositor|soci|directorio|expositor|asociaci|annuaire|exposant|membre|bedrijvengids|ledenlijst|deelnemer|wystawc|rehber|kat[ıi]l[ıi]mc[ıi]|名录|黄页|企业库|企业大全|参展商|会员企业|供应商目录/i;
 
 /** 搜索结果是否名录/黄页相貌（URL 或标题命中正向信号）。 */
 export function isDirectoryListingShaped(url: string, title: string): boolean {
@@ -269,25 +286,38 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
       { q, language },
       toolCtx,
     );
-    const out = res.data.results.slice(0, 20).map((r) => ({ url: r.url, title: r.title ?? '' }));
+    const buckets: SearchSourceBucket[] = [
+      { source: 'searxng', hits: res.data.results.slice(0, 20) },
+    ];
     if (resolveSerperApiKey()) {
       try {
         const serper = await this.deps.broker!.invoke<
           { query: string; num?: number; hl?: string },
           SearchProviderOutput
         >('serper.search', { query: q, num: 10, hl: language }, toolCtx);
-        const seen = new Set(out.map((item) => item.url));
-        for (const item of serper.data?.results ?? []) {
-          if (!item.url || seen.has(item.url)) continue;
-          seen.add(item.url);
-          out.push({ url: item.url, title: item.title ?? '' });
+        if (serper.data?.results?.length) {
+          buckets.push({ source: 'serper', hits: serper.data.results });
         }
       } catch (error) {
         if (isExecutionControlError(error)) throw error;
         this.log(`optional serper.search degraded: ${String(error).slice(0, 80)}`);
       }
     }
-    return out;
+    if (resolveBraveSearchApiKey()) {
+      try {
+        const brave = await this.deps.broker!.invoke<
+          { query: string; count?: number; searchLang?: string },
+          SearchProviderOutput
+        >('brave.search', { query: q, count: 10, searchLang: language }, toolCtx);
+        if (brave.data?.results?.length) {
+          buckets.push({ source: 'brave', hits: brave.data.results });
+        }
+      } catch (error) {
+        if (isExecutionControlError(error)) throw error;
+        this.log(`optional brave.search degraded: ${String(error).slice(0, 80)}`);
+      }
+    }
+    return fuseSearchEngineHits(buckets).map((item) => ({ url: item.url, title: item.title ?? '' }));
   }
 
   /** 抓一个名录页（含有限翻页）→ 列表抽取 → 该页所有公司记录。 */
@@ -552,10 +582,32 @@ export function buildDirectorySearches(query: CompanyDiscoveryQuery): string[] {
     .join(' ')
     .trim();
 
+  const localized = DIRECTORY_INTENTS_BY_LANG[language];
   const intents = language === 'zh'
     ? [...DIRECTORY_INTENTS_ZH]
-    : [...DIRECTORY_INTENTS_EN.slice(0, 2), ...DIRECTORY_INTENTS_DE.slice(0, 2)];
-  const searches = intents.map((intent) => [topic, intent, region ?? ''].filter(Boolean).join(' ').trim());
+    : localized
+      ? [...localized.slice(0, 2), ...DIRECTORY_INTENTS_EN.slice(0, 2)]
+      : [...DIRECTORY_INTENTS_EN.slice(0, 2), ...DIRECTORY_INTENTS_DE.slice(0, 2)];
+
+  // 匹配全球 20 个旗舰展会目录（Intersolar / KEY Energy / RE+ / ProPak 等），按目标国优先注入至多 2 条参展商检索
+  // 中文国内市场（language === 'zh'）保持纯中文目录意图串，不混入英文展会检索。
+  const catalogFairs = language === 'zh'
+    ? []
+    : selectCatalogFairs({
+        industryTerms: [...industries, ...rawIndustries],
+        keywords: [...keywords, ...rawKeywords],
+        countries: targetCountryCodes(query).map((code) => code.toUpperCase()),
+        regions: arr(f.region),
+      });
+  const fairQueries = catalogFairs
+    .slice(0, 2)
+    .flatMap((fair) => buildTradeFairSearchQueries(fair, [...keywords, ...industries], 1))
+    .slice(0, 2);
+
+  const directoryQueries = intents.map((intent) => [topic, intent, region ?? ''].filter(Boolean).join(' ').trim());
+  const searches = fairQueries.length > 0
+    ? [...directoryQueries.slice(0, Math.max(2, MAX_DIRECTORY_SEARCHES_PER_QUERY - fairQueries.length)), ...fairQueries]
+    : directoryQueries;
   // 去重 + 去过短
   return [...new Set(searches)].filter((q) => q.length > 5).slice(0, MAX_DIRECTORY_SEARCHES_PER_QUERY);
 }
