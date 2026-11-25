@@ -24,6 +24,7 @@ import {
   applyDomainAckConsumerTransaction,
   domainAggregateIdForReceipt,
 } from '../durable-results/domain-ack-consumer-bindings';
+import { isNavigationNoiseOffering } from '../discovery/offering-noise-filter';
 import {
   buyerOutreachFacts,
   fitOutreachFacts,
@@ -190,7 +191,7 @@ export class OutreachDraftService {
         website: seller.website,
         summary: seller.summary,
         claims: loaded.claims,
-        offerings: loaded.offerings,
+        offerings: loaded.offerings.filter((o) => !isNavigationNoiseOffering(o.name)),
       }),
       ...buyerOutreachFacts(buyer),
       ...fitOutreachFacts(lead),

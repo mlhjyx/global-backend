@@ -5,6 +5,8 @@ import {
   toReadableName,
   toContactRecord,
   currentYear,
+  resolvePatentSourceMode,
+  summarizeCompanyPatentSignals,
 } from './bigquery-patents.provider';
 import type { PatentApplicant, PatentRecord } from '../../adapters/bigquery-patents';
 import type { GooglePatentsInput, GooglePatentsOutput } from '../../tools/source-tools';
@@ -262,5 +264,28 @@ describe('GooglePatents · 模式切换（cache/direct/off）', () => {
     const cached = await new GooglePatentsInventorProvider({ cacheReader, now: FIXED_NOW, mode: 'cache' }).discoverContacts(company, CTX);
     expect(cached.contacts.map((c) => c.fullName)).toEqual(direct.contacts.map((c) => c.fullName));
     expect(cached.contacts.map((c) => c.buyingRole)).toEqual(direct.contacts.map((c) => c.buyingRole));
+  });
+
+  it('workspace_lia mode gates inventor cache strictly per workspace LIA and summarizes zero-PII corporate patent signals', async () => {
+    expect(resolvePatentSourceMode('workspace_lia')).toBe('workspace_lia');
+    const cacheReader = vi.fn(async () => fixture());
+    const allowedProvider = new GooglePatentsInventorProvider({
+      cacheReader,
+      now: FIXED_NOW,
+      mode: 'workspace_lia',
+      hasActiveWorkspaceLia: async (wsId) => wsId === 'ws-lia-active',
+    });
+
+    const denied = await allowedProvider.discoverContacts(company, { ...CTX, workspaceId: 'ws-no-lia' });
+    expect(denied.contacts).toEqual([]);
+    expect(cacheReader).not.toHaveBeenCalled();
+
+    const admitted = await allowedProvider.discoverContacts(company, { ...CTX, workspaceId: 'ws-lia-active' });
+    expect(admitted.contacts.map((c) => c.fullName)).toEqual(['Hans Müller', 'Anna Schmidt']);
+
+    const summary = summarizeCompanyPatentSignals(fixture());
+    expect(summary.patentCount).toBe(1);
+    expect(summary.soleApplicantCount).toBe(1);
+    expect(JSON.stringify(summary)).not.toContain('Müller');
   });
 });

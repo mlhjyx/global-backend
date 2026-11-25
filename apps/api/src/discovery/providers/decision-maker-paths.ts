@@ -66,6 +66,73 @@ export type GuessedPageProbeResult =
   | { kind: 'fallback_browser' };
 
 /**
+ * 从 `/sitemap.xml` 提取同站人物页 URL（线性扫描 `<loc>...</loc>`，免回溯正则），
+ * 按人物页优先级排序返回最多 4 条真实站点路径，避免在 JS 导航站点上盲猜 404。
+ */
+export function extractPeopleUrlsFromSitemapXml(
+  xml: string,
+  host: string,
+  scoreUrl: (url: string) => number,
+): Array<{ url: string; w: number }> {
+  const normalizedRoot = host.trim().toLowerCase().replace(/^www\./u, '');
+  if (!normalizedRoot || !xml) return [];
+  const bounded = xml.slice(0, 500_000);
+  const lower = bounded.toLowerCase();
+  const seen = new Set<string>();
+  const matches: Array<{ url: string; w: number }> = [];
+  let cursor = 0;
+  while (cursor < bounded.length) {
+    const start = lower.indexOf('<loc>', cursor);
+    if (start === -1) break;
+    const end = lower.indexOf('</loc>', start + 5);
+    if (end === -1) break;
+    cursor = end + 6;
+    const raw = bounded.slice(start + 5, end).trim();
+    if (!raw || raw.length > 512) continue;
+    try {
+      const parsed = new URL(raw);
+      if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') continue;
+      const candidateRoot = parsed.hostname.toLowerCase().replace(/^www\./u, '');
+      if (candidateRoot !== normalizedRoot) continue;
+      parsed.search = '';
+      parsed.hash = '';
+      const cleanUrl = parsed.toString();
+      const w = scoreUrl(cleanUrl);
+      if (w <= 0) continue;
+      const dedupeKey = cleanUrl.toLowerCase().replace(/^https?:\/\/(www\.)?/u, '').replace(/\/$/u, '');
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+      matches.push({ url: cleanUrl, w });
+    } catch {
+      /* ignore malformed <loc> */
+    }
+  }
+  matches.sort((a, b) => b.w - a.w);
+  return matches.slice(0, 4);
+}
+
+/** 轻量读取 `/sitemap.xml` 补齐真实人物页路径（404/非 XML 时静默返回空数组）。 */
+export async function probeSitemapPeopleUrls(
+  broker: ExecutionBroker,
+  host: string,
+  toolCtx: ToolContext,
+  scoreUrl: (url: string) => number,
+): Promise<Array<{ url: string; w: number }>> {
+  try {
+    const res = await broker.invoke<
+      { url: string },
+      { status?: number; ok?: boolean; text?: string }
+    >('http.get', { url: `https://${host}/sitemap.xml` }, toolCtx);
+    const status = res.data?.status ?? 0;
+    if (status < 200 || status >= 300 || !res.data?.text) return [];
+    return extractPeopleUrlsFromSitemapXml(res.data.text, host, scoreUrl);
+  } catch (err) {
+    if (isExecutionControlError(err)) throw err;
+    return [];
+  }
+}
+
+/**
  * 对固定路径盲猜页先走轻量 `http.get`：
  *  - HTTP 400/404/410 明确不存在 → 直接跳过，绝不送进无头浏览器空耗数十秒；
  *  - HTTP 200 且剥离 HTML 后正文 ≥ HTTP_FIRST_MIN_CHARS → 直接使用，免开浏览器；

@@ -25,6 +25,7 @@ import { isExecutionControlError } from '../../execution-budget/execution-contro
 import {
   fixedPathsForCompany,
   probeGuessedPeoplePageHttpFirst,
+  probeSitemapPeopleUrls,
   toggleWwwHost,
 } from './decision-maker-paths';
 
@@ -399,6 +400,19 @@ export class DecisionMakerProvider {
           .map((l) => ({ l, w: scorePeoplePageUrl(l) }))
           .filter((s) => s.w > 0)) {
           addPicked(s.l, s.w, false);
+        }
+      }
+      // 首页未找到高优先级人物页（Impressum/管理层/团队）时，轻量探一次 /sitemap.xml，
+      // 直接拿到站点真实人物页 URL（标记 guessed=true 走 HTTP-first 免开无头浏览器）。
+      if (!picked.some((p) => p.w >= 85)) {
+        const sitemapHits = await probeSitemapPeopleUrls(
+          this.deps.broker!,
+          fixedHost,
+          toolCtx,
+          scorePeoplePageUrl,
+        );
+        for (const hit of sitemapHits) {
+          addPicked(hit.url, hit.w, true);
         }
       }
     }

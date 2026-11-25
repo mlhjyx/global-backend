@@ -49,7 +49,8 @@ import { cleanEmail } from '../../acquisition/clean';
 import { canonicalizeSuppressionValue } from '../suppression-value';
 import { isAllowedByRobots } from '../../adapters/robots';
 import { normalizeDomain } from '../identity';
-import { inferCountryFromCcTld } from '../domain-country';
+import { resolveCompanyJurisdiction } from '../jurisdiction-resolver';
+import { sharedSearchEngineHealth } from '../search-engine-health';
 import { companyProjectPageUrl } from '../website-profile/project-page-evidence';
 import {
   MAX_GOOGLE_PLACES_SEARCHES_PER_QUERY,
@@ -341,12 +342,18 @@ export class PublicWebDiscoveryProvider
     call: () => Promise<{ data?: { results?: SearxngSearchResult[] } }>,
     label: string,
   ): Promise<SearxngSearchResult[]> {
+    if (!sharedSearchEngineHealth.isAvailable(label)) {
+      this.log(`optional ${label} skipped: circuit cooldown`);
+      return [];
+    }
     try {
       const res = await call();
+      sharedSearchEngineHealth.recordSuccess(label);
       return Array.isArray(res.data?.results) ? res.data.results.slice(0, 20) : [];
     } catch (error) {
       if (isExecutionControlError(error)) throw error;
-      this.log(`optional ${label} degraded: ${String(error).slice(0, 100)}`);
+      const status = sharedSearchEngineHealth.recordFailure(label);
+      this.log(`optional ${label} degraded${status.opened ? ' (cooldown opened)' : ''}: ${String(error).slice(0, 100)}`);
       return [];
     }
   }
@@ -679,7 +686,7 @@ export function mapPublicWebCompanyToRecord(args: {
     domain,
     country: args.extracted.country?.trim()
       ? countryIso(args.extracted.country)
-      : inferCountryFromCcTld(domain),
+      : resolveCompanyJurisdiction({ name, domain })?.iso,
     industry: args.extracted.industry || undefined,
     employeeCount:
       typeof employeeCount === 'number' && Number.isSafeInteger(employeeCount) && employeeCount >= 0

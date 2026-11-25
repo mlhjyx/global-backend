@@ -171,6 +171,32 @@ export function replyEntryFooter(contact: SellerReplyContact): string {
   return ['—', `Reply directly to ${clip(contact.sellerName, 120)}:`, ...lines].join('\n');
 }
 
+/**
+ * 极简 GDPR Art.14 首次告知页脚（Batch 1.5-A）。
+ * 欧盟允许将 Art.14 告知合并在第一封正常 B2B 开发信页脚中，避免单独发送生硬的法律通知邮件；
+ * 仅对 EU/UK 个人邮箱场景按需拼入，对美/中东/亚太/拉美及公司职能邮箱不触发。
+ */
+export function buildCompactArticle14Footer(language: string, sellerName: string): string {
+  const lang = (language ?? 'en').trim().toLowerCase().slice(0, 2);
+  const name = clip(sellerName.trim() || 'Our Export Team', 100);
+  if (lang === 'it') {
+    return `Nota privacy (GDPR Art. 14): ${name} ha reperito il Suo contatto aziendale da fonti pubbliche per proporre una collaborazione B2B. Risponda "STOP" in qualsiasi momento per opporsi e cancellare i dati.`;
+  }
+  if (lang === 'de') {
+    return `Datenschutzhinweis (DSGVO Art. 14): ${name} hat Ihre geschäftlichen Kontaktdaten aus öffentlich zugänglichen Unternehmensquellen für eine B2B-Anfrage erhoben. Antworten Sie jederzeit mit „STOP“, um zu widersprechen und die Löschung zu veranlassen.`;
+  }
+  if (lang === 'fr') {
+    return `Information RGPD (Art. 14) : ${name} a obtenu vos coordonnées professionnelles depuis des sources publiques pour un échange B2B. Répondez « STOP » à tout moment pour vous opposer et supprimer vos données.`;
+  }
+  if (lang === 'es') {
+    return `Aviso RGPD (Art. 14): ${name} obtuvo su contacto profesional de fuentes públicas corporativas para una consulta B2B. Responda "STOP" en cualquier momento para oponerse y eliminar sus datos.`;
+  }
+  if (lang === 'nl') {
+    return `Privacyverklaring (AVG Art. 14): ${name} heeft uw zakelijke contactgegevens uit openbare bedrijfsbronnen verkregen voor B2B-contact. Antwoord op elk moment met "STOP" om bezwaar te maken en uw gegevens te laten verwijderen.`;
+  }
+  return `Privacy notice (GDPR Art. 14): ${name} obtained your business contact from publicly available corporate sources for B2B outreach. Reply "STOP" anytime to opt out and erase your record.`;
+}
+
 export function outreachDraftPrompt(facts: readonly OutreachFact[], language: string): string {
   const name = LANGUAGE_NAMES[language] ?? language;
   return [

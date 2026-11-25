@@ -483,4 +483,48 @@ describe('DecisionMakerProvider Batch 1.4-D multilingual HTTP-first & www TLS re
     expect(calls.some((c) => c.tool === 'crawl4ai.fetch' && c.url === 'https://www.coenergia.com/')).toBe(true);
     expect(people.map((p) => p.fullName)).toEqual(['Page Person']);
   });
+
+  it('discovers real people pages via /sitemap.xml when homepage HTML exposes no management/team links', async () => {
+    const calls: Array<{ tool: string; url?: string }> = [];
+    const broker = {
+      invoke: vi.fn(async (tool: string, input: { url?: string }) => {
+        calls.push({ tool, url: input.url });
+        if (tool === 'crawl4ai.fetch' && input.url === 'https://js-nav.it/') {
+          return { data: { url: input.url, text: 'short home' } };
+        }
+        if (tool === 'http.get' && input.url === 'https://js-nav.it/') {
+          return { data: { status: 200, ok: true, finalUrl: 'https://js-nav.it/', text: '<html><body><div id="nav"></div></body></html>' } };
+        }
+        if (tool === 'http.get' && input.url === 'https://js-nav.it/sitemap.xml') {
+          return {
+            data: {
+              status: 200,
+              ok: true,
+              text: '<urlset><url><loc>https://js-nav.it/prodotti</loc></url><url><loc>https://js-nav.it/azienda/direzione</loc></url></urlset>',
+            },
+          };
+        }
+        if (tool === 'http.get' && input.url === 'https://js-nav.it/azienda/direzione') {
+          return {
+            data: {
+              status: 200,
+              ok: true,
+              text: `<html><body>PAGE-PEOPLE ${'Direzione generale acquisti fotovoltaico '.repeat(25)}</body></html>`,
+            },
+          };
+        }
+        return { data: { status: 404, ok: false, text: 'Not Found' } };
+      }),
+    } as unknown as ExecutionBroker;
+
+    const provider = new DecisionMakerProvider({ gateway: {} as never, broker });
+    const people = await provider.findDecisionMakers(
+      { domain: 'js-nav.it', name: 'JS Nav S.r.l.', country: 'IT' },
+      { workspaceId: 'w', runId: 'r', artifactSubject: { subjectType: 'company', subjectId: 'c1' } } as never,
+    );
+
+    expect(calls.some((c) => c.tool === 'http.get' && c.url === 'https://js-nav.it/sitemap.xml')).toBe(true);
+    expect(calls.some((c) => c.tool === 'http.get' && c.url === 'https://js-nav.it/azienda/direzione')).toBe(true);
+    expect(people.map((p) => p.fullName)).toEqual(['Page Person']);
+  });
 });

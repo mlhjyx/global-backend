@@ -26,7 +26,11 @@ import {
   verifiedAtStateColumns,
 } from '../../discovery/contact-point-verification-state';
 import { setEmailPointState, upsertProviderEmailPoint } from '../../discovery/contact-point-writer';
-import { inferCountryFromCcTld } from '../../discovery/domain-country';
+import {
+  conservativeCountryCodeForFallback,
+  inferConservativeEuUkFallback,
+  resolveCompanyJurisdiction,
+} from '../../discovery/jurisdiction-resolver';
 import {
   applyLearnedPattern,
   inferEmailPattern,
@@ -90,12 +94,13 @@ export function hasAnyEnrichmentPath(
   return findersCount > 0 || (Boolean(knownSamples?.length) && verifiersCount > 0);
 }
 
-/** EU/UK 具名邮箱（personal/other）入库时同事务排期 GDPR Art.14 通知。 */
+/** EU/UK 具名邮箱（personal/other）入库时同事务排期 GDPR Art.14 通知（缺国别时对明确欧洲信号保守 Fail-Closed）。 */
 export async function maybeScheduleEnrichedArticle14(
   tx: Prisma.TransactionClient,
   args: {
     workspaceId: string;
     contactId: string;
+    companyName?: string | null;
     country?: string | null;
     domain?: string | null;
     emailType: ContactEmailType;
@@ -103,15 +108,24 @@ export async function maybeScheduleEnrichedArticle14(
     acquiredAt: Date;
   },
 ): Promise<void> {
-  const effectiveCountry = args.country ?? inferCountryFromCcTld(args.domain);
-  if (!effectiveCountry || !isPersonalOrOtherEmailType(args.emailType)) return;
+  if (!isPersonalOrOtherEmailType(args.emailType)) return;
   const noticeModel = (tx as { article14Notice?: { findFirst?: unknown } }).article14Notice;
   if (typeof noticeModel?.findFirst !== 'function') return;
+  const resolved = resolveCompanyJurisdiction({
+    name: args.companyName,
+    domain: args.domain,
+    country: args.country,
+  })?.iso;
+  const fallback = resolved
+    ? null
+    : inferConservativeEuUkFallback({ name: args.companyName, domain: args.domain });
+  const effectiveCountry = resolved ?? (fallback ? conservativeCountryCodeForFallback(fallback) : null);
+  if (!effectiveCountry) return;
   await scheduleArticle14NoticeInTransaction(tx, {
     workspaceId: args.workspaceId,
     subjectId: args.contactId,
     country: effectiveCountry,
-    sourceCategory: args.sourceCategory,
+    sourceCategory: fallback ? `${args.sourceCategory}:conservative_eu_fallback` : args.sourceCategory,
     acquiredAt: args.acquiredAt,
   });
 }
@@ -172,9 +186,17 @@ export async function loadCompanyEnrichmentMeta(
   if (companyModel && typeof companyModel.findFirst === 'function') {
     const row = await tx.canonicalCompany.findFirst({
       where: { id: companyId },
-      select: { country: true, domain: true },
+      select: { name: true, country: true, domain: true, attributes: true },
     });
-    country = row?.country ?? inferCountryFromCcTld(row?.domain) ?? null;
+    country =
+      row?.country ??
+      resolveCompanyJurisdiction({
+        name: row?.name,
+        domain: row?.domain,
+        country: row?.country,
+        attributes: row?.attributes,
+      })?.iso ??
+      null;
   }
   if (contactIds.length > 0 && typeof tx.canonicalContact?.findMany === 'function') {
     const rows = await tx.canonicalContact.findMany({
@@ -341,7 +363,15 @@ export async function tryStep0PatternInference(
         catchAllClass: verification.resolved.catchAllClass,
         lastVerificationEventId: lastEventId,
       });
-      const effectiveCountry = input.country ?? inferCountryFromCcTld(input.domain);
+      const resolvedCountry = resolveCompanyJurisdiction({
+        domain: input.domain,
+        country: input.country,
+      })?.iso;
+      const euFallback = resolvedCountry
+        ? null
+        : inferConservativeEuUkFallback({ domain: input.domain });
+      const effectiveCountry =
+        resolvedCountry ?? (euFallback ? conservativeCountryCodeForFallback(euFallback) : null);
       if (
         effectiveCountry &&
         (emailType === 'personal' || emailType === 'other') &&
@@ -351,7 +381,7 @@ export async function tryStep0PatternInference(
           workspaceId: input.workspaceId,
           subjectId: input.contactId,
           country: effectiveCountry,
-          sourceCategory: 'pattern_inferred',
+          sourceCategory: euFallback ? 'pattern_inferred:conservative_eu_fallback' : 'pattern_inferred',
           acquiredAt: attemptedAt,
         });
       }

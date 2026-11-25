@@ -7,7 +7,7 @@
  */
 import type { Prisma } from '@prisma/client';
 import { classifyContactEmail } from '../discovery/contact-classifier';
-import { inferCountryFromCcTld } from '../discovery/domain-country';
+import { resolveCompanyJurisdiction } from '../discovery/jurisdiction-resolver';
 import {
   buildLinkedInCoPilotPlaybook,
   buildReferralFirstInfoDraft,
@@ -244,7 +244,14 @@ export function buildBattleCsvRow(input: BattleRowBuildInput): BattleCsvRow {
     publicWhatsappUrl: channels.publicWhatsapp,
   });
   const effectiveCountry =
-    (company.country ?? '').trim().toUpperCase() || inferCountryFromCcTld(company.domain) || null;
+    (company.country ?? '').trim().toUpperCase() ||
+    resolveCompanyJurisdiction({
+      name: company.name,
+      domain: company.domain,
+      country: company.country,
+      attributes: company.attributes,
+    })?.iso ||
+    null;
   const d3 = evaluateMultiChannelOutreachPolicy({
     country: effectiveCountry,
     companyName: company.name,
