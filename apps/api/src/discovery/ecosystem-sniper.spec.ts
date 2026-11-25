@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildEcosystemSniperQueries,
   parseCustomerSeedCsv,
+  withIcpSniperAndSeedFilters,
 } from './ecosystem-sniper';
 import {
   KNOWN_SOLAR_PV_BRANDS,
@@ -59,5 +60,35 @@ describe('L0 ecosystem & competitor replacement sniper + customer seed CSV', () 
     expect(matched.brands.map((b) => b.name)).toEqual(['LONGi', 'SMA', 'Fronius']);
     expect(matched.carriesChineseBrand).toBe(true);
     expect(matched.carriesForeignBrand).toBe(true);
+  });
+
+  it('Phase 1: propagates ICP competitor_brands, ecosystem_brands and seed_domains onto public_web queries', () => {
+    const queries = [
+      {
+        source_class: 'public_intelligence',
+        filters: { source_hint: 'public_web', country: 'Italy' },
+        keywords: ['moduli fotovoltaici'],
+        rationale: 'web',
+        priority: 1,
+      },
+      {
+        source_class: 'industry_data',
+        filters: { source_hint: 'directory', country: 'Italy' },
+        keywords: ['fotovoltaico'],
+        rationale: 'dir',
+        priority: 2,
+      },
+    ];
+    const enriched = withIcpSniperAndSeedFilters(queries, {
+      competitor_brands: ['LONGi', 'JinkoSolar'],
+      ecosystem_brands: 'SMA, Fronius',
+      seed_domains: ['https://www.krannich-solar.com/', 'baywa-re.it'],
+    });
+    expect(enriched[0]!.filters).toMatchObject({
+      competitor_brands: ['LONGi', 'JinkoSolar'],
+      ecosystem_brands: ['SMA', 'Fronius'],
+      seed_domains: ['krannich-solar.com', 'baywa-re.it'],
+    });
+    expect(enriched[1]!.filters).not.toHaveProperty('competitor_brands');
   });
 });

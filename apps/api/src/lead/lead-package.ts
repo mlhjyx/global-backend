@@ -20,6 +20,11 @@ import {
   type LeadPackageCompanyChannel,
   type LeadPackageSocialProfile,
 } from '../discovery/company-channels';
+import {
+  projectStoredAndFallbackSignals,
+  type LeadPackageCompanySignal,
+  type LeadPackageSignalItem,
+} from '../signals/enrichment-signal-projection';
 
 export interface LeadPackageLead {
   readonly id: string;
@@ -78,6 +83,7 @@ export interface LeadPackageInput {
   readonly company: LeadPackageCompany;
   readonly contactPoints: readonly LeadPackageContactPoint[];
   readonly companyChannels?: readonly LeadPackageCompanyChannel[];
+  readonly companySignals?: readonly LeadPackageCompanySignal[];
   /** 禁联或未清制裁命中时为 true：隐藏社媒与渠道链接，避免误导运营触达受限主体。 */
   readonly omitSocials?: boolean;
   readonly evidence: readonly LeadPackageEvidence[];
@@ -118,11 +124,7 @@ export interface LeadPackage {
   readonly company_channels: readonly LeadPackageCompanyChannel[];
   readonly social_profiles: readonly LeadPackageSocialProfile[];
   readonly suggested_contact_path: SuggestedContactPath | null;
-  readonly signals: readonly {
-    readonly type: string;
-    readonly at: string;
-    readonly url: string | null;
-  }[];
+  readonly signals: readonly LeadPackageSignalItem[];
   readonly scores: {
     readonly fit: number | null;
     readonly role: number | null;
@@ -209,11 +211,15 @@ function companyProfile(attributes: Record<string, unknown>) {
   });
 }
 
-/** The newest intent signals behind "why now", at most {@link MAX_SIGNALS}, shared with the weekly report. */
-export function leadSignals(attributes: unknown): readonly { type: string; at: string; url: string | null }[] {
-  const intent = record(record(attributes).intent);
+/** The newest intent + company signals behind "why now", at most {@link MAX_SIGNALS}, shared with the weekly report. */
+export function leadSignals(
+  attributes: unknown,
+  companySignals?: readonly LeadPackageCompanySignal[],
+): readonly LeadPackageSignalItem[] {
+  const attrs = record(attributes);
+  const intent = record(attrs.intent);
   const events = Array.isArray(intent.events) ? intent.events : [];
-  return events
+  const intentItems: LeadPackageSignalItem[] = events
     .map((entry) => record(entry))
     .flatMap((event) => {
       const type = text(event.type);
@@ -221,8 +227,17 @@ export function leadSignals(attributes: unknown): readonly { type: string; at: s
       if (!type || !at) return [];
       const url = isHttps(text(event.page_url)) ? (text(event.page_url) as string) : null;
       return [{ type, at, url }];
-    })
+    });
+  const storedAndFallback = projectStoredAndFallbackSignals(attrs, companySignals);
+  const seen = new Set<string>();
+  return [...intentItems, ...storedAndFallback]
     .sort((left, right) => Date.parse(right.at) - Date.parse(left.at))
+    .filter((signal) => {
+      const key = `${signal.type}\n${signal.url ?? ''}\n${signal.provider ?? ''}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
     .slice(0, MAX_SIGNALS)
     .map((signal) => Object.freeze(signal));
 }
@@ -306,7 +321,7 @@ export function buildLeadPackage(input: LeadPackageInput): LeadPackage {
     company_channels: Object.freeze(companyChannels),
     social_profiles: Object.freeze(socialProfiles),
     suggested_contact_path: suggestedContactPath(input.contactPoints),
-    signals: Object.freeze([...leadSignals(attributes)]),
+    signals: Object.freeze([...leadSignals(attributes, input.companySignals)]),
     scores: Object.freeze({
       fit: finite(scores.fit),
       role: finite(scores.role),

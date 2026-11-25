@@ -11,6 +11,7 @@ import {
   type ToolContext,
 } from '../../tools/tool-contract';
 import type { CrawlHtmlResult } from '../../adapters/web-crawler';
+import { isPdfDocumentUrl } from '../../adapters/pdf-url-guard';
 import type { HttpGetInput, HttpGetOutput } from '../../tools/source-tools';
 import { isAllowedByRobots } from '../../adapters/robots';
 import { isExecutionControlError } from '../../execution-budget/execution-control-error';
@@ -75,7 +76,7 @@ export class StructuredHarvestProvider implements CompanyEnrichmentAdapter {
         titles: [...new Set(titles)].slice(0, 12),
         has_buying_role: titles.some(isBuyingRole),
       };
-    } else if (careersUrl && (await recoverExternalActionFailure(isAllowedByRobots(careersUrl, {
+    } else if (careersUrl && !isPdfDocumentUrl(careersUrl) && (await recoverExternalActionFailure(isAllowedByRobots(careersUrl, {
         authorizeExternalAction: ctx.authorizeExternalAction,
       }), false))) {
       // ② 抓 careers 落地页 → 优先 ATS 结构化真值，兜底 JobPosting JSON-LD（robots 在 crawl4ai.render 工具内权威强制）
@@ -153,7 +154,9 @@ const CAREERS_RE = /career|careers|jobs?|stellen|stellenangebote|karriere|vacanc
 
 /** 从 URL 清单挑最像"招聘/职业"的页面（路径命中招聘词，短路径优先）。 */
 export function pickCareersUrl(urls: string[]): string | undefined {
-  const hits = urls.filter((u) => CAREERS_RE.test(pathOf(u))).sort((a, b) => pathOf(a).length - pathOf(b).length);
+  const hits = urls
+    .filter((u) => !isPdfDocumentUrl(u) && CAREERS_RE.test(pathOf(u)))
+    .sort((a, b) => pathOf(a).length - pathOf(b).length);
   return hits[0];
 }
 

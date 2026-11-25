@@ -96,6 +96,8 @@ import { corroborateCompanyBeforeFit } from '../discovery/run2/corroboration-enr
 import { scopeIndependentEnrichment } from '../discovery/enrichment-identity';
 import type { FailureStage } from '../discovery/judgment/failure-codes';
 import { withClassifiedFailure } from './pipeline-failure-activity';
+import { isActivityCancelledError, withActivityHeartbeat } from './activity-heartbeat';
+import { revisableProvisionalLeadWhere } from '../discovery/run2/pool';
 
 export interface CompanyPipelineActivityInput {
   manufacturerNetworkExecution?: ManufacturerNetworkExecutionSnapshot;
@@ -322,8 +324,13 @@ export function createRun2PipelineActivities(deps: {
       unclassified: boolean;
       reason?: string;
     }> {
+      return withActivityHeartbeat(
+        { stage: 'profiling', runId: args.runId, companyId: args.companyId },
+        async (_activityCtx, checkpoint) => {
       const binding = await ensureRunBudget(args);
+      checkpoint('corroborate');
       await corroborateCompanyBeforeFit(deps, args, binding);
+      checkpoint('setup');
       const setup = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const source = await tx.dataProvider.findUnique({
           where: { key: WEBSITE_PROFILE_PROVIDER_KEY },
@@ -372,6 +379,7 @@ export function createRun2PipelineActivities(deps: {
       const icpHomeCountry = targetCountryCodes({ filters: { country: setup.icp?.targetMarkets } })[0] ?? '';
       const homeCountry =
         targetCountryCodes({ filters: { country: setup.company.country } })[0] ?? icpHomeCountry;
+      checkpoint('profile_fetch');
       const durableReceipts: Array<{ producerId: string; receipt: DurableExecutionReceipt }> = [];
       let profile: WebsiteProfile | null = null;
       try {
@@ -393,6 +401,7 @@ export function createRun2PipelineActivities(deps: {
           },
         );
       } catch (error) {
+        if (isActivityCancelledError(error)) throw error;
         if (artifactSubjectSkipReason(error)) {
           return { profiled: false, matched: false, unclassified: false, reason: 'suppressed' };
         }
@@ -492,6 +501,8 @@ export function createRun2PipelineActivities(deps: {
         matched: committed,
         unclassified: profile.tradeRoleSource === null,
       };
+        },
+      );
     },
 
     /** 精判：单公司四门判定 → Lead（fitVerdict/fitReasons）。 */
@@ -500,7 +511,11 @@ export function createRun2PipelineActivities(deps: {
       verdict: 'match' | 'weak' | 'mismatch' | null;
       skipped?: boolean;
     }> {
+      return withActivityHeartbeat(
+        { stage: 'fitting', runId: args.runId, companyId: args.companyId },
+        async (_activityCtx, checkpoint) => {
       const binding = await ensureRunBudget(args);
+      checkpoint('load');
       // P3 J07（W8）：L0 门链与 J03b 的契约模式协同——off 保持旧行为（不评估 L0）；
       // shadow 评估但只记录（v1 产出照旧）；enforce 下 FAIL 在模型调用前拦截（NOT_FIT）。
       const mode = judgeContractMode();
@@ -529,6 +544,7 @@ export function createRun2PipelineActivities(deps: {
       if (!(await mayUse(args.workspaceId, args.companyId))) {
         return { judged: false, verdict: null, skipped: true };
       }
+      checkpoint('l0_gates');
       const gate = deepJudgeRunsL0(mode)
         ? await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
             evaluateL0Gates(tx, {
@@ -541,10 +557,30 @@ export function createRun2PipelineActivities(deps: {
         : null;
       const blocked = gate ? deepJudgeGateBlock(mode, gate) : null;
       if (blocked) {
-        // L0 FAIL（enforce）：不调用模型、不写 Lead。job 以 NOT_FIT 收尾（工作流见
-        // mismatch 即结束本条流水线）；门结果（hard_gate_result）已由 evaluateGates 落库。
+        // L0 FAIL（enforce）：不调用模型、不新建 Lead；但若此前快扫曾为本公司建过暂定 weak Lead，
+        // 同步降级为 REJECTED/mismatch，避免旧暂定 Lead 滞留 needs_review 并在下轮重扫死循环。
+        await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+          const leadRepo = tx.lead as { updateMany?: (input: unknown) => Promise<unknown> };
+          if (typeof leadRepo?.updateMany !== 'function') return;
+          await leadRepo.updateMany({
+            where: {
+              workspaceId: args.workspaceId,
+              icpId: args.icpId,
+              canonicalCompanyId: args.companyId,
+              ...revisableProvisionalLeadWhere(),
+            },
+            data: {
+              fitVerdict: 'mismatch',
+              fitReasons: { source: 'l0_gate', gateId: blocked.gateId, reasonCode: blocked.reasonCode },
+              queue: 'rejected',
+              status: 'REJECTED',
+              version: { increment: 1 },
+            },
+          });
+        });
         return { judged: false, verdict: 'mismatch', skipped: true };
       }
+      checkpoint('judge');
       const judgment = await judgeFitCompany(
         deps.gateway,
         args.workspaceId,
@@ -570,6 +606,8 @@ export function createRun2PipelineActivities(deps: {
         await recordCompanyJobCostCents(tx as never, args, sumReceiptMicrousd([judgment.durableReceipt]));
       });
       return { judged: true, verdict: judgment.verdict };
+        },
+      );
     },
 
     /** 信号：单公司数字足迹/结构化收割（7 天 TTL，SUSPENDED 域名跳过）。 */
@@ -578,6 +616,9 @@ export function createRun2PipelineActivities(deps: {
       provider: string | null;
       skipped?: string;
     }> {
+      return withActivityHeartbeat(
+        { stage: 'signals', runId: args.runId, companyId: args.companyId },
+        async (_activityCtx, checkpoint) => {
       const binding = await ensureRunBudget(args);
       const enrichers = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
         deps.providers.routeSignalEnrichment(tx as never),
@@ -623,6 +664,7 @@ export function createRun2PipelineActivities(deps: {
       const hits: Array<{ key: string; result: EnrichmentResult }> = [];
       let subjectDenied = false;
       for (const enricher of enrichers) {
+        checkpoint(`enricher:${enricher.key}`);
         const prev = existing[enricher.key] as { _ts?: string } | undefined;
         if (prev?._ts && nowMs - Date.parse(prev._ts) < SIGNAL_TTL_MS) continue;
         if (!(await mayUse(args.workspaceId, args.companyId))) {
@@ -644,6 +686,7 @@ export function createRun2PipelineActivities(deps: {
           );
           if (result.matched) hits.push({ key: enricher.key, result });
         } catch (error) {
+          if (isActivityCancelledError(error)) throw error;
           if (artifactSubjectSkipReason(error)) {
             subjectDenied = true;
             break;
@@ -683,6 +726,8 @@ export function createRun2PipelineActivities(deps: {
         provider: committed.length ? committed.join('+') : null,
         ...(subjectDenied ? { skipped: 'suppressed' } : {}),
       };
+        },
+      );
     },
 
     /** 联系人：单公司决策人发现 + 可选邮箱补全（M3 双闸语义不变）。 */
@@ -694,7 +739,11 @@ export function createRun2PipelineActivities(deps: {
       phones: number;
       emailGuess?: Record<string, number> | null;
     }> {
+      return withActivityHeartbeat(
+        { stage: 'contacts', runId: args.runId, companyId: args.companyId },
+        async (_activityCtx, checkpoint) => {
       const binding = await ensureRunBudget(args);
+      checkpoint('discover_contacts');
       const providerRow = await deps.prisma.dataProvider.findUnique({
         where: { key: 'decision_maker' },
         select: { config: true },
@@ -745,6 +794,7 @@ export function createRun2PipelineActivities(deps: {
         select: { status: true },
       });
       if (emailGuessRow?.status === 'ENABLED' && company?.domain) {
+        checkpoint('email_guess');
         const verifiers = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
           deps.providers.routeEmailVerification(tx as never),
         );
@@ -784,6 +834,8 @@ export function createRun2PipelineActivities(deps: {
         phones,
         ...(emailGuess ? { emailGuess } : {}),
       };
+        },
+      );
     },
 
     /**
@@ -802,6 +854,9 @@ export function createRun2PipelineActivities(deps: {
       costMicrousd?: number;
       operationRef?: string;
     }> {
+      return withActivityHeartbeat(
+        { stage: 'enrich_contacts', runId: args.runId, companyId: args.companyId },
+        async (_activityCtx, checkpoint) => {
       const finders = resolveConfiguredFinderProviders();
       if (finders.length === 0) return { skipped: true, reason: 'no_configured_finder' };
       const enabled = await deps.prisma.dataProvider.findMany({
@@ -826,6 +881,7 @@ export function createRun2PipelineActivities(deps: {
         accountKey: binding.accountKey,
       });
       if (deps.contactEnrichmentSafety) {
+        checkpoint('safety_enrich');
         // Same shared runner as HTTP: no second grant, original binding and exact remaining micro.
         const safety = await executeContactEnrichmentSafetyActivity(deps.contactEnrichmentSafety, {
           workspaceId: args.workspaceId,
@@ -850,6 +906,8 @@ export function createRun2PipelineActivities(deps: {
         };
       }
       return { skipped: true, reason: 'source_control_pending' };
+        },
+      );
     },
   };
 

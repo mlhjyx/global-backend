@@ -37,7 +37,12 @@ export interface CompanyForScoring {
   contacts: {
     title: string | null;
     seniority: string | null;
-    contactPoints: { type: string; status: string }[];
+    contactPoints: {
+      type: string;
+      status: string;
+      sourceType?: string | null;
+      verificationMethod?: string | null;
+    }[];
   }[];
   /**
    * 公司级联系路径（BI-14 `company_contact_point`，#630）：调用方（qualify.activities）已按
@@ -210,9 +215,9 @@ export function scoreLead(company: CompanyForScoring, icp: IcpForScoring, opts?:
   // Reachability（v3，BI-14 D-028）= max(公司级, 个人旧口径)：
   //  - 公司级：任一联系路径 kind（contact_page / impressum_page / contact_form / supplier_page）或
   //    公司级渠道（company_contact_channel: email / phone / form_url）且 status ∈ VALID/UNVERIFIED → 1.0；社交页不计；INVALID 不计。
-  //  - 个人旧口径不变（Q4，不收回已有能力）：VALID 1 / UNVERIFIED|RISKY 0.5。🔴 **排除标识点 external_id**——它不是可达渠道
-  //   （#58 P1：CH officer_id 默认 UNVERIFIED，若计入会让「无邮箱/电话的董事」被误判可达、越过推荐队列 Reachability 硬底）。
-  //    用黑名单（非白名单 email/phone）以保留 linkedin 等真实联系渠道（#62 复审 P2）。
+  //  - 个人口径：VALID 1 / 真实非盲猜 UNVERIFIED 0.5；未验证的 RISKY 邮箱与 pattern_guess 盲猜不得拿分（Phase 1 止血）。
+  //    🔴 **排除标识点 external_id**——它不是可达渠道（#58 P1：CH officer_id 默认 UNVERIFIED，若计入会让
+  //    「无邮箱/电话的董事」被误判可达、越过推荐队列 Reachability 硬底）。用黑名单以保留 linkedin 等真实联系渠道（#62 复审 P2）。
   const companyReachability = hasReachableCompanyChannel(
     company.companyContactPoints,
     company.companyContactChannels,
@@ -222,9 +227,11 @@ export function scoreLead(company: CompanyForScoring, icp: IcpForScoring, opts?:
   const points = company.contacts
     .flatMap((c) => c.contactPoints)
     .filter((p) => p.type !== 'external_id');
+  const isBlindGuessPoint = (p: { sourceType?: string | null; verificationMethod?: string | null }): boolean =>
+    p.sourceType === 'pattern_guess' || p.verificationMethod === 'pattern_guess';
   const personalReachability = points.some((p) => p.status === 'VALID')
     ? 1
-    : points.some((p) => p.status === 'UNVERIFIED' || p.status === 'RISKY')
+    : points.some((p) => p.status === 'UNVERIFIED' && !isBlindGuessPoint(p))
       ? 0.5
       : 0;
   const reachability = Math.max(companyReachability, personalReachability);

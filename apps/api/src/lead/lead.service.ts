@@ -18,6 +18,7 @@ import {
 } from './lead-qualified-snapshot';
 import { buildLeadPackage, packageSanctionsStatus, type LeadPackage } from './lead-package';
 import { filterReachableCompanyChannels, loadCompanyContactChannels, loadLeadListChannelSummaries, type LeadPackageCompanyChannel } from '../discovery/company-channels';
+import { loadCompanySignalsForLead, type LeadPackageCompanySignal } from '../signals/enrichment-signal-projection';
 import { isOutcomeReasonCode, isRejectReasonCode, REJECT_REASON_CODES } from './reason-codes';
 import { reachableCompanyContactPoints } from '../discovery/company-contact-points';
 import { DataRightsService } from '../compliance/data-rights.service';
@@ -276,6 +277,7 @@ export class LeadService {
   ): Promise<{
     contactPoints: Array<{ kind: string; value: string; status: string }>;
     companyChannels: LeadPackageCompanyChannel[];
+    companySignals: LeadPackageCompanySignal[];
     evidence: Array<{ field: string; sourceUrl: string | null; fetchedAt: Date }>;
   }> {
     const contactPoints = await tx.companyContactPoint.findMany({
@@ -284,6 +286,7 @@ export class LeadService {
       orderBy: [{ kind: 'asc' }, { value: 'asc' }],
     });
     const rawChannels = await loadCompanyContactChannels(tx, [company.id]);
+    const companySignals = await loadCompanySignalsForLead(tx, company.id);
     const evidenceRows =
       companyEvidence ??
       (await tx.fieldEvidence.findMany({
@@ -312,6 +315,7 @@ export class LeadService {
     return {
       contactPoints: reachableCompanyContactPoints(contactPoints, suppressions, company),
       companyChannels: filterReachableCompanyChannels(rawChannels, suppressions, company),
+      companySignals,
       evidence: newest.map((row) => ({
         field: row.field,
         sourceUrl: row.sourceUrl ?? (row.rawRecordId ? sourceById.get(row.rawRecordId) ?? null : null),
@@ -370,6 +374,7 @@ export class LeadService {
         company,
         contactPoints: undeliverable ? [] : facts.contactPoints,
         companyChannels: undeliverable ? [] : facts.companyChannels,
+        companySignals: facts.companySignals,
         omitSocials: undeliverable,
         evidence: facts.evidence,
         sanctions: {
@@ -813,7 +818,7 @@ export class LeadService {
         // BI-19/BI-21/BI-15（设计 §2/§3）：同一事务里组装交付读模型；快照只取其公司级字段。
         // 读取全部有界（单公司 ≤100 条证据 + 至多 6 条联系路径），不含 canonical_contact；
         // 证据行复用上面那次读取，公司行锁里不再额外扫表。
-        const { contactPoints: deliveryContactPoints, evidence: deliveryEvidence } = await this.loadDeliveryFacts(
+        const { contactPoints: deliveryContactPoints, companySignals: deliverySignals, evidence: deliveryEvidence } = await this.loadDeliveryFacts(
           tx,
           effectiveCompany,
           suppressionRows,
@@ -823,6 +828,7 @@ export class LeadService {
           lead,
           company: effectiveCompany,
           contactPoints: deliveryContactPoints,
+          companySignals: deliverySignals,
           evidence: deliveryEvidence,
           sanctions: {
             status: sanctionsScreening.status,

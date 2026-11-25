@@ -286,6 +286,19 @@ describe('A1：联系人发现的工具白名单', () => {
   });
 });
 
+describe('Phase 1: discovery.quick_judge System Prompt aligns with two-layer quick-scan rubric', () => {
+  it('replaces the legacy machining 4-gate prompt with the two-layer buyer rubric', () => {
+    const description = getTask('discovery.quick_judge')?.description ?? '';
+    expect(description).not.toContain('材质门');
+    expect(description).not.toContain('工艺子集门');
+    expect(description).toContain('必过层');
+    expect(description).toContain('加分层');
+    expect(description).toContain('行业赛道');
+    expect(description).toContain('商业角色');
+    expect(description).toContain('mismatch');
+  });
+});
+
 const B2_LEGACY_SCHEMA_BYTES = {
   "company_understanding.extract_claims": {
     "output": "cafe12f823aa2a21d9a0bdeec90940b2804ef7e7bfdb3247803dbc7ab9d3ae60",

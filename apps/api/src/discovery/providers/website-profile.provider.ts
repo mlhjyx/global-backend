@@ -1,5 +1,6 @@
 import { getTask } from '../../ai-tasks/task-registry';
 import { extractSameSiteLinks } from '../../adapters/site-links';
+import { isPdfDocumentUrl } from '../../adapters/pdf-url-guard';
 import {
   isCrawl4aiRenderEmptyHtml,
   type CrawlHtmlResult,
@@ -321,6 +322,7 @@ export class WebsiteProfileProvider {
    * the company subject (as for the homepage and Impressum fetches; DSR erasure covers it).
    */
   private async render(url: string, ctx: ExecutionContext & { artifactSubject: ArtifactSubjectRef }): Promise<string> {
+    if (isPdfDocumentUrl(url)) return '';
     const result = await this.deps.broker.invoke<{ url: string }, CrawlHtmlResult & { robotsBlocked?: boolean }>(
       'crawl4ai.render',
       { url },

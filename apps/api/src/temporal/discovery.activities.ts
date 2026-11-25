@@ -1,6 +1,8 @@
 import type { ManufacturerNetworkExecutionSnapshot } from '../discovery/manufacturer-network-execution';
 import { createHash } from 'node:crypto';
 import { scopeRunProjectEvidence } from '../discovery/website-profile/run-project-page';
+import { mergeRun2JudgedCompanyIds } from './discovery-run2-helpers';
+import { persistEnrichmentCompanySignals } from '../signals/enrichment-signal-projection';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { ApplicationFailure } from '@temporalio/activity';
 import { PrismaService } from '../prisma/prisma.service';
@@ -577,6 +579,7 @@ export async function commitCompanySignals(
     });
     if (result.value) committed.push(hit.key);
   }
+  if (committed.length > 0) await persistEnrichmentCompanySignals(tx, { workspaceId: args.workspaceId, companyId: args.companyId, hits: writable, signalTimestamp: args.signalTimestamp });
   const hitKeys = new Set(writable.map((hit) => hit.key));
   const consumed = new Set<string>();
   for (const [enricherKey, receipts] of args.receipts) {
@@ -767,8 +770,10 @@ const FIT_REACHED_FAILURE_STAGES: ReadonlySet<string> = new Set<DiscoveryRunStag
   // 看门狗收尾时无法知道 run 走到哪：交给 leads 的 fit 判定查询决定（有判定就请求评分）。
   'watchdog',
   'fit',
+  'deep',
   'enrich',
   'signals',
+  'contacts',
   'watches',
   'patentEnqueue',
   'finalize',
@@ -813,12 +818,13 @@ async function fitStageJudged(
     where: { runId: run.runId, ingestStatus: 'ACCEPTED' },
     select: { id: true },
   });
-  if (!rawRecords.length) return false;
-  const links = await tx.identityLink.findMany({
-    where: { canonicalType: 'company', rawRecordId: { in: rawRecords.map((record) => record.id) } },
-    select: { canonicalId: true },
-  });
-  const companyIds = [...new Set(links.map((link) => link.canonicalId))];
+  const links = rawRecords.length
+    ? await tx.identityLink.findMany({
+        where: { canonicalType: 'company', rawRecordId: { in: rawRecords.map((record) => record.id) } },
+        select: { canonicalId: true },
+      })
+    : [];
+  const companyIds = await mergeRun2JudgedCompanyIds(tx, run.runId, links.map((link) => link.canonicalId));
   if (!companyIds.length) return false;
   const judged = await tx.lead.findFirst({
     where: { icpId: run.icpId, canonicalCompanyId: { in: companyIds }, fitVerdict: { not: null } },
@@ -3306,7 +3312,8 @@ export function createDiscoveryActivities(deps: {
           },
           select: { canonicalId: true },
         });
-        const ids = [...new Set(links.map((l) => l.canonicalId))];
+        const ids = await mergeRun2JudgedCompanyIds(tx, args.runId, [...new Set(links.map((l) => l.canonicalId))], { deepMatchOnly: true });
+        if (!ids.length) return [];
         return tx.canonicalCompany.findMany({
           where: {
             id: { in: ids },

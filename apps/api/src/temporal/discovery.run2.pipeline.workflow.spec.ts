@@ -3,8 +3,13 @@ import { ActivityFailure, ApplicationFailure } from '@temporalio/common';
 
 vi.mock('@temporalio/workflow', async () => await import('./testing/temporal-workflow.mock'));
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { acts, resetActivities, setPatched } from './testing/temporal-workflow.mock';
-import { companyPipelineWorkflow } from './discovery.run2.pipeline.workflow';
+import {
+  COMPANY_PIPELINE_WEAK_SKIP_SIGNALS_PATCH,
+  companyPipelineWorkflow,
+} from './discovery.run2.pipeline.workflow';
 
 const WORKSPACE_ID = '11111111-1111-4111-8111-111111111111';
 const RUN_ID = '22222222-2222-4222-8222-222222222222';
@@ -179,7 +184,21 @@ describe('M0④ 公司级深挖子工作流', () => {
     expect(acts.contactsCompanyOnce).not.toHaveBeenCalled();
   });
 
-  it('Batch 1.6: weak 线索保留 signals，但跳过重度 contacts 与 enrich', async () => {
+  it('Phase 1: weak 线索在 signals 之前短路（跳过 signals、contacts 与 enrich）', async () => {
+    acts.fitCompanyOnce.mockResolvedValue({ judged: true, verdict: 'weak' });
+
+    await expect(companyPipelineWorkflow(INPUT)).resolves.toEqual({ stage: 'done' });
+    expect(markedStages()).toEqual(['profiling', 'fitting', 'done']);
+    expect(acts.signalsCompanyOnce).not.toHaveBeenCalled();
+    expect(acts.contactsCompanyOnce).not.toHaveBeenCalled();
+    expect(acts.enrichContactsForCompany).not.toHaveBeenCalled();
+    expect(acts.updateCompanyJobStage).toHaveBeenLastCalledWith(
+      expect.objectContaining({ stage: 'done', verdictDeep: 'weak' }),
+    );
+  });
+
+  it('Batch 1.6 replay: 旧历史（未命中 weak-skip-signals patch）下 weak 仍保留 signals 并跳过 contacts 与 enrich', async () => {
+    setPatched((id) => id !== COMPANY_PIPELINE_WEAK_SKIP_SIGNALS_PATCH);
     acts.fitCompanyOnce.mockResolvedValue({ judged: true, verdict: 'weak' });
 
     await expect(companyPipelineWorkflow(INPUT)).resolves.toEqual({ stage: 'done' });
@@ -187,6 +206,12 @@ describe('M0④ 公司级深挖子工作流', () => {
     expect(acts.signalsCompanyOnce).toHaveBeenCalledTimes(1);
     expect(acts.contactsCompanyOnce).not.toHaveBeenCalled();
     expect(acts.enrichContactsForCompany).not.toHaveBeenCalled();
+  });
+
+  it('Phase 1: 长耗时深挖活动代理声明 heartbeatTimeout，确保父取消可及时送达子活动', () => {
+    const src = readFileSync(join(import.meta.dirname, 'discovery.run2.pipeline.workflow.ts'), 'utf8');
+    expect(src).toMatch(/const modelActs = proxyActivities[\s\S]*?heartbeatTimeout:/u);
+    expect(src).toMatch(/const signalActs = proxyActivities[\s\S]*?heartbeatTimeout:/u);
   });
 
   it('marks the job skipped(DEEP_STOPPED) and rethrows when the parent cancels the child', async () => {

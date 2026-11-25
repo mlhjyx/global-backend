@@ -274,4 +274,30 @@ describe('LeadService.package', () => {
       response: { error: { code: 'SYNTHETIC_PROVENANCE_QUARANTINED' } },
     });
   });
+
+  it('Phase 1: loads company_signal rows into LeadPackage.signals when intent.events is absent', async () => {
+    const tx = txFor({
+      companySignal: {
+        findMany: vi.fn(async () => [
+          {
+            providerKey: 'digital_footprint',
+            signalKind: 'page_change',
+            sourceUrl: 'https://beispiel-pumpen.de/',
+            title: '正在投放付费广告（广告像素活跃）',
+            excerpt: '检测到广告像素：google_ads, meta_pixel',
+            observedAt: new Date('2026-11-25T10:00:00.000Z'),
+          },
+        ]),
+      },
+    });
+    const pkg = await serviceWithTx(tx).leadPackage(ctx, 'lead-1');
+    expect(pkg.signals).toHaveLength(1);
+    expect(pkg.signals[0]).toMatchObject({
+      type: 'AD_CAMPAIGN_ACTIVE',
+      at: '2026-11-25T10:00:00.000Z',
+      url: 'https://beispiel-pumpen.de/',
+      title: '正在投放付费广告（广告像素活跃）',
+      provider: 'digital_footprint',
+    });
+  });
 });

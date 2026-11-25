@@ -80,12 +80,34 @@ const DIRECTORY_INTENTS_BY_LANG: Readonly<Partial<Record<SearchLanguage, readonl
   tr: ['firma rehberi', 'katılımcı listesi', 'üye listesi', 'fuar katılımcıları'],
 });
 
-/** 列表页 URL/标题的正向信号（用于从搜索命中里挑真正的名录页）。含多语种名录/参展商词。 */
-const LISTING_HINT = /member|mitglied|exhibitor|aussteller|directory|verzeichnis|list|catalog|katalog|branchenbuch|elenco|espositor|soci|directorio|expositor|asociaci|annuaire|exposant|membre|bedrijvengids|ledenlijst|deelnemer|wystawc|rehber|kat[ıi]l[ıi]mc[ıi]|名录|黄页|企业库|企业大全|参展商|会员企业|供应商目录/i;
+/** 明确非名录的组织介绍、治理架构、工作组、登录、资讯类路径（命中直接排除）。 */
+const NON_LISTING_PATH_RE =
+  /(?:^|\/)(?:board[-_]?of[-_]?members|governing[-_]?board|gruppi[-_]?di[-_]?lavoro|working[-_]?groups?|become[-_]?a[-_]?member|join[-_]?us|membership[-_]?(?:fees?|benefits?|apply)|login|sign[-_]?in|register|contact(?:[-_]?us)?|contatti|privacy|cookie|terms|news|blog|press|article)(?:\/|$)/iu;
 
-/** 搜索结果是否名录/黄页相貌（URL 或标题命中正向信号）。 */
+const ABOUT_ONLY_PATH_RE = /^\/(?:[a-z]{2}\/)?(?:chi-siamo|about(?:-us)?|qui-sommes-nous|ueber-uns|quienes-somos)\/?$/iu;
+const ROOT_OR_LOCALE_HOME_RE = /^\/(?:[a-z]{2}(?:-[a-z]{2})?\/?)?$/iu;
+
+/** 列表页 URL/标题的正向信号（词边界精确匹配，剔除 `soci`/`asociaci`/`list`/`member` 泛子串误匹配）。 */
+const LISTING_HINT =
+  /(?:^|[^a-z\p{L}])(?:members?[-_/\s]+(?:directory|list|companies|catalogue?|index)|member[-_/\s]+companies|directory|directories|exhibitors?|aussteller(?:verzeichnis|liste)?|mitglieder(?:verzeichnis|liste)?|verzeichnis|branchenbuch|katalog|catalog(?:ue|o)?|elenco(?:[-_/\s]+(?:aziende|soci|associati|imprese))?|espositori?|associati|i[-_/\s]+nostri[-_/\s]+(?:soci|associati)|(?:lista|albo)[-_/\s]+(?:soci|associati|aziende)|directorio|expositores?|listado[-_/\s]+(?:empresas|socios)|annuaire|exposants?|liste[-_/\s]+(?:des[-_/\s]+)?(?:membres|exposants|entreprises)|bedrijvengids|ledenlijst|deelnemers(?:lijst)?|wystawc[a-z\p{L}]*|lista[-_/\s]+(?:cz[łl]onk[óo]w|wystawc[óo]w)|firma[-_/\s]+rehberi|kat[ıi]l[ıi]mc[ıi]|üye[-_/\s]+listesi|(?:exhibitor|company|supplier|buyer|vendor|manufacturer|distributor)[-_/\s]+list)(?:$|[^a-z\p{L}])|名录|黄页|企业库|企业大全|参展商|会员企业|供应商目录/iu;
+
+const HOME_TITLE_DIRECTORY_HINT =
+  /(?:^|[^a-z\p{L}])(?:members?[-_\s]+directory|exhibitor[-_\s]+list|industry[-_\s]+directory|yellow[-_\s]+pages|branchenbuch|bedrijvengids|annuaire|directorio|elenco[-_\s]+aziende)(?:$|[^a-z\p{L}])|企业名录|企业黄页|企业大全|参展商名单|供应商目录/iu;
+
+/** 搜索结果是否名录/黄页相貌（过滤掉协会首页/介绍/董事会/工作组等非名录页，保留真名录）。 */
 export function isDirectoryListingShaped(url: string, title: string): boolean {
-  return LISTING_HINT.test(url) || LISTING_HINT.test(title);
+  let path = url;
+  try {
+    const parsed = new URL(url);
+    path = decodeURIComponent(parsed.pathname);
+    if (NON_LISTING_PATH_RE.test(path) || ABOUT_ONLY_PATH_RE.test(path)) return false;
+    if (ROOT_OR_LOCALE_HOME_RE.test(path)) {
+      return HOME_TITLE_DIRECTORY_HINT.test(title);
+    }
+  } catch {
+    /* non-standard test URL falls back to full-string check */
+  }
+  return LISTING_HINT.test(path) || LISTING_HINT.test(title);
 }
 
 const CRAWL_CONCURRENCY = 4;

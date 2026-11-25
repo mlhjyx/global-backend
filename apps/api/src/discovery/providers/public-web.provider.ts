@@ -43,6 +43,7 @@ import {
   isCrawl4aiRenderEmptyHtml,
   type CrawlResult,
 } from '../../adapters/web-crawler';
+import { isPdfDocumentUrl } from '../../adapters/pdf-url-guard';
 import { extractSameSiteLinks } from '../../adapters/site-links';
 import { extractPublicContacts, type PublicContact } from '../../adapters/contact-extractor';
 import { legalPageCandidates } from '../impressum/find-legal-pages';
@@ -205,7 +206,7 @@ export class PublicWebDiscoveryProvider
     // reject → 整轮 run 以 DOMAIN_ACK_DISCOVERY_QUERY_LINEAGE_RECEIPT_MISMATCH 失败（2026-11-10
     // run 97a4fa1b：覆盖补齐查询只有中文行业词）。改为 fail-safe 空结果 + 有效空血缘，与 ted /
     // model_web_search 同约定（AGENTS.md §5 单源失败不阻断其余源）；可操作错误码留在日志。
-    if (searches.length === 0) {
+    if (searches.length === 0 && !hasSupplementarySeedDiscovery(query)) {
       console.warn(
         '[public_web] discover failed: DISCOVERY_MARKET_UNSUPPORTED: 无法为目标市场/语言构造检索串（该市场语言暂无本地化支持，或关键词全为不可检索字符）；请调整目标市场或关键词',
       );
@@ -561,6 +562,7 @@ export class PublicWebDiscoveryProvider
         maxPages: MAX_PUBLIC_WEB_CONTACT_LINKED_PAGES,
       });
       for (const candidate of candidates) {
+        if (isPdfDocumentUrl(candidate.url)) continue;
         try {
           const rendered = await render(candidate.url);
           if (rendered.data.robotsBlocked || isCrawl4aiRenderEmptyHtml(rendered.data.html)) {
@@ -974,11 +976,19 @@ export function searchEvidenceText(hits: readonly SearchHit[]): string {
   return lines.join('\n').slice(0, MAX_SEARCH_EVIDENCE_CHARS);
 }
 
+function hasSupplementarySeedDiscovery(query: CompanyDiscoveryQuery): boolean {
+  if (!resolveExaApiKey()) return false;
+  const filters = (query.filters ?? {}) as Record<string, unknown>;
+  const rawSeeds = filters.seed_domains ?? filters.lookalike_urls;
+  const list = Array.isArray(rawSeeds) ? rawSeeds : rawSeeds ? [rawSeeds] : [];
+  return list.some((item) => typeof item === 'string' && item.trim().length > 0);
+}
+
 /**
  * 从计划查询构造 ≤3 条搜索串（G3 §4.3）：品类词 × 目标国语言的贸易角色词
  * （分销商 ICP → Großhandel/Händler/Vertrieb）；角色未知时只用品类词，不再硬加
- * 'manufacturer company'。中文等中日韩文字的词先剔除再取前几个：规划器为词表映射
- * 保留的中文行业词不得进入目标国语言的检索串，全是中文时不发起检索。
+ * 'manufacturer company'。当配置了竞品替换/生态互补狙击品牌时，为狙击串保留固定配额，
+ * 避免被前置通用查询截断。
  */
 export function buildSearchQueries(query: CompanyDiscoveryQuery): string[] {
   const f = query.filters ?? {};
@@ -990,26 +1000,40 @@ export function buildSearchQueries(query: CompanyDiscoveryQuery): string[] {
   const terms = [...keywords, ...products, ...industries]
     .map((t) => t.trim())
     .filter((t, i, a) => t.length > 0 && a.indexOf(t) === i);
-  if (!terms.length) return [];
   const roleTerms = tradeRoleTerms(tradeRoleFor(query), language);
-
-  const scenario = readBuyerProcurementScenario(f);
-  const queries = scenario === 'factory_direct' || scenario === 'equipment_integration'
-    ? keywords.slice(0, 2)
-    : roleTerms.length
-      ? roleTerms.map((role, i) => `${terms[i % terms.length]} ${role}`)
-      : [terms.slice(0, 2).join(' '), terms[2] ?? ''];
   const sniperQueries = buildEcosystemSniperQueries({
     competitorBrands: arr(f.competitor_brands),
     ecosystemBrands: arr(f.ecosystem_brands),
     buyerRoleTerms: roleTerms,
     countryHint: typeof f.country === 'string' ? f.country : undefined,
     maxQueries: MAX_SEARCHES_PER_QUERY,
-  });
-  return [...queries, ...sniperQueries]
+  })
     .map((q) => q.trim())
-    .filter((q, i, a) => q.length > 3 && a.indexOf(q) === i)
-    .slice(0, MAX_SEARCHES_PER_QUERY);
+    .filter((q, i, a) => q.length > 3 && a.indexOf(q) === i);
+  if (!terms.length) return sniperQueries.slice(0, MAX_SEARCHES_PER_QUERY);
+
+  const scenario = readBuyerProcurementScenario(f);
+  const baseQueries = (
+    scenario === 'factory_direct' || scenario === 'equipment_integration'
+      ? keywords.slice(0, 2)
+      : roleTerms.length
+        ? roleTerms.map((role, i) => `${terms[i % terms.length]} ${role}`)
+        : [terms.slice(0, 2).join(' '), terms[2] ?? '']
+  )
+    .map((q) => q.trim())
+    .filter((q, i, a) => q.length > 3 && a.indexOf(q) === i);
+
+  if (sniperQueries.length === 0) return baseQueries.slice(0, MAX_SEARCHES_PER_QUERY);
+  if (baseQueries.length === 0) return sniperQueries.slice(0, MAX_SEARCHES_PER_QUERY);
+
+  const reservedSniperSlots = Math.min(sniperQueries.length, Math.max(1, MAX_SEARCHES_PER_QUERY - 1));
+  const baseSlots = Math.max(1, MAX_SEARCHES_PER_QUERY - reservedSniperSlots);
+  const combined = [...baseQueries.slice(0, baseSlots), ...sniperQueries.slice(0, reservedSniperSlots)];
+  for (const q of [...baseQueries.slice(baseSlots), ...sniperQueries.slice(reservedSniperSlots)]) {
+    if (combined.length >= MAX_SEARCHES_PER_QUERY) break;
+    if (!combined.includes(q)) combined.push(q);
+  }
+  return combined.slice(0, MAX_SEARCHES_PER_QUERY);
 }
 
 function dedupeSearchResults(hits: readonly SearxngSearchResult[]): SearxngSearchResult[] {

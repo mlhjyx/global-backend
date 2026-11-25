@@ -10,6 +10,7 @@
  *     为 Exa `findSimilar` Lookalike 扩展与已有客户去重提供确定性种子列表。
  */
 import { normalizeDomain } from './identity';
+import type { PlanQueryShape } from './icp-to-cpv';
 import { lookupCountryIso } from './vocab';
 
 export interface EcosystemSniperInput {
@@ -189,4 +190,74 @@ export function parseCustomerSeedCsv(csvText: string, maxRows = 500): CustomerSe
     });
   }
   return out;
+}
+
+function readTermList(raw: unknown, max = 12): string[] {
+  const parts = Array.isArray(raw)
+    ? raw.filter((item): item is string => typeof item === 'string')
+    : typeof raw === 'string'
+      ? raw.split(/[,;\n、，；]+/u)
+      : [];
+  return uniqueNonEmpty(parts).slice(0, max);
+}
+
+function readSeedDomains(raw: unknown, max = 10): string[] {
+  const parts = Array.isArray(raw)
+    ? raw.filter((item): item is string => typeof item === 'string')
+    : typeof raw === 'string'
+      ? raw.split(/[,;\n\s]+/u)
+      : [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const rawItem of parts) {
+    const domain = normalizeDomain(rawItem.trim());
+    if (!domain || !SEED_DOMAIN_RE.test(domain) || seen.has(domain)) continue;
+    seen.add(domain);
+    out.push(domain);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+/**
+ * Propagates ICP-level `competitor_brands`, `ecosystem_brands`, and `seed_domains`
+ * (`lookalike_urls`) onto `public_web` queries when those queries did not already set them.
+ */
+export function withIcpSniperAndSeedFilters<Q extends PlanQueryShape>(
+  queries: readonly Q[],
+  companyAttributes: unknown,
+): Q[] {
+  if (!companyAttributes || typeof companyAttributes !== 'object' || Array.isArray(companyAttributes)) {
+    return [...queries];
+  }
+  const attrs = companyAttributes as Record<string, unknown>;
+  const competitorBrands = readTermList(attrs.competitor_brands ?? attrs.competitorBrands);
+  const ecosystemBrands = readTermList(attrs.ecosystem_brands ?? attrs.ecosystemBrands);
+  const seedDomains = readSeedDomains(
+    attrs.seed_domains ?? attrs.seedDomains ?? attrs.lookalike_urls ?? attrs.lookalikeUrls,
+  );
+  if (!competitorBrands.length && !ecosystemBrands.length && !seedDomains.length) {
+    return [...queries];
+  }
+  return queries.map((query) => {
+    const filters = (query.filters ?? {}) as Record<string, unknown>;
+    const hint = typeof filters.source_hint === 'string' ? filters.source_hint.trim().toLowerCase() : '';
+    const isPublicWeb = hint === 'public_web' || (!hint && query.source_class === 'public_intelligence');
+    if (!isPublicWeb) return query;
+    const nextFilters: Record<string, unknown> = { ...filters };
+    let changed = false;
+    if (competitorBrands.length && nextFilters.competitor_brands == null) {
+      nextFilters.competitor_brands = competitorBrands;
+      changed = true;
+    }
+    if (ecosystemBrands.length && nextFilters.ecosystem_brands == null) {
+      nextFilters.ecosystem_brands = ecosystemBrands;
+      changed = true;
+    }
+    if (seedDomains.length && nextFilters.seed_domains == null && nextFilters.lookalike_urls == null) {
+      nextFilters.seed_domains = seedDomains;
+      changed = true;
+    }
+    return changed ? { ...query, filters: nextFilters } : query;
+  });
 }

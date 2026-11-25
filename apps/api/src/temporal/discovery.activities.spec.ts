@@ -3520,7 +3520,7 @@ describe("finalizeRun durable query receipt readback", () => {
       gateway: {},
       budgetStore,
     } as never);
-    return { activities, outboxCreate, update, planUpdate, leadFindFirst, rawFindMany, identityLinkFindMany, queryRaw };
+    return { activities, outboxCreate, update, planUpdate, leadFindFirst, rawFindMany, identityLinkFindMany, queryRaw, tx };
   }
 
   const RUN_RAW_RECORD_ID = "80000000-0000-4000-8000-000000000001";
@@ -3691,7 +3691,7 @@ describe("finalizeRun durable query receipt readback", () => {
     });
   });
 
-  it.each(["fit", "enrich", "signals", "watches", "patentEnqueue"] as const)(
+  it.each(["fit", "deep", "enrich", "signals", "contacts", "watches", "patentEnqueue"] as const)(
     "requests scoring for a FAILED run that stopped at stage %s once the run's own companies hold a fit verdict (the failure path's stats shape)",
     async (stage) => {
       const leadFindFirst = vi.fn(async () => ({ id: "70000000-0000-4000-8000-000000000001" }));
@@ -3740,6 +3740,45 @@ describe("finalizeRun durable query receipt readback", () => {
       });
     },
   );
+
+  it("requests scoring for a Run 2.0 pool-first FAILED run at stage deep via discoveryCompanyJob when no raw records exist", async () => {
+    const leadFindFirst = vi.fn(async () => ({ id: "70000000-0000-4000-8000-000000000001" }));
+    const jobFindMany = vi.fn(async () => [{ canonicalCompanyId: RUN_COMPANY_ID }]);
+    const { activities, outboxCreate, rawFindMany, tx } = finalizeHarness(
+      null,
+      authorityBudgetStore(),
+      "RUNNING",
+      leadFindFirst,
+    );
+    rawFindMany.mockResolvedValueOnce([]);
+    (tx as Record<string, unknown>).discoveryCompanyJob = { findMany: jobFindMany };
+
+    await activities.finalizeRun(
+      discoveryArgs("40000000-0000-4000-8000-000000000001", {
+        planId: "50000000-0000-4000-8000-000000000001",
+        icpId: "60000000-0000-4000-8000-000000000001",
+        status: "FAILED" as const,
+        stats: {
+          ...FAILED_AFTER_FIT_STATS,
+          failure: { ...FAILED_AFTER_FIT_STATS.failure, stage: "deep" },
+        },
+      }),
+    );
+
+    expect(jobFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ runId: "40000000-0000-4000-8000-000000000001" }),
+      }),
+    );
+    expect(outboxCreate).toHaveBeenCalledTimes(2);
+    expect(outboxCreate.mock.calls[1]![0]).toMatchObject({
+      data: {
+        eventType: "QualifyRequested",
+        aggregateId: "60000000-0000-4000-8000-000000000001",
+        payload: { reason: "discovery_run_failed_after_fit" },
+      },
+    });
+  });
 
   it.each(["plan", "query", "canonicalize", "websiteProfile"] as const)(
     "writes no QualifyRequested for a FAILED run that stopped at stage %s, before fit, whatever the ICP's leads hold",

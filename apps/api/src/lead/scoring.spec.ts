@@ -209,6 +209,56 @@ describe('scoreLead — authoritativeFit（资格门覆盖 Fit 维，不再覆�
     expect(r.scores.reachability).toBeGreaterThan(0); // linkedin 不被误排
   });
 
+  it('Phase 1：未验证的 RISKY 或 pattern_guess 盲猜邮箱不得拿 0.5 可达性分', () => {
+    const risky = scoreLead(
+      company({
+        contacts: [{ title: 'Director', seniority: 'director', contactPoints: [{ type: 'email', status: 'RISKY' }] }],
+      }),
+      icp,
+      { authoritativeFit: 'match' },
+    );
+    expect(risky.scores.reachability).toBe(0);
+    expect(risky.queue).toBe('needs_review');
+    expect(risky.detail.reasonCodes).toContain('MISSING_CONTACT_POINT');
+
+    const blindGuess = scoreLead(
+      company({
+        contacts: [{
+          title: 'Director',
+          seniority: 'director',
+          contactPoints: [{
+            type: 'email',
+            status: 'UNVERIFIED',
+            sourceType: 'pattern_guess',
+            verificationMethod: 'pattern_guess',
+          }],
+        }],
+      }),
+      icp,
+      { authoritativeFit: 'match' },
+    );
+    expect(blindGuess.scores.reachability).toBe(0);
+    expect(blindGuess.queue).toBe('needs_review');
+
+    const verifiedGuess = scoreLead(
+      company({
+        contacts: [{
+          title: 'Director',
+          seniority: 'director',
+          contactPoints: [{
+            type: 'email',
+            status: 'VALID',
+            sourceType: 'pattern_guess',
+            verificationMethod: 'smtp_rcpt',
+          }],
+        }],
+      }),
+      icp,
+      { authoritativeFit: 'match' },
+    );
+    expect(verifiedGuess.scores.reachability).toBe(1);
+  });
+
   it('match 覆盖规则引擎的词表误判（industry 对不上也不 rejected）', () => {
     // 规则要 manufacturing，公司词表是中文「制造业」→ 规则引擎 no_match，但资格门 match
     const r = scoreLead(company({ industry: '制造业', ...reachable }), icp, { authoritativeFit: 'match' });

@@ -244,4 +244,81 @@ describe('buildLeadPackage', () => {
     expect(Object.isFrozen(pkg.contact_points)).toBe(true);
     expect(Object.isFrozen(pkg.fit.reason_codes)).toBe(true);
   });
+
+  it('Phase 1: projects company_signal rows and falls back to digital_footprint / structured_harvest when intent.events is empty', () => {
+    const input = base();
+    const withoutIntent = {
+      ...input,
+      company: {
+        ...input.company,
+        attributes: {
+          website_profile: (input.company.attributes as Record<string, unknown>).website_profile,
+        },
+      },
+      companySignals: [
+        {
+          providerKey: 'structured_harvest',
+          signalKind: 'page_change',
+          sourceUrl: 'https://beispiel-pumpen.de/careers',
+          title: '正在招聘采购/供应链相关岗位（3 个开放职位）',
+          excerpt: 'Head of Procurement, Supply Chain Manager',
+          observedAt: new Date('2026-11-24T12:00:00.000Z'),
+        },
+        {
+          providerKey: 'rss',
+          signalKind: 'rss_item',
+          sourceUrl: 'https://news.example.de/expansion',
+          title: 'Beispiel Pumpen expands warehouse',
+          excerpt: 'New regional logistics center opened.',
+          observedAt: new Date('2026-11-20T08:00:00.000Z'),
+        },
+      ],
+    };
+    const pkg = buildLeadPackage(withoutIntent);
+    expect(pkg.signals).toHaveLength(2);
+    expect(pkg.signals[0]).toMatchObject({
+      type: 'HIRING_BUYING_ROLE',
+      at: '2026-11-24T12:00:00.000Z',
+      url: 'https://beispiel-pumpen.de/careers',
+      title: '正在招聘采购/供应链相关岗位（3 个开放职位）',
+      provider: 'structured_harvest',
+    });
+    expect(pkg.signals[1]).toMatchObject({
+      type: 'NEWS_MENTION',
+      at: '2026-11-20T08:00:00.000Z',
+      url: 'https://news.example.de/expansion',
+      provider: 'rss',
+    });
+
+    const fallbackPkg = buildLeadPackage({
+      ...input,
+      company: {
+        ...input.company,
+        attributes: {
+          digital_footprint: {
+            is_advertiser: true,
+            ad_pixels: ['google_ads', 'meta_pixel'],
+            _ts: '2026-11-22T09:00:00.000Z',
+          },
+          structured_harvest: {
+            careers_url: 'https://beispiel-pumpen.de/jobs',
+            hiring_signal: { open_roles: 2, titles: ['Procurement Lead'], has_buying_role: true },
+            _ts: '2026-11-23T09:00:00.000Z',
+          },
+        },
+      },
+    });
+    expect(fallbackPkg.signals).toHaveLength(2);
+    expect(fallbackPkg.signals[0]).toMatchObject({
+      type: 'HIRING_BUYING_ROLE',
+      at: '2026-11-23T09:00:00.000Z',
+      url: 'https://beispiel-pumpen.de/jobs',
+      provider: 'structured_harvest',
+    });
+    expect(fallbackPkg.signals[1]).toMatchObject({
+      type: 'AD_CAMPAIGN_ACTIVE',
+      at: '2026-11-22T09:00:00.000Z',
+      provider: 'digital_footprint',
+    });
+  });
 });

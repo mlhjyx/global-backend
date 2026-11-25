@@ -10,6 +10,8 @@ import { classifyPipelineFailure } from './pipeline-failure-taxonomy';
 export const COMPANY_CONTACT_ENRICHMENT_PATCH = 'company-contact-enrichment-v1';
 /** Batch 1.6：画像软失败/阻断后提前收工、weak 线索跳过重度联系人抓取（版本化闸保证旧历史回放安全）。 */
 export const COMPANY_PIPELINE_QUALITY_GATE_PATCH = 'company-pipeline-quality-gate-v1';
+/** Phase 1：weak 线索在 signals 之前短路（仅 match 进入 signals + contacts + enrich；新 patch 保护旧历史回放）。 */
+export const COMPANY_PIPELINE_WEAK_SKIP_SIGNALS_PATCH = 'company-pipeline-weak-skip-signals-v1';
 
 /**
  * M0④ 公司级深挖流水线（每家一个子工作流）：
@@ -26,10 +28,12 @@ export const COMPANY_PIPELINE_QUALITY_GATE_PATCH = 'company-pipeline-quality-gat
  */
 const modelActs = proxyActivities<Run2PipelineActivities>({
   startToCloseTimeout: '15 minutes',
+  heartbeatTimeout: '5 minutes',
   retry: { maximumAttempts: 2 },
 });
 const signalActs = proxyActivities<Run2PipelineActivities>({
   startToCloseTimeout: '30 minutes',
+  heartbeatTimeout: '5 minutes',
   retry: { maximumAttempts: 2 },
 });
 const bookkeeping = proxyActivities<Run2PipelineActivities>({
@@ -89,6 +93,10 @@ export async function companyPipelineWorkflow(
     await mark('fitting');
     const fit = await modelActs.fitCompanyOnce(input);
     if (fit.verdict === 'mismatch' || (qualityGate && fit.verdict === null)) {
+      await mark('done', fit.verdict ? { verdictDeep: fit.verdict } : {});
+      return { stage: 'done' };
+    }
+    if (patched(COMPANY_PIPELINE_WEAK_SKIP_SIGNALS_PATCH) && fit.verdict !== 'match') {
       await mark('done', fit.verdict ? { verdictDeep: fit.verdict } : {});
       return { stage: 'done' };
     }
