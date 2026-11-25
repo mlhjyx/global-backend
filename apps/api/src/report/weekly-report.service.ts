@@ -39,7 +39,7 @@ import {
   type BattleDecisionMaker,
 } from './battle-csv-builder';
 import { filterOfferingNames } from '../discovery/offering-noise-filter';
-import { filterReachableCompanyChannels, loadCompanyContactChannels } from '../lead/lead-channels';
+import { filterReachableCompanyChannels, loadCompanyContactChannels } from '../discovery/company-channels';
 
 /** A week's accepted leads are reviewed by hand; more than this is refused, never truncated. */
 export const WEEKLY_REPORT_MAX_LEADS = 1_000;
@@ -480,7 +480,16 @@ export class WeeklyReportService {
         fullName: true,
         title: true,
         department: true,
-        contactPoints: { select: { type: true, value: true, status: true, verificationState: true } },
+        contactPoints: {
+          select: {
+            type: true,
+            value: true,
+            status: true,
+            verificationState: true,
+            sourceType: true,
+            verificationMethod: true,
+          },
+        },
       },
       orderBy: [{ companyId: 'asc' }, { fullName: 'asc' }],
     });

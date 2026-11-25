@@ -17,7 +17,7 @@ import {
   leadCandidateBatchRef,
 } from './lead-qualified-snapshot';
 import { buildLeadPackage, packageSanctionsStatus, type LeadPackage } from './lead-package';
-import { filterReachableCompanyChannels, loadCompanyContactChannels, loadLeadListChannelSummaries, type LeadPackageCompanyChannel } from './lead-channels';
+import { filterReachableCompanyChannels, loadCompanyContactChannels, loadLeadListChannelSummaries, type LeadPackageCompanyChannel } from '../discovery/company-channels';
 import { isOutcomeReasonCode, isRejectReasonCode, REJECT_REASON_CODES } from './reason-codes';
 import { reachableCompanyContactPoints } from '../discovery/company-contact-points';
 import { DataRightsService } from '../compliance/data-rights.service';
@@ -198,16 +198,19 @@ export class LeadService {
           const byId = new Map(companies.map(({ status: _s, attributes: _a, ...summary }) => [summary.id, summary]));
           return rows
             .filter((lead) => !quarantinedCompanyIds.has(lead.canonicalCompanyId))
-            .map(({ decisions, ...lead }) => ({
-              cursor: lead.id,
-              value: {
-                ...lead,
-                scored: isLeadScored(lead),
-                queueBasis: leadQueueBasis(lead, Array.isArray(decisions) && decisions.length > 0),
-                company: byId.get(lead.canonicalCompanyId) ?? null,
-                channelSummary: channelSummaries.get(lead.canonicalCompanyId) ?? null,
-              },
-            }));
+            .map(({ decisions, ...lead }) => {
+              const channelSummary = channelSummaries.get(lead.canonicalCompanyId);
+              return {
+                cursor: lead.id,
+                value: {
+                  ...lead,
+                  scored: isLeadScored(lead),
+                  queueBasis: leadQueueBasis(lead, Array.isArray(decisions) && decisions.length > 0),
+                  company: byId.get(lead.canonicalCompanyId) ?? null,
+                  ...(channelSummary ? { channelSummary } : {}),
+                },
+              };
+            });
         },
       });
     });

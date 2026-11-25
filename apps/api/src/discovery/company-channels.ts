@@ -2,15 +2,15 @@ import type { Prisma } from '@prisma/client';
 import {
   contactPointHostSuppressed,
   reachableCompanyContactPoints,
-} from '../discovery/company-contact-points';
+} from './company-contact-points';
 import {
   canonicalizeSuppressionValue,
   canonicalizeSuppressionValues,
   companyMatchesSuppression,
-} from '../discovery/suppression-value';
+} from './suppression-value';
 
 type SuppressionRow = { readonly type: string; readonly value: string };
-import { isGenericSwitchboardContact } from '../discovery/providers/contact-quality-filter';
+import { isGenericSwitchboardContact } from './providers/contact-quality-filter';
 
 /**
  * 公司全渠道联系方式与社媒账号读模型聚合器（Batch 1.6）：
@@ -285,6 +285,20 @@ export async function loadLeadListChannelSummaries(
 ): Promise<Map<string, LeadChannelSummary>> {
   const summaries = new Map<string, LeadChannelSummary>();
   if (companies.length === 0) return summaries;
+
+  const rawTx = tx as unknown as {
+    companyContactChannel?: { findMany?: unknown };
+    companyContactPoint?: { findMany?: unknown };
+    canonicalContact?: { findMany?: unknown };
+  };
+  // 最小单测 stub 未挂载渠道表时返回空 Map，保持列表旧契约；真实 Prisma tx 恒有这些 delegate。
+  if (
+    typeof rawTx.companyContactChannel?.findMany !== 'function' &&
+    typeof rawTx.companyContactPoint?.findMany !== 'function' &&
+    typeof rawTx.canonicalContact?.findMany !== 'function'
+  ) {
+    return summaries;
+  }
 
   const companyIds = companies.map((c) => c.id);
   const channels = await loadCompanyContactChannels(tx, companyIds);

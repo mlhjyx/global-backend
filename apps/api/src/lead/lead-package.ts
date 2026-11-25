@@ -19,7 +19,7 @@ import {
   extractCompanySocialProfiles,
   type LeadPackageCompanyChannel,
   type LeadPackageSocialProfile,
-} from './lead-channels';
+} from '../discovery/company-channels';
 
 export interface LeadPackageLead {
   readonly id: string;

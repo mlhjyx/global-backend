@@ -149,10 +149,15 @@ export class ReportController {
     @Query('icpId') icpId: string | undefined,
     @Query('week') week: string | undefined,
     @Query('maskEmails') maskEmails: string | undefined,
-    @Query('scope') scope: string | undefined,
     @Res({ passthrough: true }) response: Response,
+    @Query('scope') scope?: string,
   ): Promise<string> {
-    const report = await this.reports.battleCsv(ctx, { icpId, week, maskEmails, scope });
+    const report = await this.reports.battleCsv(ctx, {
+      icpId,
+      week,
+      maskEmails,
+      ...(scope !== undefined ? { scope } : {}),
+    });
     response.setHeader('Content-Type', 'text/csv; charset=utf-8');
     response.setHeader('Content-Disposition', `attachment; filename="battle-report-${report.week}-${report.icpId}.csv"`);
     response.setHeader('Cache-Control', 'no-store');

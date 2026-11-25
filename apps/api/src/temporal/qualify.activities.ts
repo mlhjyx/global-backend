@@ -12,7 +12,7 @@ import {
 import type { ScreenMatch } from '../sanctions/sanctions-matcher';
 import { syntheticDiscoveryEntityIds } from '../discovery/evidence-license';
 import { reachableCompanyContactPoints } from '../discovery/company-contact-points';
-import { loadCompanyContactChannelsByCompany, reachableChannelsForCompany } from '../lead/lead-channels';
+import { loadCompanyContactChannelsByCompany, reachableChannelsForCompany } from '../discovery/company-channels';
 import {
   appendRunEvent,
   QUALIFICATION_BATCH_SCORED_EVENT,

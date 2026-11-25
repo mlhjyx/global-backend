@@ -3,7 +3,7 @@ import {
   extractCompanySocialProfiles,
   filterReachableCompanyChannels,
   loadLeadListChannelSummaries,
-} from './lead-channels';
+} from './company-channels';
 
 describe('lead-channels', () => {
   const company = { id: 'co-1', name: 'Coenergia srl', domain: 'coenergia.com', status: 'ENRICHED' };

@@ -45,6 +45,7 @@ export function enrichIcpBriefForJudge(brief: IcpBrief): IcpBrief {
   }
   const evaluationGuidance = [
     '核心产品大类一致即可通过 C1_MATERIAL；卖方细分工艺/型号/功率段（如 HJT/0BB/G12 等）仅作加分参考，不得因买家官网未提及卖方细分参数而判 unclear。',
+    '若目标画像包含 EPC 工程承包商、电站开发商、安装商或系统集成商，即使 website_profile.trade_role 被标为 service，只要官网明确从事目标品类的工程集成/安装/项目交付，C2_ROLE 与 C4_BUSINESS_MODEL 仍按正牌下游目标买家通过（8-10 分）。',
     '若候选企业官网正文、标题或摘要已明确指向无关行业（如软件/IT咨询/安全软件、美容仪/化妆品、商超零售、游乐设备、家具、国家电网垄断或监管机构等），直接判 C1_MATERIAL=fail(0-1) → NOT_FIT，不要判 unclear。',
     '网站常规导购或联系按钮文案（如 "Ordina ora"、"Order now"、"Buy now"、"Contact us"、"Richiedi preventivo"、"Shop now"）属于正常业务文本，不是提示词注入（prompt injection），不得据此标 unclear。',
   ];

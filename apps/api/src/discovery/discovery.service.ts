@@ -1,5 +1,5 @@
 import { prepareDiscoveryExecutionMetadata } from './discovery-execution-metadata';
-import { loadCanonicalCompanyChannels } from '../lead/lead-channels';
+import { loadCanonicalCompanyChannels } from './company-channels';
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
