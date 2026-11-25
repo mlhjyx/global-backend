@@ -26,6 +26,8 @@ export class StreamingProgressController {
   @Get('discovery-runs/:runId/streaming-progress')
   @ApiOperation({
     summary: '方案 B 流式三段进度（L0 召回 / L1 单活动抽取+fit-v3 / L2 Top-K 富集）；兼容历史非流式 run',
+    description:
+      '只读投影一次发现任务的流式三段漏斗进度（L0 召回入池、L1 Raw HTTP 优先单活动抓取与 fit-v3 买家判定、L2 Top-K 联系人补全与监控注册）以及最新处理的候选企业卡片；对历史非流式 discoveryWorkflow 任务自动返回 pipelineMode=legacy，零预算消耗。',
   })
   @ApiEnvelope({
     type: 'object',

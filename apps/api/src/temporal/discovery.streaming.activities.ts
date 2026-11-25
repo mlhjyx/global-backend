@@ -138,6 +138,26 @@ async function lockDiscoveryRunRow(
   `;
 }
 
+function hostMatchesDomain(rawUrl: string, root: string): URL | null {
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    const host = parsed.hostname.toLowerCase();
+    return host === root || host.endsWith(`.${root}`) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function isLinkedinCompanyUrl(rawUrl: string): boolean {
+  const parsed = hostMatchesDomain(rawUrl, 'linkedin.com');
+  return Boolean(parsed && parsed.pathname.toLowerCase().startsWith('/company/'));
+}
+
+function isXAccountUrl(rawUrl: string): boolean {
+  return Boolean(hostMatchesDomain(rawUrl, 'x.com') ?? hostMatchesDomain(rawUrl, 'twitter.com'));
+}
+
 async function persistExtractionFacts(
   tx: Prisma.TransactionClient,
   workspaceId: string,
@@ -171,8 +191,8 @@ async function persistExtractionFacts(
     data: { attributes: nextAttrs as Prisma.InputJsonValue, version: { increment: 1 } },
   });
 
-  const linkedin = extraction.channels.socialLinks.find((u) => /linkedin\.com\/company\//iu.test(u)) ?? null;
-  const xAccount = extraction.channels.socialLinks.find((u) => /(?:x|twitter)\.com\//iu.test(u)) ?? null;
+  const linkedin = extraction.channels.socialLinks.find(isLinkedinCompanyUrl) ?? null;
+  const xAccount = extraction.channels.socialLinks.find(isXAccountUrl) ?? null;
   const observation = companyContactObservation({
     contactPage: extraction.channels.contactPageUrl,
     impressumPage: extraction.channels.impressumUrl,

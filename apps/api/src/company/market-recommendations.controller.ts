@@ -23,6 +23,8 @@ export class MarketRecommendationsController {
   @Get(':companyId/market-recommendations')
   @ApiOperation({
     summary: 'UN Comtrade / HS 贸易流目标国推荐（只读，不消费 Grant，不自动写入确认市场）',
+    description:
+      '根据显式传入的 4-6 位 HS 码，或按卖家已勾选产品与行业确定性反推的 HS 码，返回基于 UN Comtrade 贸易流基线的目标出口国排序建议（进口规模、同比增速、全球份额与业务理由）。本接口纯只读、零预算消耗，固定返回 isRecommendationOnly=true，绝不自动写入公司确认目标市场。',
   })
   @ApiQuery({
     name: 'hsCodes',

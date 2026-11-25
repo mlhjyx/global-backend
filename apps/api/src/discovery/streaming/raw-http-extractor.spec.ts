@@ -170,6 +170,21 @@ describe('raw-http-extractor pure helpers (3 empirical laws from #30)', () => {
     expect(isPdfBodyContent('   %PDF-1.4')).toBe(true);
     expect(isPdfBodyContent('<!doctype html><html></html>')).toBe(false);
   });
+
+  it('CodeQL hardening: decodes HTML entities in a single pass and ignores non-http(s) href schemes', () => {
+    const html = `<html><body><main>
+      <p>A &amp;lt; B &amp; C &#39;quoted&#39;</p>
+      <a href="javascript:alert(1)">bad1</a>
+      <a href="data:text/html,evil">bad2</a>
+      <a href="vbscript:msgbox(1)">bad3</a>
+      <a href="/contact">Contact</a>
+    </main></body></html>`;
+    const visible = extractVisibleBodyText(html);
+    expect(visible).toContain("A &lt; B & C 'quoted'");
+    const extracted = extractHtmlChannelsAndLinks(html, 'https://acme.de/', 'acme.de');
+    expect(extracted.contactPageUrl).toBe('https://acme.de/contact');
+    expect(extracted.socialLinks).toEqual([]);
+  });
 });
 
 describe('extractCompanyWebsiteStreaming single-activity flow', () => {

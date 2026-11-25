@@ -50,18 +50,27 @@ export interface HtmlChannelsAndLinks {
   readonly careersPageUrl: string | null;
 }
 
+const NAMED_HTML_ENTITIES: Readonly<Record<string, string>> = Object.freeze({
+  nbsp: ' ',
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  apos: "'",
+});
+
+/** Single-pass HTML entity decoding (avoids CodeQL js/double-escaping on &amp;lt; etc.). */
 function decodeHtmlEntities(input: string): string {
-  return input
-    .replace(/&nbsp;/giu, ' ')
-    .replace(/&amp;/giu, '&')
-    .replace(/&lt;/giu, '<')
-    .replace(/&gt;/giu, '>')
-    .replace(/&quot;/giu, '"')
-    .replace(/&#39;|&apos;/giu, "'")
-    .replace(/&#(\d+);/gu, (_m, dec) => {
+  return input.replace(/&(?:([a-z]+)|#(\d+));/giu, (match, name?: string, dec?: string) => {
+    if (name) {
+      return NAMED_HTML_ENTITIES[name.toLowerCase()] ?? match;
+    }
+    if (dec) {
       const code = Number(dec);
       return Number.isInteger(code) && code >= 32 && code <= 0x10ffff ? String.fromCodePoint(code) : ' ';
-    });
+    }
+    return match;
+  });
 }
 
 function normalizePhone(raw: string): string {
@@ -268,7 +277,7 @@ export function extractHtmlChannelsAndLinks(
   let m: RegExpExecArray | null;
   while ((m = hrefRe.exec(html)) !== null) {
     const rawHref = (m[1] ?? m[2] ?? '').trim();
-    if (!rawHref || rawHref.startsWith('#') || rawHref.startsWith('javascript:')) continue;
+    if (!rawHref || rawHref.startsWith('#')) continue;
     if (/^mailto:/iu.test(rawHref)) {
       const email = rawHref.replace(/^mailto:/iu, '').split('?', 1)[0]?.trim().toLowerCase() ?? '';
       if (email.includes('@') && !email.includes('%')) allEmails.push(email);
@@ -286,6 +295,7 @@ export function extractHtmlChannelsAndLinks(
     } catch {
       continue;
     }
+    // Strict scheme allowlist (automatically blocks javascript:, data:, vbscript:, etc.).
     if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:') continue;
     const cleanUrl = `${resolved.origin}${resolved.pathname}`.replace(/\/+$/u, '') || `${resolved.origin}/`;
     if (OFFICIAL_SOCIAL_RE.test(resolved.href) && !SHARE_SOCIAL_RE.test(resolved.href)) {
