@@ -67,3 +67,7 @@ export const DISCOVERY_STALE_RUN_SWEEP_WORKFLOW = 'staleRunSweepWorkflow';
 export const DISCOVERY_STALE_RUN_SWEEP_SCHEDULE_ID = 'discovery-stale-run-sweep';
 export const PERSONAL_ARTIFACT_CLEANUP_WORKFLOW =
   'personalArtifactCleanupWorkflow';
+export const SELLER_DOCUMENT_PENDING_CLEANUP_WORKFLOW =
+  'sellerDocumentPendingCleanupWorkflow';
+export const SELLER_DOCUMENT_PENDING_CLEANUP_SCHEDULE_ID =
+  'seller-document-pending-cleanup';

@@ -176,10 +176,14 @@ function managedReadinessEnv(): NodeJS.ProcessEnv {
   };
 }
 
-async function readFromFreshServiceProcess(sha256: string): Promise<number> {
+async function readFromFreshServiceProcess(
+  sha256: string,
+  workspaceId: string,
+): Promise<number> {
   const program = `
     import { S3Client } from '@aws-sdk/client-s3';
     import { S3GenericOperationArtifactStore } from './src/durable-results/artifact/generic-operation-artifact.store.ts';
+    const [sha256, workspaceId] = process.argv.slice(1);
     const client = new S3Client({
       endpoint: process.env.GENERIC_OPERATION_ARTIFACT_MINIO_ENDPOINT,
       region: 'us-east-1', forcePathStyle: true, maxAttempts: 1,
@@ -193,7 +197,9 @@ async function readFromFreshServiceProcess(sha256: string): Promise<number> {
       bucket: process.env.GENERIC_OPERATION_ARTIFACT_MINIO_BUCKET,
       client,
     });
-    const body = await store.read(process.argv[1], 'PERSONAL_DATA');
+    const body = await store.read(sha256, 'PERSONAL_DATA', undefined, {
+      scope: { scopeKind: 'workspace', workspaceId },
+    });
     let size = 0;
     for await (const chunk of body) size += chunk.byteLength;
     client.destroy();
@@ -201,7 +207,7 @@ async function readFromFreshServiceProcess(sha256: string): Promise<number> {
   `;
   const result = await execFileAsync(
     process.execPath,
-    ['--import', 'tsx', '--input-type=module', '-e', program, sha256],
+    ['--import', 'tsx', '--input-type=module', '-e', program, sha256, workspaceId],
     { cwd: process.cwd(), env: process.env, timeout: 15_000, maxBuffer: 1024 },
   );
   return Number(result.stdout.trim());
@@ -288,19 +294,28 @@ describe.runIf(enabled)(
         expect(staged.sizeBytes).toBe(String(MAX_ARTIFACT_BYTES));
         expect(staged.sha256).toBe(hashOfLength(MAX_ARTIFACT_BYTES));
 
-        const stored = await first.promote(staged);
-        await expect(second.promote(staged)).resolves.toEqual(stored);
+        const scope = {
+          scopeKind: 'workspace' as const,
+          workspaceId: randomUUID(),
+        };
+        const stored = await first.promote(staged, { scope });
+        await expect(second.promote(staged, { scope })).resolves.toEqual(stored);
         await expect(
-          second.inspect(staged.sha256, staged.privacyClass),
+          second.inspect(staged.sha256, staged.privacyClass, undefined, { scope }),
         ).resolves.toEqual(stored);
 
-        const read = await second.read(staged.sha256, staged.privacyClass);
+        const read = await second.read(
+          staged.sha256,
+          staged.privacyClass,
+          undefined,
+          { scope },
+        );
         let readBytes = 0;
         for await (const chunk of read) readBytes += chunk.byteLength;
         expect(readBytes).toBe(MAX_ARTIFACT_BYTES);
-        await expect(readFromFreshServiceProcess(staged.sha256)).resolves.toBe(
-          MAX_ARTIFACT_BYTES,
-        );
+        await expect(
+          readFromFreshServiceProcess(staged.sha256, scope.workspaceId),
+        ).resolves.toBe(MAX_ARTIFACT_BYTES);
 
         const runtime = runtimeClient();
         await expect(
@@ -326,6 +341,7 @@ describe.runIf(enabled)(
                 Key: contentAddressedObjectKey(
                   untaggedSha,
                   'PERSONAL_DATA',
+                  scope,
                 ),
                 Body: Uint8Array.of(1),
                 ContentType: 'application/octet-stream',
@@ -349,6 +365,7 @@ describe.runIf(enabled)(
                   Key: contentAddressedObjectKey(
                     invalidTagSha,
                     'PERSONAL_DATA',
+                    scope,
                   ),
                   Body: Uint8Array.of(1),
                   ContentType: 'application/octet-stream',
@@ -620,6 +637,10 @@ describe.runIf(enabled)(
       const bucket = required('GENERIC_OPERATION_ARTIFACT_MINIO_BUCKET');
       const artifactId = randomUUID();
       const body = new TextEncoder().encode(`retention-${randomUUID()}`);
+      const scope = {
+        scopeKind: 'workspace' as const,
+        workspaceId: randomUUID(),
+      };
       let objectKey: string | undefined;
       try {
         const staged = await store.stage({
@@ -629,7 +650,7 @@ describe.runIf(enabled)(
           resultSchema: 'http-get/v1',
           privacyClass: 'PERSONAL_DATA',
         });
-        const first = await store.promote(staged);
+        const first = await store.promote(staged, { scope });
         objectKey = first.objectKey;
         const firstHead = await admin.send(
           new HeadObjectCommand({ Bucket: bucket, Key: first.objectKey }),
@@ -638,11 +659,11 @@ describe.runIf(enabled)(
 
         // Within the lifecycle window: the same version is reused, nothing is copied.
         const soon = new Date(Date.now() + 60 * 60 * 1000).toISOString();
-        await expect(store.promote(staged, { retainUntil: soon })).resolves.toEqual(first);
+        await expect(store.promote(staged, { retainUntil: soon, scope })).resolves.toEqual(first);
 
         // Beyond it: the runtime principal copies the object onto itself.
         const later = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString();
-        const refreshed = await store.promote(staged, { retainUntil: later });
+        const refreshed = await store.promote(staged, { retainUntil: later, scope });
         expect(refreshed).toEqual({ ...first, versionId: refreshed.versionId });
         expect(refreshed.versionId).not.toBe(first.versionId);
         const head = await admin.send(
@@ -673,8 +694,12 @@ describe.runIf(enabled)(
         expect(
           (versions.Versions ?? []).filter((entry) => entry.Key === first.objectKey).map((entry) => entry.VersionId).sort(),
         ).toEqual([first.versionId, refreshed.versionId].sort());
-        await expect(store.inspect(staged.sha256, 'PERSONAL_DATA')).resolves.toEqual(refreshed);
-        const read = await store.read(staged.sha256, 'PERSONAL_DATA');
+        await expect(
+          store.inspect(staged.sha256, 'PERSONAL_DATA', undefined, { scope }),
+        ).resolves.toEqual(refreshed);
+        const read = await store.read(staged.sha256, 'PERSONAL_DATA', undefined, {
+          scope,
+        });
         expect(await bytes(read)).toHaveLength(body.byteLength);
       } finally {
         await store.deleteStaging(artifactId).catch(() => undefined);
@@ -704,6 +729,10 @@ describe.runIf(enabled)(
       const reuseId = randomUUID();
       // A length no other scenario uses, so the digest-derived key is this test's own.
       const size = 101 + Math.floor(Math.random() * 800);
+      const scope = {
+        scopeKind: 'workspace' as const,
+        workspaceId: randomUUID(),
+      };
       let objectKey: string | undefined;
       try {
         const first = await store.promote(
@@ -714,6 +743,7 @@ describe.runIf(enabled)(
             resultSchema: 'crawl4ai-fetch/v1',
             privacyClass: 'PERSONAL_DATA',
           }),
+          { scope },
         );
         objectKey = first.objectKey;
         const firstHead = await admin.send(
@@ -729,7 +759,7 @@ describe.runIf(enabled)(
             resultSchema: 'http-get/v1',
             privacyClass: 'PERSONAL_DATA',
           }),
-          { retainUntil: later },
+          { retainUntil: later, scope },
         );
 
         expect(reused).toEqual({ ...first, versionId: reused.versionId });
@@ -790,7 +820,12 @@ describe.runIf(enabled)(
             resultSchema: 'http-get/v1',
             privacyClass: privacy,
           });
-          const stored = await store.promote(staged);
+          const stored = await store.promote(
+            staged,
+            privacy === 'PERSONAL_DATA'
+              ? { scope: { scopeKind: 'workspace', workspaceId: randomUUID() } }
+              : undefined,
+          );
           objects.push({ artifactId, key: stored.objectKey, privacy });
         }
 

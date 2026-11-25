@@ -9,6 +9,8 @@ export const PERSONAL_ARTIFACT_CLEANUP_COMMAND_SCHEMA =
 export const PERSONAL_ARTIFACT_CLEANUP_STORE_UNAVAILABLE =
   "PERSONAL_ARTIFACT_CLEANUP_STORE_UNAVAILABLE" as const;
 
+export type PersonalArtifactObjectScope = "workspace" | "legacy_global";
+
 export interface PersonalArtifactCleanupCommand {
   readonly schemaVersion: typeof PERSONAL_ARTIFACT_CLEANUP_COMMAND_SCHEMA;
   readonly commandId: string;
@@ -17,6 +19,7 @@ export interface PersonalArtifactCleanupCommand {
   readonly artifactId: string;
   readonly sha256: string;
   readonly versionId: string;
+  readonly objectScope: PersonalArtifactObjectScope;
   readonly tombstonedAt: string;
   readonly attempt: number;
 }
@@ -80,8 +83,10 @@ export interface PersonalArtifactCleanupCommandRepository {
 export interface PrivilegedPersonalArtifactCleanupPort {
   eraseFinalObject(
     input: Readonly<{
+      workspaceId: string;
       sha256: string;
       versionId: string;
+      objectScope: PersonalArtifactObjectScope;
     }>,
   ): Promise<"DELETED" | "ABSENT">;
 }
@@ -126,6 +131,7 @@ const COMMAND_KEYS = Object.freeze([
   "artifactId",
   "sha256",
   "versionId",
+  "objectScope",
   "tombstonedAt",
   "attempt",
 ]);
@@ -183,6 +189,8 @@ function parseCommand(value: unknown): PersonalArtifactCleanupCommand | null {
     !isCanonicalArtifactSha256(source.sha256) ||
     typeof source.versionId !== "string" ||
     !VERSION_ID_PATTERN.test(source.versionId) ||
+    (source.objectScope !== "workspace" &&
+      source.objectScope !== "legacy_global") ||
     tombstonedAt === null ||
     typeof source.attempt !== "number" ||
     !Number.isSafeInteger(source.attempt) ||
@@ -198,6 +206,7 @@ function parseCommand(value: unknown): PersonalArtifactCleanupCommand | null {
     artifactId: source.artifactId,
     sha256: source.sha256,
     versionId: source.versionId,
+    objectScope: source.objectScope,
     tombstonedAt,
     attempt: source.attempt,
   });
@@ -357,8 +366,10 @@ export class PersonalArtifactCleanupService {
     try {
       const objectStatus = await this.cleanupPort.eraseFinalObject(
         Object.freeze({
+          workspaceId: command.workspaceId,
           sha256: command.sha256,
           versionId: command.versionId,
+          objectScope: command.objectScope,
         }),
       );
       if (objectStatus !== "DELETED" && objectStatus !== "ABSENT") {

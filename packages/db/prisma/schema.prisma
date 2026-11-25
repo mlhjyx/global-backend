@@ -724,7 +724,7 @@ model GovernedSubjectTombstoneAudit {
 /// Source receipts and expiry remain per-operation manifest policy.
 model GenericOperationArtifactObject {
   sha256          String   @db.Char(64)
-  objectKey       String   @unique(map: "generic_operation_artifact_object_key_key") @map("object_key") @db.VarChar(200)
+  objectKey       String   @id @map("object_key") @db.VarChar(200)
   sizeBytes       BigInt   @map("size_bytes")
   mediaType       String   @map("media_type") @db.VarChar(160)
   privacyClass    String   @map("privacy_class") @db.VarChar(40)
@@ -734,7 +734,6 @@ model GenericOperationArtifactObject {
   artifacts GenericOperationArtifact[]
   versions  GenericOperationArtifactObjectVersion[]
 
-  @@id([sha256, privacyClass], map: "generic_operation_artifact_object_pkey")
   @@unique([sha256, objectKey, sizeBytes, privacyClass], map: "generic_operation_artifact_object_content_key")
   @@map("generic_operation_artifact_object")
 }
@@ -743,14 +742,15 @@ model GenericOperationArtifactObject {
 /// the first write, each retention refresh, each re-write after a lifecycle
 /// deletion. Append-only; personal-data erasure addresses each one exactly.
 model GenericOperationArtifactObjectVersion {
+  objectKey       String   @map("object_key") @db.VarChar(200)
   sha256          String   @db.Char(64)
   privacyClass    String   @map("privacy_class") @db.VarChar(40)
   objectVersionId String   @map("object_version_id") @db.VarChar(1024)
   firstSettledAt  DateTime @default(now()) @map("first_settled_at") @db.Timestamptz(3)
 
-  object GenericOperationArtifactObject @relation(fields: [sha256, privacyClass], references: [sha256, privacyClass], onDelete: Restrict, onUpdate: Restrict, map: "generic_operation_artifact_object_version_object_fkey")
+  object GenericOperationArtifactObject @relation(fields: [objectKey], references: [objectKey], onDelete: Restrict, onUpdate: Restrict, map: "generic_operation_artifact_object_version_object_fkey")
 
-  @@id([sha256, privacyClass, objectVersionId], map: "generic_operation_artifact_object_version_pkey")
+  @@id([objectKey, objectVersionId], map: "generic_operation_artifact_object_version_pkey")
   @@map("generic_operation_artifact_object_version")
 }
 
@@ -759,6 +759,7 @@ model PersonalArtifactCleanupCommand {
   workspaceId       String    @map("workspace_id") @db.Uuid
   deletionRequestId String    @map("deletion_request_id") @db.Uuid
   artifactId        String    @map("artifact_id") @db.Uuid
+  objectKey         String    @map("object_key") @db.VarChar(200)
   sha256            String    @db.Char(64)
   objectVersionId   String    @map("object_version_id") @db.VarChar(1024)
   tombstonedAt      DateTime  @map("tombstoned_at") @db.Timestamptz(3)
@@ -770,8 +771,9 @@ model PersonalArtifactCleanupCommand {
   completedAt       DateTime? @map("completed_at") @db.Timestamptz(3)
   createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
 
-  @@unique([deletionRequestId, sha256, objectVersionId], map: "personal_artifact_cleanup_command_request_object_key")
+  @@unique([deletionRequestId, objectKey, objectVersionId], map: "personal_artifact_cleanup_command_request_object_key")
   @@index([workspaceId, deletionRequestId, status, createdAt], map: "personal_artifact_cleanup_command_claim_idx")
+  @@index([objectKey], map: "personal_artifact_cleanup_command_object_key_idx")
   @@map("personal_artifact_cleanup_command")
 }
 

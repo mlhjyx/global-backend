@@ -117,4 +117,20 @@ describe('R1 immutable SiteRelease database invariants', () => {
     expect(migration).not.toMatch(/INSERT\s+INTO\s+"site_release"/i);
     expect(migration).not.toMatch(/artifact_key[\s\S]+local:/i);
   });
+
+  it('adds workspace-prefixed site_release artifact_prefix constraint via additive migration while retaining legacy compatibility', () => {
+    const prefixMigrationDirs = readdirSync(migrationsDir).filter((entry) =>
+      /site_release_workspace_prefix$/.test(entry),
+    );
+    expect(prefixMigrationDirs).toHaveLength(1);
+    const prefixMigration = readFileSync(
+      path.join(migrationsDir, prefixMigrationDirs[0]!, 'migration.sql'),
+      'utf8',
+    );
+    expect(prefixMigration).toContain('DROP CONSTRAINT "site_release_artifact_prefix_check"');
+    expect(prefixMigration).toContain('ADD CONSTRAINT "site_release_artifact_prefix_check"');
+    expect(prefixMigration).toContain(`'ws/' || "workspace_id"::text || '/sites/' || "site_id"::text || '/releases/' || "id"::text`);
+    expect(prefixMigration).toContain(`'sites/' || "site_id"::text || '/releases/' || "id"::text`);
+    expect(prefixMigration).not.toMatch(/\bDROP\s+(?:TABLE|COLUMN)\b/i);
+  });
 });

@@ -9,7 +9,10 @@ import {
   type GenericOperationArtifactManifest,
 } from './artifact.types';
 import type { GenericOperationArtifactRepository } from './generic-operation-artifact.repository';
-import { contentAddressedObjectKey } from './artifact-key';
+import {
+  contentAddressedObjectKey,
+  legacyPersonalDataObjectKey,
+} from './artifact-key';
 import {
   ArtifactStorageError,
   type GenericOperationArtifactStore,
@@ -345,6 +348,7 @@ describe('GenericOperationArtifactService', () => {
 
     expect(deps.store.promote).toHaveBeenCalledWith(staged, {
       retainUntil: EXPIRES_AT,
+      scope: { scopeKind: 'workspace', workspaceId: WORKSPACE_ID },
     });
     // A concurrent reuse may have refreshed the object again between promote
     // and the post-promote inspect: the content contract still has to match,
@@ -353,6 +357,10 @@ describe('GenericOperationArtifactService', () => {
       SHA256,
       'CONFIDENTIAL_TENANT',
       undefined,
+      {
+        scope: { scopeKind: 'workspace', workspaceId: WORKSPACE_ID },
+        objectKey: OBJECT_KEY,
+      },
     );
     expect(deps.budgetStore.settleArtifactManifest).toHaveBeenCalledWith(
       reservation,
@@ -570,6 +578,10 @@ describe('GenericOperationArtifactService', () => {
       SHA256,
       'CONFIDENTIAL_TENANT',
       undefined,
+      {
+        scope: { scopeKind: 'workspace', workspaceId: WORKSPACE_ID },
+        objectKey: OBJECT_KEY,
+      },
     );
     expect(deps.order).toEqual([
       'load-expected',
@@ -624,6 +636,10 @@ describe('GenericOperationArtifactService', () => {
       SHA256,
       'CONFIDENTIAL_TENANT',
       undefined,
+      {
+        scope: { scopeKind: 'workspace', workspaceId: WORKSPACE_ID },
+        objectKey: OBJECT_KEY,
+      },
     );
     expect(deps.store.inspect).not.toHaveBeenCalledWith('ff'.repeat(32), undefined);
   });
@@ -865,5 +881,76 @@ describe('GenericOperationArtifactService', () => {
       new GenericOperationArtifactError('GENERIC_OPERATION_ARTIFACT_INVALID'),
     );
     expect(deps.budgetStore.settleArtifactManifest).not.toHaveBeenCalled();
+  });
+
+  it('reads legacy un-prefixed PERSONAL_DATA DB manifests via their persisted objectKey while passing workspace scope', async () => {
+    const legacyKey = legacyPersonalDataObjectKey(SHA256);
+    const deps = dependencies();
+    const legacyManifest = {
+      schemaVersion: GENERIC_OPERATION_ARTIFACT_MANIFEST_SCHEMA,
+      artifactId: ARTIFACT_ID,
+      scopeKind: 'workspace' as const,
+      workspaceId: WORKSPACE_ID,
+      authorityId: AUTHORITY_ID,
+      operationId: OPERATION_ID,
+      resultSchema: 'http-get/v1',
+      objectKey: legacyKey,
+      sha256: SHA256,
+      sizeBytes: String(BODY.byteLength),
+      mediaType: 'text/plain',
+      privacyClass: 'PERSONAL_DATA' as const,
+      sourceDigest: null,
+      createdAt: CREATED_AT,
+      expiresAt: EXPIRES_AT,
+    };
+    const legacyStored: StoredArtifact = {
+      objectKey: legacyKey,
+      versionId: 'legacy-version-1',
+      sha256: SHA256,
+      sizeBytes: String(BODY.byteLength),
+      mediaType: 'text/plain',
+      resultSchema: 'http-get/v1',
+      privacyClass: 'PERSONAL_DATA',
+    };
+    vi.mocked(deps.repository.findExact).mockResolvedValueOnce({
+      manifest: legacyManifest,
+      expectedFacts: { status: 200, ok: true, sanitizedUrl: 'https://example.com', blocked: null },
+    } as never);
+    vi.mocked(deps.store.inspect).mockResolvedValueOnce(legacyStored);
+
+    const verified = await deps.service.readVerified({
+      scopeKind: 'workspace',
+      workspaceId: WORKSPACE_ID,
+      authorityId: AUTHORITY_ID,
+      reference: {
+        schemaVersion: 'generic-operation-artifact-ref/v1',
+        artifactId: ARTIFACT_ID,
+        operationId: OPERATION_ID,
+        resultSchema: 'http-get/v1',
+        sha256: SHA256,
+        sizeBytes: String(BODY.byteLength),
+        mediaType: 'text/plain',
+        expiresAt: EXPIRES_AT,
+      },
+    });
+    expect(verified.manifest.objectKey).toBe(legacyKey);
+    expect(deps.store.inspect).toHaveBeenCalledWith(
+      SHA256,
+      'PERSONAL_DATA',
+      undefined,
+      {
+        scope: { scopeKind: 'workspace', workspaceId: WORKSPACE_ID },
+        objectKey: legacyKey,
+      },
+    );
+    expect(deps.store.read).toHaveBeenCalledWith(
+      SHA256,
+      'PERSONAL_DATA',
+      undefined,
+      {
+        scope: { scopeKind: 'workspace', workspaceId: WORKSPACE_ID },
+        objectKey: legacyKey,
+      },
+    );
   });
 });

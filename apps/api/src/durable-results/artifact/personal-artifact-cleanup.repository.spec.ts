@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  contentAddressedObjectKey,
+  legacyPersonalDataObjectKey,
+} from './artifact-key';
+import {
   PrismaPersonalArtifactCleanupCommandRepository,
   PersonalArtifactCleanupEnqueuer,
   personalArtifactCleanupPersistence,
@@ -13,12 +17,17 @@ const COMMAND_ID = '00000000-0000-4000-8000-0000000000d4';
 const ARTIFACT_ID = '00000000-0000-4000-8000-0000000000e5';
 const SHA256 = 'ab'.repeat(32);
 const VERSION_ID = 'version-exact-1';
+const OBJECT_KEY = contentAddressedObjectKey(SHA256, 'PERSONAL_DATA', {
+  scopeKind: 'workspace',
+  workspaceId: WORKSPACE_ID,
+});
 
 const row = Object.freeze({
   command_id: COMMAND_ID,
   workspace_id: WORKSPACE_ID,
   deletion_request_id: REQUEST_ID,
   artifact_id: ARTIFACT_ID,
+  object_key: OBJECT_KEY,
   sha256: SHA256,
   object_version_id: VERSION_ID,
   tombstoned_at: new Date('2026-08-24T08:00:00.000Z'),
@@ -55,6 +64,7 @@ describe('PrismaPersonalArtifactCleanupCommandRepository', () => {
         artifactId: ARTIFACT_ID,
         sha256: SHA256,
         versionId: VERSION_ID,
+        objectScope: 'workspace',
         tombstonedAt: '2026-08-24T08:00:00.000Z',
         attempt: 1,
       },
@@ -114,6 +124,44 @@ describe('PrismaPersonalArtifactCleanupCommandRepository', () => {
       deletionRequestId: REQUEST_ID,
     })).resolves.toEqual({ status: 'SHARED_OBJECT_STILL_REFERENCED' });
   });
+
+  it('rejects a command row pointing at another workspace prefix and maps legacy rows cleanly', async () => {
+    const crossTenantDb = persistence({
+      claim: vi.fn(async () => [
+        {
+          ...row,
+          object_key: contentAddressedObjectKey(SHA256, 'PERSONAL_DATA', {
+            scopeKind: 'workspace',
+            workspaceId: OTHER_WORKSPACE_ID,
+          }),
+        },
+      ]),
+    });
+    await expect(
+      new PrismaPersonalArtifactCleanupCommandRepository(crossTenantDb).claimCommitted({
+        workspaceId: WORKSPACE_ID,
+        deletionRequestId: REQUEST_ID,
+      }),
+    ).rejects.toThrow('INVALID_DURABLE_CLEANUP_COMMAND');
+
+    const legacyDb = persistence({
+      claim: vi.fn(async () => [
+        {
+          ...row,
+          object_key: legacyPersonalDataObjectKey(SHA256),
+        },
+      ]),
+    });
+    await expect(
+      new PrismaPersonalArtifactCleanupCommandRepository(legacyDb).claimCommitted({
+        workspaceId: WORKSPACE_ID,
+        deletionRequestId: REQUEST_ID,
+      }),
+    ).resolves.toMatchObject({
+      status: 'CLAIMED',
+      command: { objectScope: 'legacy_global' },
+    });
+  });
 });
 
 describe('personal artifact cleanup Prisma persistence', () => {
@@ -135,6 +183,7 @@ describe('personal artifact cleanup Prisma persistence', () => {
       artifactId: ARTIFACT_ID,
       sha256: SHA256,
       versionId: VERSION_ID,
+      objectScope: 'workspace' as const,
       tombstonedAt: '2026-08-24T08:00:00.000Z',
       attempt: 1,
     };

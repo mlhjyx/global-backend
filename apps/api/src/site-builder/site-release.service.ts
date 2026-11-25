@@ -14,6 +14,7 @@ import {
   type PreparedReleaseArtifact,
   type ReleaseArtifactStorage,
 } from './release-artifact';
+import { siteReleaseArtifactPrefix } from './site-release-prefix';
 import {
   assertRendererOutputMatches,
   rendererOutputTreeDigest,
@@ -286,7 +287,11 @@ export class SiteReleaseService {
           buildRunId: input.buildRunId,
           releaseNumber,
           status: 'candidate',
-          artifactPrefix: `sites/${input.siteId}/releases/${releaseId}`,
+          artifactPrefix: siteReleaseArtifactPrefix(
+            input.workspaceId,
+            input.siteId,
+            releaseId,
+          ),
           producerToken,
           leaseUntil: this.leaseUntil(now),
           createdBy: input.createdBy,

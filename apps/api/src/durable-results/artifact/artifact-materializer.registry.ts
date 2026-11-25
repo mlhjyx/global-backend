@@ -131,7 +131,9 @@ export class ArtifactMaterializerRegistry {
   ): Promise<T> {
     let parsedManifest: GenericOperationArtifactManifest;
     try {
-      parsedManifest = parseGenericOperationArtifactManifest(manifest);
+      parsedManifest = parseGenericOperationArtifactManifest(manifest, {
+        allowLegacyPersonalData: true,
+      });
     } catch {
       return invalid();
     }
@@ -165,7 +167,9 @@ export async function readBoundedArtifactUtf8(
   contract: ArtifactPayloadContract,
 ): Promise<string> {
   try {
-    const parsed = parseGenericOperationArtifactManifest(manifest);
+    const parsed = parseGenericOperationArtifactManifest(manifest, {
+      allowLegacyPersonalData: true,
+    });
     const declaredSize = BigInt(parsed.sizeBytes);
     if (
       parsed.resultSchema !== contract.resultSchema ||

@@ -32,7 +32,10 @@ describe('personal artifact cleanup runtime configuration', () => {
     expect(probe).toBeInstanceOf(ListObjectVersionsCommand);
     expect((probe as ListObjectVersionsCommand).input).toEqual({
       Bucket: 'personal-cleanup-test',
-      Prefix: contentAddressedObjectKey('0'.repeat(64), 'PERSONAL_DATA'),
+      Prefix: contentAddressedObjectKey('0'.repeat(64), 'PERSONAL_DATA', {
+        scopeKind: 'workspace',
+        workspaceId: '00000000-0000-4000-8000-000000000000',
+      }),
       MaxKeys: 1,
     });
     runtime.destroy();

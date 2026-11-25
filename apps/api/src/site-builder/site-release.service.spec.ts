@@ -690,7 +690,7 @@ describe('SiteReleaseService cross-system commit protocol', () => {
         buildRunId: input.buildRunId,
         releaseNumber: 1,
         status: 'candidate',
-        artifactPrefix: `${`sites/${input.siteId}/releases/`}50000000-0000-0000-0000-000000000001`,
+        artifactPrefix: `ws/${input.workspaceId}/sites/${input.siteId}/releases/50000000-0000-0000-0000-000000000001`,
         artifactDigest: null,
         manifest: null,
         manifestDigest: null,
@@ -762,6 +762,9 @@ describe('SiteReleaseService cross-system commit protocol', () => {
     });
     const root = await outputRoot();
     const first = await service.materialize({ ...input, root });
+    expect(prisma.state.release?.artifactPrefix).toBe(
+      `ws/${input.workspaceId}/sites/${input.siteId}/releases/${first.releaseId}`,
+    );
     const producer = prisma.state.release?.producerToken;
     const replay = await service.materialize({ ...input, root });
 

@@ -44,8 +44,8 @@ function digest(): string {
   return randomUUID().replaceAll('-', '').repeat(2);
 }
 
-function objectKey(sha256: string): string {
-  return `generic-operation-results/v1/final/personal-data/sha256/${sha256.slice(0, 2)}/${sha256}`;
+function objectKey(sha256: string, workspaceId: string): string {
+  return `generic-operation-results/v1/final/personal-data/ws/${workspaceId}/sha256/${sha256.slice(0, 2)}/${sha256}`;
 }
 
 /** The SQLSTATE and message PostgreSQL raised through a Prisma raw query, or null. */
@@ -89,7 +89,7 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
     }
 
     /** One reserved budget operation under a consumed workspace Grant, as the budget store leaves it. */
-    async function seedBinding(): Promise<Binding> {
+    async function seedBinding(targetWorkspaceId = workspaceId): Promise<Binding> {
       const authorityId = randomUUID();
       const accountId = randomUUID();
       const operationId = randomUUID();
@@ -100,7 +100,7 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
           request_sha256, currency, unit, cap_microusd, runs_consumed,
           issued_at, not_before, expires_at, consumed_at
         ) VALUES (
-          ${authorityId}::uuid, ${workspaceId}, 'WORKSPACE_GRANT', ${workspaceId}::uuid,
+          ${authorityId}::uuid, ${targetWorkspaceId}, 'WORKSPACE_GRANT', ${targetWorkspaceId}::uuid,
           ${`https://subject-${randomUUID()}.example.test`},
           'global-backend:execution-budget', ${randomUUID()}::uuid, ${digest()},
           'execution-budget-grant/v1', 'contact.verify', 'contact_point',
@@ -117,7 +117,7 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
           exhausted, ref_count, authority_id,
           authorized_cap_microusd, created_at, updated_at
         ) VALUES (
-          ${accountId}::uuid, ${workspaceId}, ${`account-${randomUUID()}`}, 1, 0, 0, 0, 10, 0,
+          ${accountId}::uuid, ${targetWorkspaceId}, ${`account-${randomUUID()}`}, 1, 0, 0, 0, 10, 0,
           false, 1, ${authorityId}::uuid, 5000000, statement_timestamp(), statement_timestamp()
         )`;
       await owner.$executeRaw`
@@ -125,15 +125,15 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
           id, scope_key, account_id, generation, operation_key,
           amount_unit, reserved_cents, reserved_microusd, status, created_at
         ) VALUES (
-          ${operationId}::uuid, ${workspaceId}, ${accountId}::uuid, 1, ${`operation-${randomUUID()}`},
+          ${operationId}::uuid, ${targetWorkspaceId}, ${accountId}::uuid, 1, ${`operation-${randomUUID()}`},
           'microusd', 0, 10, 'RESERVED', now()
         )`;
       // The generation-reset trigger zeroes the microusd counters on account insert.
       await owner.$executeRaw`
         UPDATE tool_budget_account
         SET reserved_microusd = 10, updated_at = statement_timestamp()
-        WHERE id = ${accountId}::uuid AND scope_key = ${workspaceId}`;
-      return { workspaceId, authorityId, operationId };
+        WHERE id = ${accountId}::uuid AND scope_key = ${targetWorkspaceId}`;
+      return { workspaceId: targetWorkspaceId, authorityId, operationId };
     }
 
     /** The artifact fields a test may vary; the object row compares size, key and privacy class. */
@@ -152,7 +152,7 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
         authorityId: fixture.authorityId,
         operationId: fixture.operationId,
         resultSchema: overrides.resultSchema ?? 'http-get/v1',
-        objectKey: objectKey(fixture.sha256),
+        objectKey: objectKey(fixture.sha256, fixture.workspaceId),
         sha256: fixture.sha256,
         sizeBytes: overrides.sizeBytes ?? '1024',
         mediaType: overrides.mediaType ?? 'text/html',
@@ -236,14 +236,14 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
     async function pinnedVersion(): Promise<string | null> {
       const rows = await owner.$queryRaw<{ object_version_id: string | null }[]>`
         SELECT object_version_id FROM generic_operation_artifact_object
-        WHERE sha256 = ${sha256} AND privacy_class = 'PERSONAL_DATA'`;
+        WHERE object_key = ${objectKey(sha256, workspaceId)}`;
       return rows[0]?.object_version_id ?? null;
     }
 
     async function ledger(): Promise<string[]> {
       const rows = await owner.$queryRaw<{ object_version_id: string }[]>`
         SELECT object_version_id FROM generic_operation_artifact_object_version
-        WHERE sha256 = ${sha256} AND privacy_class = 'PERSONAL_DATA'
+        WHERE object_key = ${objectKey(sha256, workspaceId)}
         ORDER BY first_settled_at, object_version_id`;
       return rows.map((row) => row.object_version_id);
     }
@@ -430,7 +430,7 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
     it('erasure removes every stored version, one no settlement recorded included, and leaves one completion receipt per command', async () => {
       const erasedSubjectId = randomUUID();
       const erasedSha256 = digest();
-      const key = objectKey(erasedSha256);
+      const key = objectKey(erasedSha256, workspaceId);
       await seedContact(erasedSubjectId);
       // Two settlements recorded two versions. A third, a refresh copy whose
       // settlement never committed, is the current version in the bucket.
@@ -490,12 +490,85 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
       // The ledger stays the audit of what settlements verified; erasure does not rewrite it.
       const ledgerRows = await owner.$queryRaw<{ object_version_id: string }[]>`
         SELECT object_version_id FROM generic_operation_artifact_object_version
-        WHERE sha256 = ${erasedSha256} AND privacy_class = 'PERSONAL_DATA'
+        WHERE object_key = ${key}
         ORDER BY object_version_id`;
       expect(ledgerRows.map((row) => row.object_version_id)).toEqual([
         'version-settled-first',
         'version-settled-refresh',
       ]);
+    });
+
+    it('isolates identical PERSONAL_DATA digests across tenants so Tenant A DSR deletion never holds or fences Tenant B', async () => {
+      const tenantBId = randomUUID();
+      const tenantBCompanyId = randomUUID();
+      const tenantBContactId = randomUUID();
+      const sharedDigest = digest();
+      const subjectAId = randomUUID();
+      await seedContact(subjectAId);
+      await owner.$executeRaw`
+        INSERT INTO workspace (id, name, created_at, updated_at)
+        VALUES (${tenantBId}::uuid, 'Tenant B Artifact WS', now(), now())`;
+      await owner.$executeRaw`
+        INSERT INTO canonical_company (id, workspace_id, name, dedupe_key, created_at, updated_at)
+        VALUES (${tenantBCompanyId}::uuid, ${tenantBId}::uuid, 'Tenant B Co', ${`ledger-co-${tenantBId}`}, now(), now())`;
+      await owner.$executeRaw`
+        INSERT INTO canonical_contact (id, workspace_id, company_id, full_name, dedupe_key, created_at)
+        VALUES (${tenantBContactId}::uuid, ${tenantBId}::uuid, ${tenantBCompanyId}::uuid, 'Tenant B Contact', ${`ledger-contact-${tenantBContactId}`}, now())`;
+
+      const seedBindingFor = async (targetWorkspaceId: string): Promise<ArtifactFixture> => {
+        const binding = await seedBinding(targetWorkspaceId);
+        return {
+          ...binding,
+          artifactId: randomUUID(),
+          sha256: sharedDigest,
+          subjectId: targetWorkspaceId === workspaceId ? subjectAId : tenantBContactId,
+        };
+      };
+
+      const fixtureA = await seedBindingFor(workspaceId);
+      const fixtureB1 = await seedBindingFor(tenantBId);
+      const keyA = objectKey(sharedDigest, workspaceId);
+      const keyB = objectKey(sharedDigest, tenantBId);
+      expect(keyA).not.toBe(keyB);
+
+      await withWorkspace((tx) => settle(tx, 'v4', fixtureA, 'version-tenant-a'));
+      await app.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${tenantBId}, true)`;
+        await settle(tx, 'v4', fixtureB1, 'version-tenant-b-1');
+      });
+
+      const bucket = new VersionedBucketFixture('cross-tenant-isolation-test');
+      bucket.putVersion(keyA, { versionId: 'version-tenant-a' });
+      bucket.putVersion(keyB, { versionId: 'version-tenant-b-1' });
+
+      const deletionRequestId = await tombstoneSubject(subjectAId);
+      const [enqueued] = await withWorkspace((tx) =>
+        tx.$queryRaw<{ command_count: number; shared_hold_count: number; version_hold_count: number }[]>`
+          SELECT * FROM enqueue_workspace_personal_artifact_cleanup_v1(${workspaceId}::uuid, ${deletionRequestId}::uuid)`,
+      );
+      expect(enqueued).toEqual({ command_count: 1, shared_hold_count: 0, version_hold_count: 0 });
+
+      const service = new PersonalArtifactCleanupService(
+        new PrismaPersonalArtifactCleanupCommandRepository(
+          personalArtifactCleanupPersistence(appPrismaService()),
+        ),
+        new S3PersonalArtifactCleanupAdapter({ bucket: bucket.bucket, client: bucket }),
+      );
+      await expect(service.cleanup({ workspaceId, deletionRequestId })).resolves.toMatchObject({
+        status: 'COMPLETED',
+        objectStatus: 'DELETED',
+      });
+      expect(bucket.versionIds(keyA)).toEqual({ objects: [], markers: [] });
+      expect(bucket.versionIds(keyB)).toEqual({ objects: ['version-tenant-b-1'], markers: [] });
+
+      // Tenant B can continue binding new artifacts with the same sha256 with no cleanup fence block.
+      const fixtureB2 = await seedBindingFor(tenantBId);
+      await expect(
+        app.$transaction(async (tx) => {
+          await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${tenantBId}, true)`;
+          await settle(tx, 'v4', fixtureB2, 'version-tenant-b-2');
+        }),
+      ).resolves.toBeUndefined();
     });
   },
 );

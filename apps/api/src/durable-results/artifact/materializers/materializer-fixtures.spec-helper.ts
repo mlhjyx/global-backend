@@ -46,7 +46,10 @@ export function manifestFor(
     authorityId: AUTHORITY_ID,
     operationId: OPERATION_ID,
     resultSchema,
-    objectKey: contentAddressedObjectKey(sha256, 'PERSONAL_DATA'),
+    objectKey: contentAddressedObjectKey(sha256, 'PERSONAL_DATA', {
+      scopeKind: 'workspace',
+      workspaceId: WORKSPACE_ID,
+    }),
     sha256,
     sizeBytes: String(bytes.byteLength),
     mediaType,

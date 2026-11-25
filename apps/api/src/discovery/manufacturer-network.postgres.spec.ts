@@ -911,6 +911,8 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
       for await (const chunk of await artifactStore.read(
         (proof as { resultDigest: string }).resultDigest,
         "PERSONAL_DATA",
+        undefined,
+        { scope: { scopeKind: "workspace", workspaceId } },
       ))
         chunks.push(chunk);
       const storedText = Buffer.concat(chunks).toString("utf8");
@@ -1113,6 +1115,8 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
           for await (const chunk of await artifactStore.read(
             artifacts[0]!.sha256,
             "PERSONAL_DATA",
+            undefined,
+            { scope: { scopeKind: "workspace", workspaceId } },
           ))
             chunks.push(chunk);
           expect(Buffer.concat(chunks).toString("utf8")).toBe("");

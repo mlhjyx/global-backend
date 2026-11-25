@@ -1,4 +1,7 @@
-import { contentAddressedObjectKey } from './artifact-key';
+import {
+  resolveArtifactObjectKey,
+  type ArtifactObjectScope,
+} from './artifact-key';
 import type { ArtifactPrivacyClass } from './artifact.types';
 
 export const GENERIC_OPERATION_ARTIFACT_OBJECT_SCHEMA =
@@ -57,10 +60,38 @@ function asMetadata(value: unknown): Readonly<Record<string, string>> | null {
   return record as Readonly<Record<string, string>>;
 }
 
+export interface ParseStoredArtifactContractOptions {
+  readonly scope?: ArtifactObjectScope;
+  readonly objectKey?: string;
+}
+
+function hasArtifactPrivacyTag(
+  taggingOutput: unknown,
+  privacyClass: string,
+): boolean {
+  const tags = asRecord(taggingOutput)?.TagSet;
+  if (!Array.isArray(tags) || tags.length !== 1) return false;
+  const tag = asRecord(tags[0]);
+  return tag?.Key === 'artifact-privacy' && tag.Value === privacyClass;
+}
+
+function tryResolveStoredObjectKey(
+  sha256: string,
+  privacyClass: ArtifactPrivacyClass,
+  options?: ParseStoredArtifactContractOptions,
+): string | null {
+  try {
+    return resolveArtifactObjectKey(sha256, privacyClass, options);
+  } catch {
+    return null;
+  }
+}
+
 export function parseStoredArtifactContract(
   sha256: string,
   headOutput: unknown,
   taggingOutput: unknown,
+  options?: ParseStoredArtifactContractOptions,
 ): StoredArtifactContract | null {
   const head = asRecord(headOutput);
   const metadata = asMetadata(head?.Metadata);
@@ -69,7 +100,6 @@ export function parseStoredArtifactContract(
   const versionId = head?.VersionId;
   const resultSchema = metadata?.['result-schema'];
   const privacyClass = metadata?.['privacy-class'];
-  const tags = asRecord(taggingOutput)?.TagSet;
   if (
     !head ||
     !metadata ||
@@ -88,26 +118,21 @@ export function parseStoredArtifactContract(
     metadata.sha256 !== sha256 ||
     metadata['size-bytes'] !== String(contentLength) ||
     head.ServerSideEncryption !== 'AES256' ||
-    !Array.isArray(tags) ||
-    tags.length !== 1
+    !hasArtifactPrivacyTag(taggingOutput, privacyClass as string)
   ) {
     return null;
   }
-  const tag = asRecord(tags[0]);
-  if (tag?.Key !== 'artifact-privacy' || tag.Value !== privacyClass) {
-    return null;
-  }
+  const resolvedPrivacyClass = privacyClass as ArtifactPrivacyClass;
+  const objectKey = tryResolveStoredObjectKey(sha256, resolvedPrivacyClass, options);
+  if (!objectKey) return null;
   return Object.freeze({
-    objectKey: contentAddressedObjectKey(
-      sha256,
-      privacyClass as ArtifactPrivacyClass,
-    ),
+    objectKey,
     versionId,
     sha256,
     sizeBytes: metadata['size-bytes'],
     mediaType: contentType,
     resultSchema,
-    privacyClass: privacyClass as ArtifactPrivacyClass,
+    privacyClass: resolvedPrivacyClass,
   });
 }
 

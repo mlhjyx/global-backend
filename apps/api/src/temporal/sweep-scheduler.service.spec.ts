@@ -84,6 +84,7 @@ describe('R7-A 周期 sweep 调度器', () => {
 
   it('never schedules the four paused platform schedules', () => {
     const ids = CUSTOMER_SWEEPS.map((sweep) => sweep.scheduleId);
+    expect(ids).toContain('seller-document-pending-cleanup');
     for (const paused of ['acq-sweep', 'intent-sweep', 'patents-cache-refresh', 'sanctions-refresh']) {
       expect(ids).not.toContain(paused);
     }
