@@ -10,7 +10,6 @@ import { Logger } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
 import {
-  contentAddressedObjectKey,
   parseArtifactObjectScope,
   resolveArtifactObjectKey,
   stagingObjectKey,
