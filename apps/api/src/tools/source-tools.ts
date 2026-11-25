@@ -9,7 +9,8 @@ import {
   ToolContext,
 } from "./tool-contract";
 import { ToolRegistry } from "./tool-registry";
-import { crawlHtml, CrawlHtmlResult } from "../adapters/web-crawler";
+import { CrawlHtmlResult } from "../adapters/web-crawler";
+import { executeCrawl4aiRenderWithResilience } from "./crawl4ai-timeout-resilience";
 import { isAllowedByRobots } from "../adapters/robots";
 import {
   EgressBlockedError,
@@ -190,22 +191,11 @@ export const crawl4aiRenderTool: Tool<
         costCents: 0,
       };
     }
-    const r = await crawlHtml(input.url, () =>
-      assertToolExternalActionAuthorized(ctx),
-      undefined,
-      ctx.beforePhysicalWire,
+    return executeCrawl4aiRenderWithResilience(
+      input.url,
+      ctx,
       sourcePhysicalWire(ctx, "crawl4ai.render.dispatch"),
     );
-    return {
-      data: r,
-      costCents: 1,
-      provenance: {
-        sourceUrl: input.url,
-        fetchedAt: new Date().toISOString(),
-        contentHash: hash(r.html),
-        parserVersion: "crawl4ai/1",
-      },
-    };
   },
 };
 

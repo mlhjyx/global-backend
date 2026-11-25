@@ -6,7 +6,10 @@ import type { ModelGateway } from '../model-gateway/model-gateway';
 import { isDiscoveryCompanyLineageProviderKey } from './company-discovery-lineage';
 import { isDiscoveryQueryLineageProviderKey } from './discovery-query-governed-lineage';
 import { DiscoveryProviderRegistry } from './provider.registry';
-import { PUBLIC_WEB_COMPANY_SITE_POLICY_DOMAIN } from './source-policy-scope';
+import {
+  DIRECTORY_PUBLIC_B2B_LISTING_POLICY_DOMAIN,
+  PUBLIC_WEB_COMPANY_SITE_POLICY_DOMAIN,
+} from './source-policy-scope';
 
 describe('DiscoveryProviderRegistry SourceClass governance', () => {
   it('binds structured and gateway-backed product adapters to the manifest', () => {
@@ -99,6 +102,28 @@ describe('DiscoveryProviderRegistry SourceClass governance', () => {
           allowedPurpose: ['discovery', 'enrichment'],
           retentionDays: 365,
           notes: expect.stringContaining('public_web'),
+        },
+      },
+    ]);
+
+    const directoryListing = policies.filter(
+      (entry) => entry.create.domain === DIRECTORY_PUBLIC_B2B_LISTING_POLICY_DOMAIN,
+    );
+    expect(directoryListing).toEqual([
+      {
+        where: { domain: DIRECTORY_PUBLIC_B2B_LISTING_POLICY_DOMAIN },
+        update: {},
+        create: {
+          domain: DIRECTORY_PUBLIC_B2B_LISTING_POLICY_DOMAIN,
+          sourceType: 'directory_listing',
+          accessMode: 'crawl',
+          reviewStatus: 'APPROVED',
+          robotsStatus: 'UNREVIEWED',
+          termsStatus: 'UNREVIEWED',
+          personalData: false,
+          allowedPurpose: ['discovery'],
+          retentionDays: 365,
+          notes: expect.stringContaining('directory'),
         },
       },
     ]);

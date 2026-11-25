@@ -39,7 +39,10 @@ import {
   MAX_COMPANY_DISCOVERY_ADAPTERS,
   MAX_CONTACT_DISCOVERY_ADAPTERS,
 } from './execution-envelope';
-import { PUBLIC_WEB_COMPANY_SITE_POLICY_DOMAIN } from './source-policy-scope';
+import {
+  DIRECTORY_PUBLIC_B2B_LISTING_POLICY_DOMAIN,
+  PUBLIC_WEB_COMPANY_SITE_POLICY_DOMAIN,
+} from './source-policy-scope';
 import type { CompanyDiscoverySource } from './plan-query-sources';
 import { declaresDiscoveryCompanyLineage } from './company-discovery-lineage';
 
@@ -292,6 +295,27 @@ export class DiscoveryProviderRegistry {
       update: {},
       create: { key: 'directory', class: 'industry_data', status: 'ENABLED', costPerCallCents: 0 },
     });
+    // directory 的「公开 B2B 协会/展会名录」三级兜底策略（保留键，非主机名）。
+    // 仅在无逐域策略命中、且域名不在社媒/商业数据商/付费目录黑名单时由 directory 使用；
+    // 逐域策略（含 SUSPENDED）永远优先，update: {} 保证运维修改重启不回写。
+    if (db.sourcePolicy) {
+      await db.sourcePolicy.upsert({
+        where: { domain: DIRECTORY_PUBLIC_B2B_LISTING_POLICY_DOMAIN },
+        update: {},
+        create: {
+          domain: DIRECTORY_PUBLIC_B2B_LISTING_POLICY_DOMAIN,
+          sourceType: 'directory_listing',
+          accessMode: 'crawl',
+          reviewStatus: 'APPROVED',
+          robotsStatus: 'UNREVIEWED',
+          termsStatus: 'UNREVIEWED',
+          personalData: false,
+          allowedPurpose: ['discovery'],
+          retentionDays: 365,
+          notes: 'directory 公开 B2B 协会/展会名录通用兜底策略（保留键，非主机名；Batch 1.5-B）。三级准入：逐域策略（含 SUSPENDED）优先 > 社媒/商业数据商/付费黄页封闭黑名单拒收 > 其余公开名录适用本策略。',
+        },
+      });
+    }
     await db.dataProvider.upsert({
       where: { key: 'trade_fair' },
       update: {},

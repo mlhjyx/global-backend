@@ -1,8 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  CRAWL4AI_RENDER_DEGRADED_EMPTY_HTML,
   CRAWL4AI_REQUEST_TIMEOUT_MS,
   crawlHtml,
   crawlUrl,
+  isCrawl4aiHtmlBody,
+  isCrawl4aiRenderEmptyHtml,
+  isCrawlTimeoutError,
   MAX_CRAWL4AI_RENDER_ARTIFACT_BYTES,
   pageTimeoutMs,
   renderCacheMode,
@@ -275,7 +279,7 @@ describe("Crawl4AI render request parameters are env-configurable", () => {
   });
 
   it("reads the page navigation timeout with a safe default and clamps", () => {
-    expect(pageTimeoutMs({})).toBe(45_000);
+    expect(pageTimeoutMs({})).toBe(25_000);
     expect(pageTimeoutMs({ CRAWLER_PAGE_TIMEOUT_MS: "60000" })).toBe(60_000);
     expect(pageTimeoutMs({ CRAWLER_PAGE_TIMEOUT_MS: "1000" })).toBe(5_000);
     // The ceiling stays below the /crawl client abort: a larger page_timeout can
@@ -287,7 +291,20 @@ describe("Crawl4AI render request parameters are env-configurable", () => {
     expect(pageTimeoutMs({ CRAWLER_PAGE_TIMEOUT_MS: "120000" })).toBe(
       CRAWL4AI_REQUEST_TIMEOUT_MS - 5_000,
     );
-    expect(pageTimeoutMs({ CRAWLER_PAGE_TIMEOUT_MS: "abc" })).toBe(45_000);
-    expect(pageTimeoutMs({ CRAWLER_PAGE_TIMEOUT_MS: "-5" })).toBe(45_000);
+    expect(pageTimeoutMs({ CRAWLER_PAGE_TIMEOUT_MS: "abc" })).toBe(25_000);
+    expect(pageTimeoutMs({ CRAWLER_PAGE_TIMEOUT_MS: "-5" })).toBe(25_000);
+  });
+
+  it("classifies crawl timeout errors and empty degraded HTML placeholders cleanly", () => {
+    expect(isCrawl4aiHtmlBody(CRAWL4AI_RENDER_DEGRADED_EMPTY_HTML)).toBe(true);
+    expect(isCrawl4aiHtmlBody("")).toBe(false);
+    expect(isCrawl4aiHtmlBody("Access Denied")).toBe(false);
+    expect(isCrawl4aiRenderEmptyHtml(CRAWL4AI_RENDER_DEGRADED_EMPTY_HTML)).toBe(true);
+    expect(isCrawl4aiRenderEmptyHtml("")).toBe(true);
+    expect(isCrawl4aiRenderEmptyHtml("<html><body><form/></body></html>")).toBe(false);
+    expect(isCrawlTimeoutError(new DOMException("aborted", "TimeoutError"))).toBe(true);
+    expect(isCrawlTimeoutError(new DOMException("aborted", "AbortError"))).toBe(true);
+    expect(isCrawlTimeoutError(Object.assign(new Error("fetch failed"), { cause: { code: "UND_ERR_HEADERS_TIMEOUT" } }))).toBe(true);
+    expect(isCrawlTimeoutError(new Error("crawler 500"))).toBe(false);
   });
 });

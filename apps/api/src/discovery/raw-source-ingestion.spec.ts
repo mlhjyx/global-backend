@@ -324,6 +324,18 @@ describe("Raw Source v2 ingestion boundary", () => {
       expect(widened.ingestStatus).toBe("ACCEPTED");
     }
 
+    // Batch 1.5-B: LLM 候选省略 searchQuery（或为 null）时 normalizer 省略该键，TS 与 DB 同步放行。
+    const { searchQuery: _omitted, ...attrsWithoutQuery } = record.attributes;
+    const withoutQuery = prepareRawSourceBatch({
+      providerKey: "model_web_search",
+      records: [{ ...record, attributes: attrsWithoutQuery }],
+      policies: mwsPolicies,
+      limits: LIMITS,
+      now: NOW,
+    }).rows[0]!;
+    expect(withoutQuery.ingestStatus).toBe("ACCEPTED");
+    expect((withoutQuery.payload as { attributes: Record<string, unknown> }).attributes).not.toHaveProperty("searchQuery");
+
     // 非白名单 executor / 携带 identifier / 带 query 的证据 URL 都必须拒收（与 DB 闸门同口径）。
     for (const bad of [
       { ...record, attributes: { ...record.attributes, searchExecutor: "bing" } },
@@ -343,6 +355,89 @@ describe("Raw Source v2 ingestion boundary", () => {
       expect(row.ingestStatus).toBe("REJECTED");
       expect(row.dispositionCode).toBe("PROVIDER_PAYLOAD_SCHEMA_INVALID");
     }
+  });
+
+  it("applies three-tier directory:public_b2b_listing fallback admission without covering blocked brokers or overriding site SUSPENDED", () => {
+    const fallback = {
+      id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      domain: "directory:public_b2b_listing",
+      retentionDays: 365,
+      reviewStatus: "APPROVED" as const,
+      allowedPurpose: ["discovery"],
+      updatedAt: new Date("2026-11-25T00:00:00.000Z"),
+    };
+    const directoryRecord = (host: string) => ({
+      externalId: `directory:acme.it`,
+      name: "Acme Solar Srl",
+      domain: "acme.it",
+      country: "IT",
+      attributes: {
+        source_kind: "directory",
+        source_directory: host.replace(/^www\./u, ""),
+        source_class: "industry_data",
+      },
+      provenance: {
+        sourceUrl: `https://${host}/elenco-soci`,
+        fetchedAt: "2026-11-25T10:00:00.000Z",
+        contentHash: "c".repeat(64),
+        parserVersion: "directory/v1",
+      },
+    });
+
+    // Tier 3: public B2B association directory falls back to directory:public_b2b_listing
+    const admitted = prepareRawSourceBatch({
+      providerKey: "directory",
+      records: [directoryRecord("italiasolare.eu")],
+      policies: [fallback],
+      limits: LIMITS,
+      now: NOW,
+    }).rows[0]!;
+    expect(admitted.ingestStatus).toBe("ACCEPTED");
+    expect(admitted.sourcePolicySnapshot.domain).toBe("directory:public_b2b_listing");
+
+    // Tier 2: blocked brokers/paid directories never fall back
+    for (const host of ["zoominfo.com", "www.europages.it", "sub.paginegialle.it", "kompass.com"]) {
+      const blocked = prepareRawSourceBatch({
+        providerKey: "directory",
+        records: [directoryRecord(host)],
+        policies: [fallback],
+        limits: LIMITS,
+        now: NOW,
+      }).rows[0]!;
+      expect(blocked.ingestStatus).toBe("QUARANTINED");
+      expect(blocked.dispositionCode).toBe("SOURCE_POLICY_MISSING");
+    }
+
+    // Tier 1: explicit site SUSPENDED always overrides the fallback
+    const suspendedSite = {
+      id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      domain: "italiasolare.eu",
+      retentionDays: 30,
+      reviewStatus: "SUSPENDED" as const,
+      allowedPurpose: ["discovery"],
+      updatedAt: new Date("2026-11-25T00:00:00.000Z"),
+    };
+    const overridden = prepareRawSourceBatch({
+      providerKey: "directory",
+      records: [directoryRecord("italiasolare.eu")],
+      policies: [fallback, suspendedSite],
+      limits: LIMITS,
+      now: NOW,
+    }).rows[0]!;
+    expect(overridden.ingestStatus).toBe("QUARANTINED");
+    expect(overridden.dispositionCode).toBe("SOURCE_POLICY_SUSPENDED");
+    expect(overridden.sourcePolicySnapshot.id).toBe(suspendedSite.id);
+
+    // Non-directory providers never fall back to directory:public_b2b_listing
+    const nonDirectory = prepareRawSourceBatch({
+      providerKey: "registry",
+      records: [companyRecord({ provenance: { ...companyRecord().provenance, sourceUrl: "https://italiasolare.eu/api" } })],
+      policies: [fallback],
+      limits: LIMITS,
+      now: NOW,
+    }).rows[0]!;
+    expect(nonDirectory.ingestStatus).toBe("QUARANTINED");
+    expect(nonDirectory.dispositionCode).toBe("SOURCE_POLICY_MISSING");
   });
 
   it.each([
