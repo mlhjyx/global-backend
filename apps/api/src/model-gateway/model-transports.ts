@@ -11,7 +11,14 @@ export const VERIFIED_GATEWAY_MODEL_TRANSPORTS: Readonly<Record<string, GatewayM
   // the same task-shaped fixture; reasoning-only fields must not be promoted
   // to business output as a workaround.
   'gpt-5.6-terra': 'openai-responses',
+  // Anthropic Claude 5.x / 4.6 / Fable models use native Messages API (`/v1/messages`,
+  // top-level `system` + `tool_choice: any`), avoiding relay Chat Completions 400 errors
+  // ("messages.0: use the top-level 'system' parameter") verified live 2026-11-25.
   'claude-sonnet-5': 'anthropic-messages',
+  'claude-sonnet-5-5': 'anthropic-messages',
+  'claude-sonnet-4-6': 'anthropic-messages',
+  'claude-fable-5': 'anthropic-messages',
+  'claude-fable-5-1': 'anthropic-messages',
 });
 
 /**

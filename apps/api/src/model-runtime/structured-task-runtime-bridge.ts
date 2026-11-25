@@ -1,4 +1,6 @@
 import type { ModelGateway } from "../model-gateway/model-gateway";
+import { definiteModelFailureCode } from "../model-gateway/definite-model-failure";
+import { resolveCrossChannelFallbackModels } from "../model-gateway/model-fallback";
 import { checkAgainstSchema } from "../model-gateway/schema-validate";
 import type {
   AiContext,
@@ -313,18 +315,29 @@ export async function executeStructuredTaskWithRuntime<Output>(
       input.validateOutput?.(output);
     },
   };
+  const primaryModel = boundedInput.model ?? registeredTask?.model;
+  const canCrossChannelFallback =
+    context.paidCost === undefined && context.platformEgress === undefined;
+  const fallbackModels = canCrossChannelFallback
+    ? resolveCrossChannelFallbackModels(primaryModel, boundedInput.task)
+    : [];
+  const attemptModels: Array<string | undefined> = [boundedInput.model, ...fallbackModels];
+
+  let activeResolvedAlias = requestedAlias;
+  let activeAttemptInput = boundedInput;
+  let activeAttemptCtx = context;
   const runtime = new ModelExecutionRuntime<typeof taskInput, Output>({
     telemetry: options.telemetry,
     transport: {
       dispatch: async () => {
         gatewayResult = await gateway.generateStructured<Output>(
-          boundedInput,
-          context,
+          activeAttemptInput,
+          activeAttemptCtx,
         );
         return {
           output: gatewayResult.data,
           requestedAlias,
-          resolvedAlias: requestedAlias,
+          resolvedAlias: activeResolvedAlias,
           reportedModel: gatewayResult.reportedModel,
           protocol,
           usage: {
@@ -343,70 +356,94 @@ export async function executeStructuredTaskWithRuntime<Output>(
       },
     },
   });
-  try {
-    const result = await runtime.execute({
-      executionId: `structured:${context.runId ?? context.correlationId ?? context.workspaceId}:${input.task}:${canonicalDigest(requestMaterial).slice(0, 16)}`,
-      fallbackIndex: 0,
-      workspaceId: context.workspaceId,
-      buildRunId: context.runId ?? context.correlationId ?? context.workspaceId,
-      contract,
-      input: taskInput,
-      inputDigest: canonicalDigest(taskInput),
-      context: envelope,
-      contextDigest: envelope.digest,
-      promptVersion,
-      schemaDigest,
-      requestedAlias,
-      resolvedAlias: requestedAlias,
-      protocol,
-      reasoning: effort,
-      sampling: {},
-      locale: "und",
-      prompt,
-    });
-    if (!gatewayResult)
-      throw new Error("model runtime completed without a gateway observation");
-    if (llmCache && llmCacheKey) {
-      try {
-        await llmCache.put(
-          context.workspaceId,
-          llmCacheKey,
-          input.task,
-          gatewayResult.data,
-          llmResultCacheTtlHours(),
-        );
-      } catch (error) {
-        console.warn(
-          `[llm-cache] put failed task=${input.task}: ${String(error).slice(0, 160)}`,
-        );
-      }
-      console.log(`[llm-cache] task=${input.task} hit=false`);
-    }
-    return {
-      ...gatewayResult,
-      runtimeExecution: {
-        contractVersion,
-        protocol,
+  let result: Awaited<ReturnType<typeof runtime.execute>> | undefined;
+  for (let idx = 0; idx < attemptModels.length; idx += 1) {
+    const candidateModel = attemptModels[idx];
+    activeResolvedAlias = idx === 0 || !candidateModel ? requestedAlias : candidateModel;
+    activeAttemptInput =
+      idx === 0 || candidateModel === undefined
+        ? boundedInput
+        : { ...boundedInput, model: candidateModel };
+    activeAttemptCtx =
+      idx === 0 || !candidateModel
+        ? context
+        : {
+            ...context,
+            correlationId: context.correlationId
+              ? `${context.correlationId}:fb:${candidateModel}`
+              : `fb:${candidateModel}`,
+          };
+    gatewayResult = undefined;
+    try {
+      result = await runtime.execute({
+        executionId: `structured:${context.runId ?? context.correlationId ?? context.workspaceId}:${input.task}:${canonicalDigest(requestMaterial).slice(0, 16)}${idx === 0 ? "" : `:fb${idx}`}`,
+        fallbackIndex: idx,
+        workspaceId: context.workspaceId,
+        buildRunId: context.runId ?? context.correlationId ?? context.workspaceId,
+        contract,
+        input: taskInput,
+        inputDigest: canonicalDigest(taskInput),
+        context: envelope,
         contextDigest: envelope.digest,
-        promptDigest: canonicalDigest(prompt),
-        states: result.states,
-        transportAttempts: result.transportAttempts,
-        repairAttempts: result.repairAttempts,
-        physicalCalls: gatewayResult.callCount ?? 1,
-        gatewayRepairCalls: Math.max(0, (gatewayResult.callCount ?? 1) - 1),
+        promptVersion,
+        schemaDigest,
         requestedAlias,
-        runtimeResolvedAlias: requestedAlias,
-        gatewayResolvedModel: gatewayResult.model,
-        provider: gatewayResult.provider,
-        ...(gatewayResult.reportedModel
-          ? { reportedModel: gatewayResult.reportedModel }
-          : {}),
-        ...(gatewayResult.modelResolutionSource
-          ? { modelResolutionSource: gatewayResult.modelResolutionSource }
-          : {}),
-      },
-    };
-  } catch (error) {
-    throw unwrapModelExecutionError(error);
+        resolvedAlias: activeResolvedAlias,
+        protocol,
+        reasoning: effort,
+        sampling: {},
+        locale: "und",
+        prompt,
+      });
+      break;
+    } catch (error) {
+      const unwrapped = unwrapModelExecutionError(error);
+      const hasMore = idx + 1 < attemptModels.length;
+      if (!hasMore || !canCrossChannelFallback || definiteModelFailureCode(unwrapped) === undefined) {
+        throw unwrapped;
+      }
+    }
   }
+  if (!result || !gatewayResult)
+    throw new Error("model runtime completed without a gateway observation");
+  if (llmCache && llmCacheKey) {
+    try {
+      await llmCache.put(
+        context.workspaceId,
+        llmCacheKey,
+        input.task,
+        gatewayResult.data,
+        llmResultCacheTtlHours(),
+      );
+    } catch (error) {
+      console.warn(
+        `[llm-cache] put failed task=${input.task}: ${String(error).slice(0, 160)}`,
+      );
+    }
+    console.log(`[llm-cache] task=${input.task} hit=false`);
+  }
+  return {
+    ...gatewayResult,
+    runtimeExecution: {
+      contractVersion,
+      protocol,
+      contextDigest: envelope.digest,
+      promptDigest: canonicalDigest(prompt),
+      states: result.states,
+      transportAttempts: result.transportAttempts,
+      repairAttempts: result.repairAttempts,
+      physicalCalls: gatewayResult.callCount ?? 1,
+      gatewayRepairCalls: Math.max(0, (gatewayResult.callCount ?? 1) - 1),
+      requestedAlias,
+      runtimeResolvedAlias: activeResolvedAlias,
+      gatewayResolvedModel: gatewayResult.model,
+      provider: gatewayResult.provider,
+      ...(gatewayResult.reportedModel
+        ? { reportedModel: gatewayResult.reportedModel }
+        : {}),
+      ...(gatewayResult.modelResolutionSource
+        ? { modelResolutionSource: gatewayResult.modelResolutionSource }
+        : {}),
+    },
+  };
 }
