@@ -271,7 +271,8 @@ export function parseEnrichmentCandidateRef(value: unknown): CandidateRef {
   const artifactRef = parseArtifactReference(row.artifactRef);
   if (
     artifactRef.operationId !== row.operationId ||
-    artifactRef.resultSchema !== "contact-email-find-hunter/v1" ||
+    (artifactRef.resultSchema !== "contact-email-find-hunter/v1" &&
+      artifactRef.resultSchema !== "contact-email-find-prospeo/v1") ||
     artifactRef.mediaType !== "application/octet-stream" ||
     BigInt(artifactRef.sizeBytes) > 16384n
   )

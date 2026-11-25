@@ -35,8 +35,10 @@ export const PUBLIC_HTTP_TIMEOUT_MAX_MS = 30_000;
 export const PUBLIC_HTTP_OPERATOR_TIMEOUT_MAX_MS = 1_800_000;
 
 export interface PublicHttpRequestOptions {
-  method?: 'GET' | 'HEAD';
+  method?: 'GET' | 'HEAD' | 'POST';
   headers?: Record<string, string>;
+  /** Bounded request body for POST (controlled API providers only; redirects are never followed for POST). */
+  body?: string | Buffer;
   /** Per-hop deadline; clamped to [100 ms, PUBLIC_HTTP_TIMEOUT_MAX_MS]. */
   timeoutMs?: number;
   /**
@@ -64,8 +66,9 @@ type HappyEyeballsRequestOptions = RequestOptions & {
 
 export type PinnedHttpExecutor = (
   target: PinnedPublicUrl,
-  options: Required<Omit<PublicHttpRequestOptions, 'headers' | 'operatorTimeoutMs'>> & {
+  options: Required<Omit<PublicHttpRequestOptions, 'headers' | 'operatorTimeoutMs' | 'body'>> & {
     headers: Record<string, string>;
+    body?: Buffer;
   },
 ) => Promise<PinnedHttpResult>;
 
@@ -254,21 +257,44 @@ const executePinnedHttp: PinnedHttpExecutor = async (target, options) =>
       request.destroy(deadlineError);
     }, options.timeoutMs);
     request.once('error', finishTransportReject);
-    request.end();
+    if (options.body !== undefined) {
+      request.end(options.body);
+    } else {
+      request.end();
+    }
   });
 
 /**
- * 只访问公网 URL 的 GET/HEAD：初始 URL 与每一跳 redirect 均重新解析校验，实际连接固定到
+ * 只访问公网 URL 的 GET/HEAD/POST：初始 URL 与每一跳 redirect 均重新解析校验，实际连接固定到
  * 当次校验 IP；响应流按字节上限中止，避免 robots/sitemap 响应先撑爆内存再 slice。
+ * POST 永不跟随 redirect。
  */
 export async function requestPublicHttp(
   raw: string,
   options: PublicHttpRequestOptions = {},
   dependencies: PublicHttpDependencies = {},
 ): Promise<PublicHttpResponse> {
+  const method = options.method ?? 'GET';
+  const bodyBuffer =
+    options.body === undefined
+      ? undefined
+      : Buffer.isBuffer(options.body)
+        ? options.body
+        : Buffer.from(options.body, 'utf8');
+  if (bodyBuffer !== undefined && method !== 'POST') {
+    throw new EgressBlockedError('body_requires_post');
+  }
+  const sanitizedHeaders = sanitizeRequestHeaders(options.headers);
+  if (
+    bodyBuffer !== undefined &&
+    !Object.keys(sanitizedHeaders).some((name) => name.toLowerCase() === 'content-length')
+  ) {
+    sanitizedHeaders['content-length'] = String(bodyBuffer.byteLength);
+  }
   const effective = {
-    method: options.method ?? 'GET',
-    headers: sanitizeRequestHeaders(options.headers),
+    method,
+    headers: sanitizedHeaders,
+    ...(bodyBuffer !== undefined ? { body: bodyBuffer } : {}),
     timeoutMs: options.operatorTimeoutMs === undefined
       ? Math.min(Math.max(options.timeoutMs ?? 15_000, 100), PUBLIC_HTTP_TIMEOUT_MAX_MS)
       : Math.min(Math.max(options.operatorTimeoutMs, 100), PUBLIC_HTTP_OPERATOR_TIMEOUT_MAX_MS),
@@ -276,7 +302,7 @@ export async function requestPublicHttp(
       Math.max(options.maxBytes ?? 1_000_000, 1),
       PLATFORM_PUBLIC_HTTP_RESPONSE_MAX_BYTES,
     ),
-    maxRedirects: Math.min(Math.max(options.maxRedirects ?? 3, 0), 5),
+    maxRedirects: method === 'POST' ? 0 : Math.min(Math.max(options.maxRedirects ?? 3, 0), 5),
   };
   const resolver = dependencies.resolver ?? resolvePublicHttpUrl;
   const execute = dependencies.executePinned ?? executePinnedHttp;

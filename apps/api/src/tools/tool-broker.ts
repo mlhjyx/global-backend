@@ -63,6 +63,7 @@ const SUBJECT_BOUND_ARTIFACT_HOLD_SCHEMAS: ReadonlySet<string> = new Set([
   "http-get/v1",
   "sanctions-download/v1",
   "contact-email-find-hunter/v1",
+  "contact-email-find-prospeo/v1",
 ]);
 
 /** Platform-scoped artifacts have no truthful workspace subject; always held. */

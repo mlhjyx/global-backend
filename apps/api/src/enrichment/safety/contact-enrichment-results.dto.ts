@@ -494,7 +494,8 @@ function metadataLedgerReceipt(record: EnrichmentRuntimeExecutionRecord, step: E
     resultSchema: step.budget_result_schema, resultDigest: step.budget_result_digest, resultJson: step.budget_result_json, receiptUsage: step.budget_receipt_usage, receiptCostBasis: step.budget_receipt_cost_basis };
   if (step.phase === "FINDER") {
     const reference = parseArtifactReference(step.budget_result_json);
-    if (reference.operationId !== step.budget_original_id || reference.sha256 !== step.budget_result_digest || reference.resultSchema !== "contact-email-find-hunter/v1") return invalidReadInput();
+    const expectedFinderSchema = "contact-email-find-" + step.provider + "/v1";
+    if (reference.operationId !== step.budget_original_id || reference.sha256 !== step.budget_result_digest || reference.resultSchema !== expectedFinderSchema) return invalidReadInput();
     const receipt = durableReceiptFromLedgerRow({ ...common, resultSchemaVersion: "generic-operation-artifact-ref/v1" }); if (!receipt) return invalidReadInput(); return receipt;
   }
   const projection = parseGenericOperationProjection(step.budget_result_json);

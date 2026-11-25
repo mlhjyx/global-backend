@@ -138,6 +138,91 @@ describe('original verdict and ACK control regressions in the domain transaction
   });
 });
 
+describe('Batch 1.6: Prospeo only_verified_email attestation & unverified point upgrade', () => {
+  it('commits Prospeo VERIFIED (confidence=95) as VALID even when smtp_self returns unreachable/UNKNOWN', async () => {
+    const x = domainWorld();
+    const prospeoStep: BoundEnrichmentStep = {
+      ...x.materialized[0]!.step,
+      provider: 'prospeo',
+      toolId: 'contact_email.find.prospeo',
+      quoteMicrousd: '19800',
+    };
+    const prospeoRef: SettledEnrichmentStepReference = {
+      ...x.materialized[0]!.reference,
+      producerId: 'contact_email.find.prospeo',
+      resultSchema: 'contact-email-find-prospeo/v1',
+      durableReceipt: {
+        ...x.materialized[0]!.reference.durableReceipt,
+        resultSchema: 'contact-email-find-prospeo/v1',
+        usage: {
+          ...x.materialized[0]!.reference.durableReceipt.usage,
+          chargedMicrousd: '19800',
+          upperBoundMicrousd: '19800',
+        },
+      },
+    };
+    const prospeoMat: EnrichmentDomainMaterializedResult = {
+      phase: 'FINDER',
+      step: prospeoStep,
+      reference: prospeoRef,
+      result: {
+        status: 'hit',
+        email: 'person@company.example.invalid',
+        providerConfidence: 95,
+        acceptAll: null,
+        pattern: null,
+        reason: 'candidate_found',
+      },
+    };
+    x.materialized.splice(0, x.materialized.length, prospeoMat);
+    x.stepIds.splice(0, x.stepIds.length, prospeoStep.stepId);
+    Object.assign(x.state, { originalReferences: [{ step: prospeoStep, reference: prospeoRef }] });
+    const result = await x.committer.commitContact(address, x.stepIds, 'synthetic-actor');
+    expect(result).toMatchObject({ status: 'APPLIED', reasonCode: 'STORED', state: 'VALID', newCandidatePoints: 1 });
+    expect(x.tx.contactPointVerificationEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          providerKey: 'prospeo',
+          verdict: 'valid',
+          detail: 'prospeo_only_verified_email',
+        }),
+      }),
+    );
+    expect(x.tx.contactEnrichmentAttempt.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ providerKey: 'prospeo', emailState: 'VALID' }),
+      }),
+    );
+  });
+
+  it('allows upgrading an existing unverified (UNKNOWN) email point without INPUT_CONFLICT', async () => {
+    const x = domainWorld();
+    const unverifiedPoint = {
+      id: id(31),
+      type: 'email',
+      value: 'guess@company.example.invalid',
+      status: 'RISKY',
+      verificationState: 'UNKNOWN',
+      validSince: null,
+      verifiedAt: null,
+      nextReverifyAt: null,
+      lastVerificationEventId: null,
+      confidence: 20,
+    };
+    const inputVersion = enrichmentInputVersion(input);
+    Object.assign(x.state, {
+      currentPoints: [unverifiedPoint],
+      target: {
+        ...x.state.target,
+        beforeDigest: contactTargetBeforeDigest({ inputVersion, points: [unverifiedPoint] }),
+        pointRefs: [unverifiedPoint.id],
+      },
+    });
+    const result = await x.committer.commitContact(address, x.stepIds, 'synthetic-actor');
+    expect(result).toMatchObject({ status: 'APPLIED', reasonCode: 'STORED', state: 'VALID', newCandidatePoints: 1 });
+  });
+});
+
 describe('V9 C4: pending apply decisions are retried, not terminal-replayed', () => {
   it('retries a cached SAVE_PENDING decision when original results are available', async () => {
     const x = domainWorld();

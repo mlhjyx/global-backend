@@ -33,6 +33,8 @@ export interface ProspeoConfig {
   costMicrousd: number;
   /** 可选：请求最小间隔毫秒（QPS 限速，生产 env PROSPEO_MIN_INTERVAL_MS=600；缺省 0 不等待）。 */
   minIntervalMs?: number;
+  /** 可选：429 重试上限（安全单线模式传 0 以保持 1 次物理出网纪律；缺省 2）。 */
+  max429Retries?: number;
 }
 
 export function resolveProspeoConfig(env: NodeJS.ProcessEnv = process.env): ProspeoConfig {
@@ -192,7 +194,8 @@ export class ProspeoProvider implements EmailEnrichmentAdapter {
       only_verified_email: true,
     });
 
-    for (let attempt = 0; attempt <= PROSPEO_MAX_429_RETRIES; attempt += 1) {
+    const maxRetries = this.config.max429Retries ?? PROSPEO_MAX_429_RETRIES;
+    for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
       await this.waitForPacingSlot();
       try {
         response = await this.fetchImpl(new URL(`${this.config.baseUrl}/enrich-person`), {
@@ -216,7 +219,7 @@ export class ProspeoProvider implements EmailEnrichmentAdapter {
           detail: timedOut ? 'prospeo_timeout' : 'prospeo_network_error',
         };
       }
-      if (response.status === 429 && attempt < PROSPEO_MAX_429_RETRIES) {
+      if (response.status === 429 && attempt < maxRetries) {
         const delayMs = parseRetryAfterMs(response.headers?.get?.('retry-after') ?? null, attempt, retryBaseMs);
         await this.sleepImpl(delayMs);
         continue;

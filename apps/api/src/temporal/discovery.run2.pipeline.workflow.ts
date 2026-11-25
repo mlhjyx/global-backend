@@ -8,6 +8,8 @@ import { classifyPipelineFailure } from './pipeline-failure-taxonomy';
 
 /** P1-10b：contacts 阶段后的付费富集步骤（版本化闸：旧历史 replay 不新增命令）。 */
 export const COMPANY_CONTACT_ENRICHMENT_PATCH = 'company-contact-enrichment-v1';
+/** Batch 1.6：画像软失败/阻断后提前收工、weak 线索跳过重度联系人抓取（版本化闸保证旧历史回放安全）。 */
+export const COMPANY_PIPELINE_QUALITY_GATE_PATCH = 'company-pipeline-quality-gate-v1';
 
 /**
  * M0④ 公司级深挖流水线（每家一个子工作流）：
@@ -72,15 +74,30 @@ export async function companyPipelineWorkflow(
 
   try {
     await mark('profiling');
-    await signalActs.profileCompanyOnce(input);
+    const profileRes = await signalActs.profileCompanyOnce(input);
+    const qualityGate = patched(COMPANY_PIPELINE_QUALITY_GATE_PATCH);
+    if (
+      qualityGate &&
+      profileRes &&
+      (profileRes.reason === 'profile_failed' ||
+        profileRes.reason === 'persist_failed' ||
+        profileRes.reason === 'suppressed')
+    ) {
+      await mark('done');
+      return { stage: 'done' };
+    }
     await mark('fitting');
     const fit = await modelActs.fitCompanyOnce(input);
-    if (fit.verdict === 'mismatch') {
-      await mark('done', { verdictDeep: 'mismatch' });
+    if (fit.verdict === 'mismatch' || (qualityGate && fit.verdict === null)) {
+      await mark('done', fit.verdict ? { verdictDeep: fit.verdict } : {});
       return { stage: 'done' };
     }
     await mark('signals');
     await signalActs.signalsCompanyOnce(input);
+    if (qualityGate && fit.verdict !== 'match') {
+      await mark('done', fit.verdict ? { verdictDeep: fit.verdict } : {});
+      return { stage: 'done' };
+    }
     await mark('contacts');
     await signalActs.contactsCompanyOnce(input);
     // P1-10b：contacts 之后对 match 公司补邮箱（付费 finder 瀑布；run 内限额由父工作流序号控制）。

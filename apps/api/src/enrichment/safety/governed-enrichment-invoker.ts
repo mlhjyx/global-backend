@@ -402,7 +402,7 @@ export class GovernedEnrichmentInvoker {
       const receipt = this.parseReceipt(row.durableReceipt);
       const schema =
         step.phase === "FINDER"
-          ? "contact-email-find-hunter/v1"
+          ? "contact-email-find-" + step.provider + "/v1"
           : step.phase === "SMTP"
             ? "smtp-probe-verdict/v1"
             : "contact-email-verify-" + step.provider + "/v1";

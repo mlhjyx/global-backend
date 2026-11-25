@@ -33,7 +33,7 @@ export const EXPECTED_TOOL_IDS = Object.freeze([
   'mapyourshow.fetch', 'samgov.search', 'opencorporates.search', 'sanctions.download',
   'deepseek.search', 'deepseek.fetch',
   'serper.search', 'brave.search', 'exa.search', 'google_places.search',
-  'contact_email.find.hunter', 'contact_email.verify.millionverifier',
+  'contact_email.find.hunter', 'contact_email.find.prospeo', 'contact_email.verify.millionverifier',
   'contact_email.verify.emailable', 'contact_email.verify.zerobounce',
 ]);
 
@@ -158,6 +158,7 @@ const ARTIFACT_CONTRACTS = Object.freeze({
   'http-get/v1': Object.freeze({ maxBytes: 3000000, mediaTypes: Object.freeze(['text/plain']), privacyClass: 'PERSONAL_DATA', ttlSeconds: 86400 }),
   'sanctions-download/v1': Object.freeze({ maxBytes: 33554432, mediaTypes: Object.freeze(['application/xml', 'text/xml']), privacyClass: 'PERSONAL_DATA', ttlSeconds: 86400 }),
   'contact-email-find-hunter/v1': Object.freeze({ maxBytes: 16384, mediaTypes: Object.freeze(['application/octet-stream']), privacyClass: 'PERSONAL_DATA', ttlSeconds: 86400 }),
+  'contact-email-find-prospeo/v1': Object.freeze({ maxBytes: 16384, mediaTypes: Object.freeze(['application/octet-stream']), privacyClass: 'PERSONAL_DATA', ttlSeconds: 86400 }),
 });
 
 function issue(code, path, message, producerId) {
@@ -531,8 +532,8 @@ function validateModelTasks(manifest, path, issues) {
 function validateArtifacts(manifest, path, issues) {
   if (!Array.isArray(manifest.artifactSchemas)) return;
   const schemas = manifest.artifactSchemas.map((entry) => entry?.schema).filter(Boolean);
-  if (!sameSet(schemas, Object.keys(ARTIFACT_CONTRACTS)) || new Set(schemas).size !== 5) {
-    issues.push(issue('EXECUTION_AUTHORITY_ARTIFACT_INVENTORY_MISMATCH', path, 'manifest must declare exactly four artifact schemas'));
+  if (!sameSet(schemas, Object.keys(ARTIFACT_CONTRACTS)) || new Set(schemas).size !== Object.keys(ARTIFACT_CONTRACTS).length) {
+    issues.push(issue('EXECUTION_AUTHORITY_ARTIFACT_INVENTORY_MISMATCH', path, `manifest must declare exactly ${Object.keys(ARTIFACT_CONTRACTS).length} artifact schemas`));
   }
   for (const entry of manifest.artifactSchemas) {
     const expected = ARTIFACT_CONTRACTS[entry?.schema];

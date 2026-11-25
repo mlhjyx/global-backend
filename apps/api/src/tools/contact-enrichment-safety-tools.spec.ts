@@ -30,6 +30,7 @@ const W = "00000000-0000-4000-8000-000000000001",
   ART = "00000000-0000-4000-8000-000000000009";
 const hosts = {
   hunter: "api.hunter.io",
+  prospeo: "api.prospeo.io",
   millionverifier: "api.millionverifier.com",
   emailable: "api.emailable.com",
   zerobounce: "api.zerobounce.net",
@@ -37,16 +38,22 @@ const hosts = {
 const replies: Record<ControlledEnrichmentProvider, unknown> = {
   hunter: {
     data: {
-      emails: [
-        {
-          first_name: "Synthetic",
-          last_name: "Person",
-          value: "person@company.example.invalid",
-          confidence: 95,
-        },
-      ],
+      first_name: "Synthetic",
+      last_name: "Person",
+      email: "person@company.example.invalid",
+      score: 95,
       accept_all: false,
-      pattern: "{first}.{last}",
+      verification: { status: "valid" },
+    },
+  },
+  prospeo: {
+    error: false,
+    person: {
+      email: {
+        email: "person@company.example.invalid",
+        status: "VERIFIED",
+        revealed: true,
+      },
     },
   },
   millionverifier: {
@@ -93,20 +100,20 @@ function world(
   ) as Record<ControlledEnrichmentProvider, ControlledEnrichmentProviderState>;
   if (options.timeoutMs !== undefined)
     Object.assign(configs[provider], { timeoutMs: options.timeoutMs });
+  const isFinder = provider === "hunter" || provider === "prospeo";
   const step: BoundEnrichmentStep = {
     slotKey: "s1",
     contactId: CONTACT,
     contactOrdinal: 0,
-    phase: provider === "hunter" ? "FINDER" : "VERIFY",
+    phase: isFinder ? "FINDER" : "VERIFY",
     provider,
-    toolId:
-      provider === "hunter"
-        ? "contact_email.find.hunter"
-        : "contact_email.verify." + provider,
+    toolId: isFinder
+      ? "contact_email.find." + provider
+      : "contact_email.verify." + provider,
     toolVersion: "1.0.0",
     quoteMicrousd: String(configs[provider].costMicrousd),
     pricingVersion: "p1",
-    dependsOnSlotKey: provider === "hunter" ? null : "finder-original",
+    dependsOnSlotKey: isFinder ? null : "finder-original",
     stepId: STEP,
     executionId: EXEC,
     workspaceId: W,
@@ -117,59 +124,55 @@ function world(
     accountKey: "actual-original-account-key",
     inputFingerprint: "e".repeat(64),
     operationKey: "original-budget-operation-key",
-    candidateRef:
-      provider === "hunter"
-        ? null
-        : {
+    candidateRef: isFinder
+      ? null
+      : {
+          operationId: OP,
+          resultDigest: "b".repeat(64),
+          artifactRef: {
+            schemaVersion: "generic-operation-artifact-ref/v1",
+            artifactId: ART,
             operationId: OP,
-            resultDigest: "b".repeat(64),
-            artifactRef: {
-              schemaVersion: "generic-operation-artifact-ref/v1",
-              artifactId: ART,
-              operationId: OP,
-              resultSchema: "contact-email-find-hunter/v1",
-              sha256: "b".repeat(64),
-              sizeBytes: "128",
-              mediaType: "application/octet-stream",
-              expiresAt: "2099-01-01T00:00:00.000Z",
-            },
+            resultSchema: "contact-email-find-hunter/v1",
+            sha256: "b".repeat(64),
+            sizeBytes: "128",
+            mediaType: "application/octet-stream",
+            expiresAt: "2099-01-01T00:00:00.000Z",
           },
+        },
     revision: 2,
     budgetOperationId: null,
   };
   const wire: ControlledEnrichmentWireInput = {
     step,
-    finder:
-      provider === "hunter"
-        ? { fullName: "Synthetic Person", domain: "company.example.invalid" }
-        : null,
-    verification:
-      provider === "hunter"
-        ? null
-        : {
-            email: "person@company.example.invalid",
-            domain: "company.example.invalid",
-            providerTimeoutSeconds: provider === "millionverifier" ? 8 : null,
-          },
+    finder: isFinder
+      ? { fullName: "Synthetic Person", domain: "company.example.invalid" }
+      : null,
+    verification: isFinder
+      ? null
+      : {
+          email: "person@company.example.invalid",
+          domain: "company.example.invalid",
+          providerTimeoutSeconds: provider === "millionverifier" ? 8 : null,
+        },
   };
   Object.assign(step, {
-    inputFingerprint:
-      provider === "hunter"
-        ? finderPhysicalInputFingerprint({
-            workspaceId: W,
-            contactId: CONTACT,
-            inputVersion: enrichmentInputVersion(wire.finder!),
-          })
-        : verificationPhysicalInputFingerprint({
-            workspaceId: W,
-            contactId: CONTACT,
-            provider: provider as Exclude<
-              ControlledEnrichmentProvider,
-              "hunter"
-            >,
-            email: wire.verification!.email,
-            providerTimeoutSeconds: wire.verification!.providerTimeoutSeconds,
-          }),
+    inputFingerprint: isFinder
+      ? finderPhysicalInputFingerprint({
+          workspaceId: W,
+          contactId: CONTACT,
+          inputVersion: enrichmentInputVersion(wire.finder!),
+        })
+      : verificationPhysicalInputFingerprint({
+          workspaceId: W,
+          contactId: CONTACT,
+          provider: provider as Exclude<
+            ControlledEnrichmentProvider,
+            "hunter" | "prospeo"
+          >,
+          email: wire.verification!.email,
+          providerTimeoutSeconds: wire.verification!.providerTimeoutSeconds,
+        }),
   });
   const resolver = vi.fn(async (raw: string) => {
     events.push("FAKE_RESOLVE");
@@ -242,7 +245,7 @@ function world(
   };
 }
 describe("four original-parser controlled HTTP Tools; fake resolver/transport only", () => {
-  it("declares exactly the four fixed producers with honest durable strategies and stable step keys", () => {
+  it("declares exactly the five fixed producers with honest durable strategies and stable step keys", () => {
     const x = world();
     const r = new ToolRegistry();
     for (const tool of x.tools) r.register(tool);
@@ -253,6 +256,7 @@ describe("four original-parser controlled HTTP Tools; fake resolver/transport on
         .sort(),
     ).toEqual([
       "contact_email.find.hunter",
+      "contact_email.find.prospeo",
       "contact_email.verify.emailable",
       "contact_email.verify.millionverifier",
       "contact_email.verify.zerobounce",
@@ -279,7 +283,7 @@ describe("four original-parser controlled HTTP Tools; fake resolver/transport on
         expect(x.beforePhysicalWire).toHaveBeenCalledTimes(1);
         const options = x.executePinned.mock.calls[0]![1];
         expect(options).toMatchObject({
-          method: "GET",
+          method: provider === "prospeo" ? "POST" : "GET",
           maxRedirects: 0,
           maxBytes: 1000000,
           timeoutMs: 8000,
@@ -288,7 +292,7 @@ describe("four original-parser controlled HTTP Tools; fake resolver/transport on
           x.events.indexOf("FAKE_PINNED_EXECUTE"),
         );
         expect(JSON.stringify(result.data)).not.toContain("raw");
-        if (provider !== "hunter") {
+        if (provider !== "hunter" && provider !== "prospeo") {
           expect(result.data).toMatchObject({
             providerKey: provider,
             state: "VALID",
@@ -460,7 +464,7 @@ describe("four original-parser controlled HTTP Tools; fake resolver/transport on
   });
 });
 
-it("composes exactly the four controlled definitions through the same actual ToolRegistry", () => {
+it("composes exactly the five controlled definitions through the same actual ToolRegistry", () => {
   const x = world();
   const registry = new ToolRegistry();
   expect(
@@ -474,8 +478,8 @@ it("composes exactly the four controlled definitions through the same actual Too
       },
     }),
   ).toBe(registry);
-  expect(registry.all()).toHaveLength(4);
-  expect(new Set(registry.all().map((t) => t.id)).size).toBe(4);
+  expect(registry.all()).toHaveLength(5);
+  expect(new Set(registry.all().map((t) => t.id)).size).toBe(5);
   expect(x.executePinned).not.toHaveBeenCalled();
 });
 

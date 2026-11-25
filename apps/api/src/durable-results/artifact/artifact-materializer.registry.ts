@@ -19,6 +19,7 @@ export const REQUIRED_ARTIFACT_RESULT_SCHEMAS = Object.freeze([
   "crawl4ai-fetch/v1",
   "crawl4ai-render/v1",
   "contact-email-find-hunter/v1",
+  "contact-email-find-prospeo/v1",
 ] as const);
 
 export type ArtifactResultSchema =
@@ -30,6 +31,7 @@ export const ARTIFACT_RESULT_PRODUCERS = Object.freeze({
   "http-get/v1": "http.get",
   "sanctions-download/v1": "sanctions.download",
   "contact-email-find-hunter/v1": "contact_email.find.hunter",
+  "contact-email-find-prospeo/v1": "contact_email.find.prospeo",
 } as const satisfies Record<ArtifactResultSchema, string>);
 
 export function artifactProducerIdForResultSchema(
@@ -138,7 +140,8 @@ export class ArtifactMaterializerRegistry {
     if (!materializer) return invalid();
     const parsedFacts: ArtifactExpectedFacts | undefined =
       resultSchema === "sanctions-download/v1" ||
-      resultSchema === "contact-email-find-hunter/v1"
+      resultSchema === "contact-email-find-hunter/v1" ||
+      resultSchema === "contact-email-find-prospeo/v1"
         ? expectedFacts === undefined
           ? undefined
           : invalid()

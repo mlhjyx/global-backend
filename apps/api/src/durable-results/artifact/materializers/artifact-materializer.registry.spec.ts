@@ -1,4 +1,7 @@
-import { contactEmailFindMaterializer } from "./contact-email-find.materializer";
+import {
+  contactEmailFindMaterializer,
+  contactEmailFindProspeoMaterializer,
+} from "./contact-email-find.materializer";
 import { describe, expect, it } from "vitest";
 import {
   ArtifactMaterializerRegistry,
@@ -18,6 +21,7 @@ import {
 
 const definitions = [
   contactEmailFindMaterializer,
+  contactEmailFindProspeoMaterializer,
   sanctionsDownloadMaterializer,
   httpGetMaterializer,
   ...crawl4aiMaterializers,

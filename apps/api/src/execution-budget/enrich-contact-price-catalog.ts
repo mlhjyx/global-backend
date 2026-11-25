@@ -1,4 +1,5 @@
 import { resolveHunterConfig } from '../enrichment/finders/hunter.provider';
+import { resolveProspeoConfig } from '../enrichment/finders/prospeo.provider';
 import { resolveEmailableConfig } from '../enrichment/verification/emailable.provider';
 import { resolveMillionVerifierConfig } from '../enrichment/verification/millionverifier.provider';
 import { resolveZeroBounceConfig } from '../enrichment/verification/zerobounce.provider';
@@ -22,6 +23,10 @@ const PROVIDERS = Object.freeze([
     toolId: 'contact_email.find.hunter',
   }),
   Object.freeze({
+    provider: 'prospeo' as const,
+    toolId: 'contact_email.find.prospeo',
+  }),
+  Object.freeze({
     provider: 'millionverifier' as const,
     toolId: 'contact_email.verify.millionverifier',
   }),
@@ -40,6 +45,7 @@ export type EnrichContactPriceProvider =
 
 export interface EnrichContactPriceConfigs {
   readonly hunter: number;
+  readonly prospeo: number;
   readonly millionverifier: number;
   readonly emailable: number;
   readonly zerobounce: number;
@@ -127,6 +133,7 @@ export function enrichContactPriceCatalog(
 ): readonly EnrichContactPriceEntry[] {
   return projectEnrichContactPriceCatalog({
     hunter: resolveHunterConfig(env).costMicrousd,
+    prospeo: resolveProspeoConfig(env).costMicrousd,
     millionverifier: resolveMillionVerifierConfig(env).costMicrousd,
     emailable: resolveEmailableConfig(env).costMicrousd,
     zerobounce: resolveZeroBounceConfig(env).costMicrousd,

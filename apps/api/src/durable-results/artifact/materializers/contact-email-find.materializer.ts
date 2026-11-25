@@ -11,6 +11,22 @@ import {
 } from "../artifact.types";
 export const CONTACT_EMAIL_FIND_HUNTER_SCHEMA =
   "contact-email-find-hunter/v1" as const;
+export const CONTACT_EMAIL_FIND_PROSPEO_SCHEMA =
+  "contact-email-find-prospeo/v1" as const;
+export const CONTACT_EMAIL_FIND_SCHEMAS = Object.freeze([
+  CONTACT_EMAIL_FIND_HUNTER_SCHEMA,
+  CONTACT_EMAIL_FIND_PROSPEO_SCHEMA,
+] as const);
+export type ContactEmailFindSchema =
+  (typeof CONTACT_EMAIL_FIND_SCHEMAS)[number];
+export function isContactEmailFindSchema(
+  value: unknown,
+): value is ContactEmailFindSchema {
+  return (
+    value === CONTACT_EMAIL_FIND_HUNTER_SCHEMA ||
+    value === CONTACT_EMAIL_FIND_PROSPEO_SCHEMA
+  );
+}
 export interface ContactEmailFindPayload {
   readonly status: "hit" | "miss";
   readonly email: string | null;
@@ -147,6 +163,7 @@ export function decodeContactEmailFindBody(
   }
 }
 async function originalBoundedReader(
+  resultSchema: ContactEmailFindSchema,
   input: AsyncIterable<Uint8Array>,
   manifest: GenericOperationArtifactManifest,
 ): Promise<string> {
@@ -155,18 +172,26 @@ async function originalBoundedReader(
   const { readBoundedArtifactUtf8 } =
     await import("../artifact-materializer.registry");
   return readBoundedArtifactUtf8(input, manifest, {
-    resultSchema: CONTACT_EMAIL_FIND_HUNTER_SCHEMA,
+    resultSchema,
     mediaTypes: new Set(["application/octet-stream"]),
     maxBytes: MAX_BYTES,
   });
 }
 export function createContactEmailFindMaterializer(
-  options: { readBounded?: BoundedFinderArtifactReader; now?: () => Date } = {},
+  options: {
+    resultSchema?: ContactEmailFindSchema;
+    readBounded?: BoundedFinderArtifactReader;
+    now?: () => Date;
+  } = {},
 ): ArtifactMaterializer<ContactEmailFindPayload> {
-  const read = options.readBounded ?? originalBoundedReader;
+  const resultSchema = options.resultSchema ?? CONTACT_EMAIL_FIND_HUNTER_SCHEMA;
+  const read =
+    options.readBounded ??
+    ((input: AsyncIterable<Uint8Array>, manifest: GenericOperationArtifactManifest) =>
+      originalBoundedReader(resultSchema, input, manifest));
   const now = options.now ?? (() => new Date());
   return Object.freeze({
-    resultSchema: CONTACT_EMAIL_FIND_HUNTER_SCHEMA,
+    resultSchema,
     async materialize(
       input: AsyncIterable<Uint8Array>,
       manifest: GenericOperationArtifactManifest,
@@ -175,7 +200,7 @@ export function createContactEmailFindMaterializer(
       const current = now();
       if (
         expectedFacts !== undefined ||
-        manifest.resultSchema !== CONTACT_EMAIL_FIND_HUNTER_SCHEMA ||
+        manifest.resultSchema !== resultSchema ||
         manifest.mediaType !== "application/octet-stream" ||
         manifest.privacyClass !== "PERSONAL_DATA" ||
         manifest.scopeKind !== "workspace" ||
@@ -193,4 +218,10 @@ export function createContactEmailFindMaterializer(
   });
 }
 export const contactEmailFindMaterializer =
-  createContactEmailFindMaterializer();
+  createContactEmailFindMaterializer({
+    resultSchema: CONTACT_EMAIL_FIND_HUNTER_SCHEMA,
+  });
+export const contactEmailFindProspeoMaterializer =
+  createContactEmailFindMaterializer({
+    resultSchema: CONTACT_EMAIL_FIND_PROSPEO_SCHEMA,
+  });

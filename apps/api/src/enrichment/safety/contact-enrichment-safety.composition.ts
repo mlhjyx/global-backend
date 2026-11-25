@@ -4,12 +4,16 @@ import { genericArtifactStorageConfig } from "../../durable-results/artifact/gen
 import { GenericOperationArtifactService } from "../../durable-results/artifact/generic-operation-artifact.service";
 import { GenericOperationArtifactRepository } from "../../durable-results/artifact/generic-operation-artifact.repository";
 import { sharedGenericOperationArtifactStore } from "../../durable-results/artifact/generic-operation-artifact.runtime";
-import { contactEmailFindMaterializer } from "../../durable-results/artifact/materializers/contact-email-find.materializer";
+import {
+  contactEmailFindMaterializer,
+  contactEmailFindProspeoMaterializer,
+} from "../../durable-results/artifact/materializers/contact-email-find.materializer";
 import type { BudgetStore } from "../../tools/budget-store";
 import type { ContactEnrichmentSafetyToolDeps, ControlledEnrichmentWireInput } from "../../tools/contact-enrichment-safety-tools";
 import { buildToolBroker } from "../../tools/tool-broker.factory";
-import { CONTROLLED_ENRICHMENT_API_HOSTS, type ControlledEnrichmentProvider, type ControlledEnrichmentProviderState } from "../../tools/contact-enrichment-safety-tools";
+import { CONTROLLED_ENRICHMENT_API_HOSTS, controlledEnrichmentToolId, type ControlledEnrichmentProvider, type ControlledEnrichmentProviderState } from "../../tools/contact-enrichment-safety-tools";
 import { resolveHunterConfig } from "../finders/hunter.provider";
+import { resolveProspeoConfig } from "../finders/prospeo.provider";
 import { resolveMillionVerifierConfig } from "../verification/millionverifier.provider";
 import { resolveEmailableConfig } from "../verification/emailable.provider";
 import { resolveZeroBounceConfig } from "../verification/zerobounce.provider";
@@ -60,7 +64,7 @@ export interface ContactEnrichmentPreparationDeps {
 export async function loadControlledEnrichmentProviderState(
   client: PrismaClient, env: NodeJS.ProcessEnv, provider: ControlledEnrichmentProvider,
 ): Promise<ControlledEnrichmentProviderState> {
-  const config = provider === "hunter" ? resolveHunterConfig(env) : provider === "millionverifier" ? resolveMillionVerifierConfig(env) : provider === "emailable" ? resolveEmailableConfig(env) : resolveZeroBounceConfig(env);
+  const config = provider === "hunter" ? resolveHunterConfig(env) : provider === "prospeo" ? resolveProspeoConfig(env) : provider === "millionverifier" ? resolveMillionVerifierConfig(env) : provider === "emailable" ? resolveEmailableConfig(env) : resolveZeroBounceConfig(env);
   // The original gate reads only these two actual native delegates. No proposed model or alternate authority is fabricated.
   const gate = await checkProviderGates(client, { key: provider, domain: CONTROLLED_ENRICHMENT_API_HOSTS[provider] });
   const policy = await client.sourcePolicy.findUnique({ where: { domain: CONTROLLED_ENRICHMENT_API_HOSTS[provider] }, select: { retentionDays: true, updatedAt: true } });
@@ -90,21 +94,23 @@ export function createContactEnrichmentSafetyPreparer(deps: ContactEnrichmentPre
     const finders = [];
     for (const finder of configured) if ((await checkProviderGates(deps.prisma, finder)).ok) finders.push(finder);
     if (finders.length === 0) return no("NO_ENABLED_FINDER", tier);
-    if (finders.some((finder) => finder.key !== "hunter")) return no("GOVERNANCE_PENDING", tier);
+    if (finders.some((finder) => finder.key !== "hunter" && finder.key !== "prospeo")) return no("GOVERNANCE_PENDING", tier);
     const verifiers = await gateConfiguredVerificationProviders(deps.prisma, env, deps.broker);
     if (verifiers.some((provider) => !["millionverifier", "emailable", "zerobounce", "smtp_self"].includes(provider.key))) return no("GOVERNANCE_PENDING", tier);
     try {
       assertPiiKeyConfigured();
       if (deps.artifactsConfigured ? !deps.artifactsConfigured() : !genericArtifactStorageConfig(env)) return no("ARTIFACT_UNAVAILABLE", tier);
     } catch { return no("ARTIFACT_UNAVAILABLE", tier); }
-    const providerNames = ["hunter", ...verifiers.filter((provider) => provider.key !== "smtp_self").map((provider) => provider.key)] as ControlledEnrichmentProvider[];
+    const governedFinders = finders.map((finder) => finder.key as "hunter" | "prospeo");
+    const providerNames = [...governedFinders, ...verifiers.filter((provider) => provider.key !== "smtp_self").map((provider) => provider.key)] as ControlledEnrichmentProvider[];
     const states = new Map<ControlledEnrichmentProvider, ControlledEnrichmentProviderState>();
     for (const provider of providerNames) { const state = await loadControlledEnrichmentProviderState(deps.prisma, env, provider); if (!preparerStateUsable(state)) return no("POLICY_UNAVAILABLE", tier); states.set(provider, state); }
-    const admittedAtMs = (deps.clock ?? (() => new Date()))().getTime();
+    const admittedNow = (deps.clock ?? (() => new Date()))();
+    const admittedAtMs = admittedNow.getTime();
     if (!Number.isSafeInteger(admittedAtMs) || admittedAtMs < 0) return no("POLICY_UNAVAILABLE", tier);
     try {
       return await deps.prisma.withWorkspace(input.workspaceId, async (tx) => {
-        const selected = await loadContactEnrichmentTargets(tx, { companyId: input.companyId, ...(input.options.contactIds === undefined ? {} : { contactIds: input.options.contactIds }) }, 10);
+        const selected = await loadContactEnrichmentTargets(tx, { companyId: input.companyId, includeUnverifiedEmails: true, ...(input.options.contactIds === undefined ? {} : { contactIds: input.options.contactIds }) }, 10);
         if (!selected.company?.domain) return no("NO_DOMAIN", tier);
         if (selected.contacts.length === 0) return no("NO_CONTACTS", tier);
         const targets: ContactTargetSnapshot[] = [], slots: QuotedEnrichmentSlot[] = [];
@@ -113,10 +119,19 @@ export function createContactEnrichmentSafetyPreparer(deps: ContactEnrichmentPre
           if (!authorized) return no("SUPPRESSED", tier);
           const points = await tx.contactPoint.findMany({ where: { workspaceId: input.workspaceId, contactId: contact.id }, select: ENRICHMENT_POINT_BEFORE_SELECT, orderBy: { id: "asc" }, take: 101 });
           const current = points.map(pointBeforeSnapshot);
-          const inputVersion = enrichmentInputVersion({ fullName: contact.fullName, domain: selected.company.domain, companyName: selected.company.name });
+          const contactInput = { fullName: contact.fullName, domain: selected.company.domain, companyName: selected.company.name };
+          const inputVersion = enrichmentInputVersion(contactInput);
           targets.push({ contactId: contact.id, contactOrdinal: ordinal, inputVersion, beforeDigest: contactTargetBeforeDigest({ inputVersion, points: current }), pointRefs: current.map((point) => point.id) });
-          const finderKey = `contact-${ordinal}-finder`; const finder = states.get("hunter")!;
-          slots.push({ slotKey: finderKey, contactId: contact.id, contactOrdinal: ordinal, phase: "FINDER", provider: "hunter", toolId: "contact_email.find.hunter", toolVersion: "1.0.0", quoteMicrousd: BigInt(finder.costMicrousd).toString(), pricingVersion: finder.pricingVersion, dependsOnSlotKey: null });
+          let chosenFinder: "hunter" | "prospeo" = governedFinders[0]!;
+          if (governedFinders.length > 1 && tx.contactEnrichmentAttempt) {
+            for (const candidateFinder of governedFinders) {
+              const reqHash = enrichmentRequestHash(contact.id, candidateFinder, contactInput);
+              const prior = await findReusableAttempt(tx, { workspaceId: input.workspaceId, contactId: contact.id, providerKey: candidateFinder, requestHash: reqHash, now: admittedNow }).catch(() => null);
+              if (!prior || prior.outcome !== "miss") { chosenFinder = candidateFinder; break; }
+            }
+          }
+          const finderKey = `contact-${ordinal}-finder`; const finder = states.get(chosenFinder)!;
+          slots.push({ slotKey: finderKey, contactId: contact.id, contactOrdinal: ordinal, phase: "FINDER", provider: chosenFinder, toolId: controlledEnrichmentToolId(chosenFinder), toolVersion: "1.0.0", quoteMicrousd: BigInt(finder.costMicrousd).toString(), pricingVersion: finder.pricingVersion, dependsOnSlotKey: null });
           let predecessor = finderKey;
           for (const [position, verifier] of verifiers.entries()) {
             const smtp = verifier.key === "smtp_self", state = smtp ? null : states.get(verifier.key as ControlledEnrichmentProvider)!;
@@ -145,6 +160,7 @@ export interface ContactEnrichmentSafetyRuntimeDeps {
   readonly store: import('./enrichment-domain-commit').EnrichmentDomainCommitStore;
   readonly artifacts?: import('./enrichment-result-reader').EnrichmentResultReaderDeps['artifacts'];
   readonly finderMaterializer?: import('./enrichment-result-reader').EnrichmentResultReaderDeps['finderMaterializer'];
+  readonly finderMaterializers?: import('./enrichment-result-reader').EnrichmentResultReaderDeps['finderMaterializers'];
   readonly loadTrustedInput?: (stepId: string, context: { workspaceId: string }) => Promise<import('../../tools/contact-enrichment-safety-tools').ControlledEnrichmentWireInput>;
   readonly materializeForDomain?: import('./enrichment-result-reader').EnrichmentResultReader['materializeForDomain'];
   readonly acknowledge?: import('./enrichment-domain-commit').EnrichmentDomainCommitDeps['acknowledge'];
@@ -269,6 +285,7 @@ export function createContactEnrichmentSafetyRuntime(deps: ContactEnrichmentSafe
     projections,
     ...(deps.artifacts ? { artifacts: deps.artifacts } : {}),
     ...(deps.finderMaterializer ? { finderMaterializer: deps.finderMaterializer } : {}),
+    ...(deps.finderMaterializers ? { finderMaterializers: deps.finderMaterializers } : {}),
     ...(deps.now ? { now: deps.now } : {}),
   });
   const repository = new EnrichmentExecutionRepository(prisma, deps.grantConsumer, deps.guards);
@@ -352,17 +369,18 @@ export function createContactEnrichmentSafetyRuntime(deps: ContactEnrichmentSafe
     if (!finderTicket) {
       const wire = deps.loadTrustedInput ? await deps.loadTrustedInput(finder.id, { workspaceId }) : null;
       if (!wire?.finder) throw new EnrichmentSafetyError('HOLD');
-      const requestHash = enrichmentRequestHash(target.contactId, 'hunter', wire.finder);
-      const reusable = await attemptCache({ workspaceId, contactId: target.contactId, providerKey: 'hunter', requestHash, now: clock() });
+      const finderProvider = finder.provider as 'hunter' | 'prospeo';
+      const requestHash = enrichmentRequestHash(target.contactId, finderProvider, wire.finder);
+      const reusable = await attemptCache({ workspaceId, contactId: target.contactId, providerKey: finderProvider, requestHash, now: clock() });
       if (reusable) {
         const state = reusable.outcome === 'hit' && reusable.emailState !== null && ['VALID', 'INVALID', 'CATCH_ALL_RISKY', 'UNKNOWN'].includes(reusable.emailState) ? reusable.emailState as import('./enrichment-domain-commit').EnrichmentContactApplyDecision['state'] : null;
         const decision = Object.freeze({ status: 'APPLIED' as const, contactId: target.contactId, reasonCode: reusable.outcome === 'hit' ? 'REUSED' as const : 'NO_MATCH' as const, state: reusable.outcome === 'hit' ? state : null, pointRefs: [], eventRefs: [], attemptRefs: [], newCandidatePoints: 0 });
         return { kind: 'decided', decision: await committer.commitSkipped({ workspaceId, companyId, executionId, contactId: target.contactId }, decision) };
       }
       const now = clock();
-      const circuitState = await circuits.load('hunter');
+      const circuitState = await circuits.load(finderProvider);
       if (!circuitAllowsCall(circuitState, now)) {
-        await recordAttempt({ workspaceId, contactId: target.contactId, providerKey: 'hunter', requestHash, outcome: 'error', errorCode: 'circuit_open', retryable: true, runId: record.businessRunId, accountKey: finder.account_key, attemptedAt: now });
+        await recordAttempt({ workspaceId, contactId: target.contactId, providerKey: finderProvider, requestHash, outcome: 'error', errorCode: 'circuit_open', retryable: true, runId: record.businessRunId, accountKey: finder.account_key, attemptedAt: now });
         const decision = Object.freeze({ status: 'SAVE_PENDING' as const, contactId: target.contactId, reasonCode: 'RESULT_UNKNOWN' as const, state: null, pointRefs: [], eventRefs: [], attemptRefs: [], newCandidatePoints: 0 });
         return { kind: 'decided', decision: await committer.commitSkipped({ workspaceId, companyId, executionId, contactId: target.contactId }, decision) };
       }
@@ -370,10 +388,10 @@ export function createContactEnrichmentSafetyRuntime(deps: ContactEnrichmentSafe
       const freshFinder = finderFor(record, contactSteps[0]!);
       bound = freshFinder.input_fingerprint === null || freshFinder.operation_key === null ? await bindStaticStep(freshFinder, record) : parseBoundEnrichmentStepRow(freshFinder);
       onFailure = async () => {
-        await circuits.save('hunter', applyCircuitOutcome(circuitState, 'failure', now)).catch(() => undefined);
-        await recordAttempt({ workspaceId, contactId: target.contactId, providerKey: 'hunter', requestHash, outcome: 'error', errorCode: 'provider_error', retryable: true, runId: record.businessRunId, accountKey: finder.account_key, attemptedAt: now }).catch(() => undefined);
+        await circuits.save(finderProvider, applyCircuitOutcome(circuitState, 'failure', now)).catch(() => undefined);
+        await recordAttempt({ workspaceId, contactId: target.contactId, providerKey: finderProvider, requestHash, outcome: 'error', errorCode: 'provider_error', retryable: true, runId: record.businessRunId, accountKey: finder.account_key, attemptedAt: now }).catch(() => undefined);
       };
-      onSuccess = async () => { await circuits.save('hunter', applyCircuitOutcome(circuitState, 'success', now)).catch(() => undefined); };
+      onSuccess = async () => { await circuits.save(finderProvider, applyCircuitOutcome(circuitState, 'success', now)).catch(() => undefined); };
     } else {
       record = await load();
       const freshFinder = finderFor(record, contactSteps[0]!);
@@ -693,14 +711,19 @@ export async function createManagedContactEnrichmentSafety(input: {
       artifacts = new GenericOperationArtifactService(new GenericOperationArtifactRepository(prisma), sharedGenericOperationArtifactStore(genericArtifactStorageConfig(env)), input.budgetStore);
     }
     const providerStates = {} as Record<ControlledEnrichmentProvider, ControlledEnrichmentProviderState>;
-    for (const provider of ['hunter', 'millionverifier', 'emailable', 'zerobounce'] as const) providerStates[provider] = await loadControlledEnrichmentProviderState(prisma, env, provider);
+    for (const provider of ['hunter', 'prospeo', 'millionverifier', 'emailable', 'zerobounce'] as const) providerStates[provider] = await loadControlledEnrichmentProviderState(prisma, env, provider);
     const originals = new EnrichmentOriginalResultRepository(prisma);
+    const finderMaterializers = Object.freeze({
+      'contact-email-find-hunter/v1': contactEmailFindMaterializer,
+      'contact-email-find-prospeo/v1': contactEmailFindProspeoMaterializer,
+    });
     const reader = new EnrichmentResultReader({
       loadBinding: (stepId, context) => originals.loadBinding(stepId, context),
       budgets: input.budgetStore,
       projections: registerSourceResultProjections(registerContactEmailVerificationProjections(new TypedProjectionRegistry())),
       ...(artifacts ? { artifacts } : {}),
       finderMaterializer: contactEmailFindMaterializer,
+      finderMaterializers,
     });
     const loadWire = async (stepId: string, workspaceId: string, deriveOnly = false): Promise<ControlledEnrichmentWireInput> => {
       const row = await loadStepRowByStep(prisma, workspaceId, stepId);
@@ -748,6 +771,10 @@ export async function createManagedContactEnrichmentSafety(input: {
       store: createSqlEnrichmentDomainCommitStore(prisma, env),
       artifacts,
       finderMaterializer: contactEmailFindMaterializer,
+      finderMaterializers: {
+        'contact-email-find-hunter/v1': contactEmailFindMaterializer,
+        'contact-email-find-prospeo/v1': contactEmailFindProspeoMaterializer,
+      },
       budgets: input.budgetStore,
       loadTrustedInput: (stepId, context) => ports!.loadTrustedInput(stepId, { workspaceId: context.workspaceId, runId: 'safety', purpose: 'enrichment', authorizeExternalAction: async () => true, artifactSubject: { subjectType: 'contact', subjectId: '00000000-0000-4000-8000-000000000000' } }, true),
       prepare: createContactEnrichmentSafetyPreparer({ prisma, env, broker }),
@@ -822,7 +849,7 @@ function buildLedgerReference(row: {
 }, head: { workspace_id: string; account_id: string; authority_id: string }): import('./enrichment-safety.contract').SettledEnrichmentStepReference | null {
   try {
     if (row.budget_original_id === null || row.operation_key === null) return null;
-    const schema = row.phase === 'FINDER' ? 'contact-email-find-hunter/v1' : row.phase === 'SMTP' ? 'smtp-probe-verdict/v1' : 'contact-email-verify-' + row.provider + '/v1';
+    const schema = row.phase === 'FINDER' ? 'contact-email-find-' + row.provider + '/v1' : row.phase === 'SMTP' ? 'smtp-probe-verdict/v1' : 'contact-email-verify-' + row.provider + '/v1';
     const common = { scopeKey: head.workspace_id, operationId: row.budget_original_id, operationKey: row.operation_key, accountId: head.account_id, authorityId: head.authority_id,
       resultSchema: row.budget_result_schema, resultDigest: row.budget_result_digest, resultJson: row.budget_result_json, receiptUsage: row.budget_receipt_usage, receiptCostBasis: row.budget_receipt_cost_basis };
     let receipt;
@@ -848,7 +875,7 @@ export function createSqlEnrichmentStepGuards(client: PrismaClient, env: NodeJS.
       if (row.contact_id === null) throw new EnrichmentSafetyError('CONTROL_MISMATCH');
       if (!(await contactMayUseExternalProcessing(tx, { workspaceId: row.workspace_id, contactId: row.contact_id }))) throw new EnrichmentSafetyError('HOLD');
       if (row.phase === 'SMTP') return { pricingVersion: row.pricing_version };
-      if (!(['hunter', 'millionverifier', 'emailable', 'zerobounce'] as readonly string[]).includes(row.provider)) throw new EnrichmentSafetyError('CONTROL_MISMATCH');
+      if (!(['hunter', 'prospeo', 'millionverifier', 'emailable', 'zerobounce'] as readonly string[]).includes(row.provider)) throw new EnrichmentSafetyError('CONTROL_MISMATCH');
       const state = await loadControlledEnrichmentProviderState(client, env, row.provider as ControlledEnrichmentProvider);
       if (!state.enabled || !state.policyAllowed || !state.apiKey || state.pricingVersion !== row.pricing_version) throw new EnrichmentSafetyError('CONTROL_MISMATCH');
       return { pricingVersion: state.pricingVersion };
@@ -862,7 +889,7 @@ export function createSqlEnrichmentStepGuards(client: PrismaClient, env: NodeJS.
         WHERE o.scope_key=${row.workspace_id} AND o.account_id=${row.account_id}::uuid AND o.generation=${row.generation} AND o.id=${candidate.operationId}::uuid`;
       const operation = rows[0];
       if (rows.length !== 1 || !operation || operation.status !== 'SETTLED' || operation.amount_unit !== 'microusd' ||
-          operation.result_schema !== 'contact-email-find-hunter/v1' || operation.result_digest !== candidate.resultDigest ||
+          (operation.result_schema !== 'contact-email-find-hunter/v1' && operation.result_schema !== 'contact-email-find-prospeo/v1') || operation.result_digest !== candidate.resultDigest ||
           operation.scope_key !== row.workspace_id || operation.account_id !== row.account_id || operation.generation !== row.generation ||
           operation.step_contact_id !== row.contact_id || operation.step_execution_id !== row.execution_id ||
           operation.step_contact_ordinal !== row.contact_ordinal || operation.step_phase !== 'FINDER' ||

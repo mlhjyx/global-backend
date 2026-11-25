@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   HunterProvider,
   parseHunterDomainSearch,
+  parseHunterEmailFinder,
   resolveHunterConfig,
 } from './hunter.provider';
 import type { FindEmailInput } from './email-enrichment-provider';
@@ -116,10 +117,46 @@ describe('parseHunterDomainSearch：供应商响应 → 人-邮箱匹配', () =>
   });
 });
 
-describe('HunterProvider.findEmail：HTTP 契约', () => {
-  it('命中：请求带 domain/api_key，返回 hit + accept_all + pattern + 成本，邮箱小写', async () => {
+describe('HunterProvider.findEmail：HTTP 契约（/v2/email-finder）', () => {
+  const emailFinderBody = {
+    data: {
+      first_name: 'Jürgen',
+      last_name: 'Müller',
+      email: 'Jurgen.Mueller@acme.example',
+      score: 95,
+      domain: 'acme.example',
+      accept_all: true,
+      position: 'Head of Procurement',
+      verification: { status: 'accept_all' },
+    },
+  };
+
+  it('parseHunterEmailFinder：解析单人命中、null miss 与 invalid 过滤', () => {
+    expect(parseHunterEmailFinder(emailFinderBody)).toMatchObject({
+      ok: true,
+      acceptAll: true,
+      verificationStatus: 'accept_all',
+      position: 'Head of Procurement',
+      missReason: null,
+      match: { email: 'Jurgen.Mueller@acme.example', confidence: 95 },
+    });
+    expect(parseHunterEmailFinder({ data: { email: null } })).toMatchObject({
+      ok: true,
+      match: null,
+      missReason: 'no_match',
+    });
+    expect(
+      parseHunterEmailFinder({ data: { email: 'dead@acme.example', verification: { status: 'invalid' } } }),
+    ).toMatchObject({
+      ok: true,
+      match: null,
+      missReason: 'invalid_verification',
+    });
+  });
+
+  it('命中：请求 /v2/email-finder 带 domain/first_name/last_name/api_key，返回 hit + accept_all + 成本，邮箱小写', async () => {
     const fetchImpl = vi.fn(async (_input: RequestInfo | URL) =>
-      jsonResponse(200, domainSearchBody),
+      jsonResponse(200, emailFinderBody),
     );
     const provider = new HunterProvider(resolveHunterConfig({ HUNTER_API_KEY: 'key-1' }), fetchImpl);
     const outcome = await provider.findEmail(INPUT);
@@ -130,26 +167,28 @@ describe('HunterProvider.findEmail：HTTP 契约', () => {
         email: 'jurgen.mueller@acme.example',
         providerConfidence: 95,
         acceptAll: true,
-        pattern: '{first}.{last}',
+        pattern: null,
       },
     });
     const url = fetchImpl.mock.calls[0]?.[0] as URL;
-    expect(url.origin + url.pathname).toBe('https://api.hunter.io/v2/domain-search');
+    expect(url.origin + url.pathname).toBe('https://api.hunter.io/v2/email-finder');
     expect(url.searchParams.get('domain')).toBe('acme.example');
+    expect(url.searchParams.get('first_name')).toBe('jurgen');
+    expect(url.searchParams.get('last_name')).toBe('muller');
     expect(url.searchParams.get('api_key')).toBe('key-1');
   });
 
-  it('无结果（200 但无同名）→ miss，成本 0', async () => {
+  it('无结果（200 但 data.email=null）→ miss，成本 0', async () => {
     const fetchImpl = vi.fn(async () =>
       jsonResponse(200, {
-        data: { accept_all: null, pattern: null, emails: [{ value: 'x@acme.example', first_name: 'A', last_name: 'B' }] },
+        data: { email: null, accept_all: null, score: 0 },
       }),
     );
     const provider = new HunterProvider(resolveHunterConfig({ HUNTER_API_KEY: 'k' }), fetchImpl);
     expect(await provider.findEmail(INPUT)).toMatchObject({
       status: 'miss',
       costMicrousd: 0,
-      detail: 'hunter_no_name_match',
+      detail: 'hunter_no_match',
     });
   });
 
@@ -179,7 +218,8 @@ describe('HunterProvider.findEmail：HTTP 契约', () => {
       vi.fn(async () =>
         jsonResponse(200, {
           data: {
-            emails: [{ value: 'jurgen@other.example', first_name: 'Jürgen', last_name: 'Müller' }],
+            email: 'jurgen@other.example',
+            score: 88,
           },
         }),
       ),
