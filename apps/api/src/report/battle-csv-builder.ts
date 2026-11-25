@@ -7,6 +7,7 @@
  */
 import type { Prisma } from '@prisma/client';
 import { classifyContactEmail } from '../discovery/contact-classifier';
+import { inferCountryFromCcTld } from '../discovery/domain-country';
 import {
   buildLinkedInCoPilotPlaybook,
   buildReferralFirstInfoDraft,
@@ -127,30 +128,61 @@ function resolveBattleChannels(
   };
 }
 
+const CJK_SCRIPT_RE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+
+const DEFAULT_PRODUCT_BY_LANGUAGE: Readonly<Record<string, string>> = Object.freeze({
+  it: 'componenti e prodotti industriali OEM/ODM',
+  de: 'Industrieprodukte (OEM/ODM)',
+  es: 'productos industriales OEM/ODM',
+  fr: 'produits industriels OEM/ODM',
+  pt: 'produtos industriais OEM/ODM',
+  en: 'industrial OEM/ODM products',
+});
+
+/** 避免把中文 ICP 名/中文主体名直接拼进意/德/英等外语开发信或 LinkedIn 附言。 */
+export function sanitizeOutreachTextForLanguage(
+  raw: string | null | undefined,
+  language: string,
+  fallback: string,
+): string {
+  const trimmed = (raw ?? '').trim();
+  if (!trimmed) return fallback;
+  if (language === 'zh') return trimmed;
+  return CJK_SCRIPT_RE.test(trimmed) ? fallback : trimmed;
+}
+
 function buildBattleOutreachCopy(args: {
   input: BattleRowBuildInput;
+  effectiveCountry: string | null;
   leadContact: BattleDecisionMaker | null;
   track: ReturnType<typeof classifyBuyingCommitteeTrack>;
   channelTier: ReturnType<typeof classifyContactChannelTier>;
   emailClass: ReturnType<typeof classifyContactEmail>['emailType'] | null;
   contactLinkedin: string | null;
 }): { linkedinNote: string | null; referralInfoDraft: string | null } {
-  const { input, leadContact, track, channelTier, emailClass, contactLinkedin } = args;
-  const sellerName = (input.sellerName ?? '').trim() || 'Our Manufacturing Team';
-  const sellerProduct = (input.sellerProductSummary ?? '').trim() || 'industrial OEM/ODM products';
+  const { input, effectiveCountry, leadContact, track, channelTier, emailClass, contactLinkedin } = args;
+  const language = languageForCountry(effectiveCountry);
+  const productFallback = DEFAULT_PRODUCT_BY_LANGUAGE[language] ?? DEFAULT_PRODUCT_BY_LANGUAGE.en;
+  const sellerName = sanitizeOutreachTextForLanguage(input.sellerName, language, 'Our Manufacturing Team');
+  const sellerProduct = sanitizeOutreachTextForLanguage(input.sellerProductSummary, language, productFallback);
+  const linkedinValueProp = sanitizeOutreachTextForLanguage(
+    input.sellerProductSummary,
+    'en',
+    DEFAULT_PRODUCT_BY_LANGUAGE.en,
+  );
   const firstName = leadContact?.fullName?.trim().split(/\s+/u)[0] ?? '';
   const linkedinNote =
     contactLinkedin && firstName
       ? buildLinkedInCoPilotPlaybook({
           firstName,
           companyName: input.company.name,
-          sellerValueProp: sellerProduct,
+          sellerValueProp: linkedinValueProp,
         }).templates.differentiated_cold
       : null;
   const referralDraft =
     channelTier === 'C' || emailClass === 'role'
       ? buildReferralFirstInfoDraft({
-          language: languageForCountry(input.company.country),
+          language,
           buyerCompanyName: input.company.name,
           targetDepartmentLabel: track.track === 'other' ? 'Procurement / Purchasing' : track.label,
           sellerProductSummary: sellerProduct,
@@ -211,14 +243,17 @@ export function buildBattleCsvRow(input: BattleRowBuildInput): BattleCsvRow {
     vendorPortalUrl: channels.vendorPortal,
     publicWhatsappUrl: channels.publicWhatsapp,
   });
+  const effectiveCountry =
+    (company.country ?? '').trim().toUpperCase() || inferCountryFromCcTld(company.domain) || null;
   const d3 = evaluateMultiChannelOutreachPolicy({
-    country: company.country,
+    country: effectiveCountry,
     companyName: company.name,
     isPersonalEmail: channels.isPersonalEmail,
     publicBusinessWhatsappUrl: channels.publicWhatsapp,
   });
   const copy = buildBattleOutreachCopy({
     input,
+    effectiveCountry,
     leadContact,
     track,
     channelTier,
@@ -234,7 +269,7 @@ export function buildBattleCsvRow(input: BattleRowBuildInput): BattleCsvRow {
   });
   return {
     companyName: company.name,
-    country: (company.country ?? '').trim().toUpperCase() || 'UNKNOWN',
+    country: effectiveCountry || 'UNKNOWN',
     domain: company.domain,
     fitScore: lead.totalScore,
     evidenceSummary: summarizeEvidence(lead, company),

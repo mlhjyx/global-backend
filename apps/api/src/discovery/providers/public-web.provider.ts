@@ -49,6 +49,7 @@ import { cleanEmail } from '../../acquisition/clean';
 import { canonicalizeSuppressionValue } from '../suppression-value';
 import { isAllowedByRobots } from '../../adapters/robots';
 import { normalizeDomain } from '../identity';
+import { inferCountryFromCcTld } from '../domain-country';
 import { companyProjectPageUrl } from '../website-profile/project-page-evidence';
 import {
   MAX_GOOGLE_PLACES_SEARCHES_PER_QUERY,
@@ -676,7 +677,7 @@ export function mapPublicWebCompanyToRecord(args: {
     externalId: domain,
     name,
     domain,
-    country: countryIso(args.extracted.country),
+    country: countryIso(args.extracted.country) ?? inferCountryFromCcTld(domain),
     industry: args.extracted.industry || undefined,
     employeeCount:
       typeof employeeCount === 'number' && Number.isSafeInteger(employeeCount) && employeeCount >= 0

@@ -78,4 +78,33 @@ describe('battle-csv-builder (Batch 1.4-C 19-column audited battle CSV)', () => 
     expect(row.referralInfoDraft).toContain('Weiterleitungsbitte');
     expect(row.complianceTag).toContain('DE:');
   });
+
+  it('sanitizes CJK seller/product fields in Italian referral drafts and infers country from ccTLD when null', () => {
+    const row = buildBattleCsvRow({
+      lead: {
+        id: 'lead-3',
+        canonicalCompanyId: 'co-3',
+        totalScore: 0.65,
+        fitVerdict: 'weak',
+        scoreDetail: null,
+      },
+      company: {
+        id: 'co-3',
+        name: 'Duowatt S.r.l.',
+        domain: 'duowatt.it',
+        country: null,
+        attributes: {},
+      },
+      companyContactPoints: [{ kind: 'email', value: 'info@duowatt.it' }],
+      decisionMakers: [],
+      draft: null,
+      sellerName: '琏升科技股份有限公司',
+      sellerProductSummary: '高效异质结光伏组件',
+    });
+
+    expect(row.country).toBe('IT');
+    expect(row.complianceTag).toContain('IT:');
+    expect(row.referralInfoDraft).toContain('componenti e prodotti industriali OEM/ODM');
+    expect(row.referralInfoDraft).not.toMatch(/[\p{Script=Han}]/u);
+  });
 });

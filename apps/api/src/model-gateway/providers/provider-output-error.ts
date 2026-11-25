@@ -179,17 +179,23 @@ export class ProviderHttpError extends Error {
   readonly status: number;
   readonly provider: string;
   readonly model: string;
+  /** True only when an upstream gateway explicitly reported transient channel/pool exhaustion (never carries raw body). */
+  readonly upstreamChannelExhausted?: boolean;
 
   constructor(input: {
     status: number;
     provider: string;
     model: string;
+    upstreamChannelExhausted?: boolean;
   }) {
     super(`${input.provider} ${input.model}: HTTP ${input.status}`);
     this.name = "ProviderHttpError";
     this.status = input.status;
     this.provider = input.provider;
     this.model = input.model;
+    if (input.upstreamChannelExhausted) {
+      this.upstreamChannelExhausted = true;
+    }
   }
 }
 import type { ModelResolutionSource, ModelUsage } from "../types";

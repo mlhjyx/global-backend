@@ -3,6 +3,7 @@ import {
   SseResponseTooLargeError,
   buildAnthropicMessagesControlFields,
   classifyBoundedStreamReadError,
+  detectUpstreamChannelExhausted,
   fetchWith429Backoff,
   modelDeprecatesTemperature,
   readBoundedResponseText,
@@ -72,5 +73,22 @@ describe('provider-wire-helpers', () => {
     });
     expect(res.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('detects 403 upstream channel exhaustion while ignoring auth/permission 403 and non-403', async () => {
+    const exhausted = new Response(
+      JSON.stringify({
+        type: 'error',
+        error: { type: 'new_api_error', message: 'The token for the current grouped routing channel has been exhausted' },
+      }),
+      { status: 403 },
+    );
+    await expect(detectUpstreamChannelExhausted(exhausted)).resolves.toBe(true);
+
+    const authDenied = new Response(JSON.stringify({ error: { message: 'Invalid API key' } }), { status: 403 });
+    await expect(detectUpstreamChannelExhausted(authDenied)).resolves.toBe(false);
+
+    const okRes = new Response('channel exhausted', { status: 200 });
+    await expect(detectUpstreamChannelExhausted(okRes)).resolves.toBe(false);
   });
 });

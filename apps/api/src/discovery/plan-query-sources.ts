@@ -777,6 +777,13 @@ function coverageFillQuery(
     // 装载状态未知：仍补，但在 rationale 留 warning 让计划 review 看见可能空跑。
     if (!context.registryFrameCountries) rationale += REGISTRY_FRAME_UNKNOWN_NOTE;
   }
+  if (
+    source.providerKey === 'companies_house_registry' &&
+    context.firstTargetIso2 &&
+    context.firstTargetIso2 !== 'GB'
+  ) {
+    return null;
+  }
   return {
     source_class: source.sourceClass,
     filters,

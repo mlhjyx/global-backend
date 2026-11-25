@@ -313,6 +313,17 @@ describe("Raw Source v2 ingestion boundary", () => {
     }).rows[0]!;
     expect(accepted.ingestStatus).toBe("ACCEPTED");
 
+    for (const executor of ["searxng", "serper", "brave", "exa"]) {
+      const widened = prepareRawSourceBatch({
+        providerKey: "model_web_search",
+        records: [{ ...record, attributes: { ...record.attributes, searchExecutor: executor } }],
+        policies: mwsPolicies,
+        limits: LIMITS,
+        now: NOW,
+      }).rows[0]!;
+      expect(widened.ingestStatus).toBe("ACCEPTED");
+    }
+
     // 非白名单 executor / 携带 identifier / 带 query 的证据 URL 都必须拒收（与 DB 闸门同口径）。
     for (const bad of [
       { ...record, attributes: { ...record.attributes, searchExecutor: "bing" } },

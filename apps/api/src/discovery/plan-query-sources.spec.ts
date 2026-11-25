@@ -943,6 +943,28 @@ describe('source coverage fill (vNext W4)', () => {
       withSourceCoverage(queries, ICP, COVERAGE_ENABLED, { registryFrameCountries: new Set(['DE']) }, 2),
     ).toBe(queries);
   });
+
+  it('skips companies_house_registry coverage fill for non-UK target markets and includes it for GB', () => {
+    const sourcesWithCh: readonly CompanyDiscoverySource[] = [
+      ...enabledOnly('public_web'),
+      { sourceClass: 'company_registry', providerKey: 'companies_house_registry', hasCompanyLineage: true },
+    ];
+    const italian = withSourceCoverage(
+      [query('public_intelligence', { source_hint: 'public_web', country: '意大利' })],
+      { targetMarkets: ['意大利'], companyAttributes: { industry: '太阳能光伏' } },
+      sourcesWithCh,
+      { registryFrameCountries: new Set() },
+    );
+    expect(hintsOf(italian)).not.toContain('companies_house_registry');
+
+    const uk = withSourceCoverage(
+      [query('public_intelligence', { source_hint: 'public_web', country: 'UK' })],
+      { targetMarkets: ['英国'], companyAttributes: { industry: 'solar' } },
+      sourcesWithCh,
+      { registryFrameCountries: new Set() },
+    );
+    expect(hintsOf(uk)).toContain('companies_house_registry');
+  });
 });
 
 describe('registry_frame loaded-country lookup (vNext W4)', () => {

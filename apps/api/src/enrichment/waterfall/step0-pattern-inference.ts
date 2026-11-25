@@ -26,6 +26,7 @@ import {
   verifiedAtStateColumns,
 } from '../../discovery/contact-point-verification-state';
 import { setEmailPointState, upsertProviderEmailPoint } from '../../discovery/contact-point-writer';
+import { inferCountryFromCcTld } from '../../discovery/domain-country';
 import {
   applyLearnedPattern,
   inferEmailPattern,
@@ -96,18 +97,20 @@ export async function maybeScheduleEnrichedArticle14(
     workspaceId: string;
     contactId: string;
     country?: string | null;
+    domain?: string | null;
     emailType: ContactEmailType;
     sourceCategory: string;
     acquiredAt: Date;
   },
 ): Promise<void> {
-  if (!args.country || !isPersonalOrOtherEmailType(args.emailType)) return;
+  const effectiveCountry = args.country ?? inferCountryFromCcTld(args.domain);
+  if (!effectiveCountry || !isPersonalOrOtherEmailType(args.emailType)) return;
   const noticeModel = (tx as { article14Notice?: { findFirst?: unknown } }).article14Notice;
   if (typeof noticeModel?.findFirst !== 'function') return;
   await scheduleArticle14NoticeInTransaction(tx, {
     workspaceId: args.workspaceId,
     subjectId: args.contactId,
-    country: args.country,
+    country: effectiveCountry,
     sourceCategory: args.sourceCategory,
     acquiredAt: args.acquiredAt,
   });
@@ -169,9 +172,9 @@ export async function loadCompanyEnrichmentMeta(
   if (companyModel && typeof companyModel.findFirst === 'function') {
     const row = await tx.canonicalCompany.findFirst({
       where: { id: companyId },
-      select: { country: true },
+      select: { country: true, domain: true },
     });
-    country = row?.country ?? null;
+    country = row?.country ?? inferCountryFromCcTld(row?.domain) ?? null;
   }
   if (contactIds.length > 0 && typeof tx.canonicalContact?.findMany === 'function') {
     const rows = await tx.canonicalContact.findMany({
@@ -338,15 +341,16 @@ export async function tryStep0PatternInference(
         catchAllClass: verification.resolved.catchAllClass,
         lastVerificationEventId: lastEventId,
       });
+      const effectiveCountry = input.country ?? inferCountryFromCcTld(input.domain);
       if (
-        input.country &&
+        effectiveCountry &&
         (emailType === 'personal' || emailType === 'other') &&
         typeof (tx as { article14Notice?: { findFirst?: unknown } }).article14Notice?.findFirst === 'function'
       ) {
         await scheduleArticle14NoticeInTransaction(tx, {
           workspaceId: input.workspaceId,
           subjectId: input.contactId,
-          country: input.country,
+          country: effectiveCountry,
           sourceCategory: 'pattern_inferred',
           acquiredAt: attemptedAt,
         });
