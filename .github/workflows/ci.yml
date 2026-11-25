@@ -806,9 +806,31 @@ jobs:
           bash infra/postgres/provision-runtime-service-principals.sh
           bash infra/postgres/provision-runtime-service-principals.sh
           bash infra/postgres/verify-runtime-service-principals.sh
-          pnpm --filter @global/api seed:platform-catalogs
-          SCOPED_RUNTIME_PRINCIPALS_TEST=1 \
-            pnpm --filter @global/api exec vitest run src/prisma/scoped-runtime-principals.postgres.spec.ts
+          (
+            set -euo pipefail
+            SCOPED_PRINCIPALS_DB="global_test_scoped_principals"
+            SCOPED_PRINCIPALS_ADMIN_URL="${DATABASE_URL}"
+            cleanup_scoped_principals_db() {
+              psql "${SCOPED_PRINCIPALS_ADMIN_URL}" --no-psqlrc --set ON_ERROR_STOP=1 --quiet \
+                --command "DROP DATABASE IF EXISTS ${SCOPED_PRINCIPALS_DB} WITH (FORCE);" >/dev/null 2>&1 || true
+            }
+            trap cleanup_scoped_principals_db EXIT
+            psql "${SCOPED_PRINCIPALS_ADMIN_URL}" --no-psqlrc --set ON_ERROR_STOP=1 --quiet \
+              --command "DROP DATABASE IF EXISTS ${SCOPED_PRINCIPALS_DB} WITH (FORCE);" \
+              --command "CREATE DATABASE ${SCOPED_PRINCIPALS_DB};"
+            export DATABASE_URL="${DATABASE_URL%/global_test}/${SCOPED_PRINCIPALS_DB}"
+            export APP_DATABASE_URL="${APP_DATABASE_URL%/global_test}/${SCOPED_PRINCIPALS_DB}"
+            export OUTBOX_RELAY_DATABASE_URL="${OUTBOX_RELAY_DATABASE_URL%/global_test}/${SCOPED_PRINCIPALS_DB}"
+            export MEMORY_OUTBOX_DATABASE_URL="${MEMORY_OUTBOX_DATABASE_URL%/global_test}/${SCOPED_PRINCIPALS_DB}"
+            export CUSTOMER_WORKER_OPS_DATABASE_URL="${CUSTOMER_WORKER_OPS_DATABASE_URL%/global_test}/${SCOPED_PRINCIPALS_DB}"
+            export EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL="${EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL%/global_test}/${SCOPED_PRINCIPALS_DB}"
+            pnpm --filter @global/db exec prisma migrate deploy
+            export RUNTIME_SERVICE_PROVISION_DATABASE_URL="${DATABASE_URL}"
+            bash infra/postgres/provision-runtime-service-principals.sh
+            pnpm --filter @global/api seed:platform-catalogs
+            SCOPED_RUNTIME_PRINCIPALS_TEST=1 \
+              pnpm --filter @global/api exec vitest run src/prisma/scoped-runtime-principals.postgres.spec.ts
+          )
           EXECUTION_BUDGET_PLATFORM_WRITER_DISPOSABLE_TEST=1 \
             bash infra/postgres/verify-execution-budget-platform-writer-provision-safety-disposable.sh
           EXECUTION_BUDGET_PLATFORM_WRITER_DISPOSABLE_TEST=1 \

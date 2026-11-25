@@ -1,5 +1,5 @@
-import { execFileSync } from 'node:child_process';
-import { resolve } from 'node:path';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join, relative, resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
   assertScopedDatabasePrincipal,
@@ -10,6 +10,27 @@ import {
 } from './scoped-database-principal';
 
 const API_ROOT = resolve(import.meta.dirname, '../..');
+const RUNTIME_SOURCE_EXTENSION_RE = /\.(?:ts|mts|js|mjs)$/u;
+const TEST_FILE_RE = /\.(?:spec|test)\./u;
+const FORBIDDEN_DATABASE_URL_RE = /\bprocess\.env\.DATABASE_URL\b/u;
+
+function collectRuntimeSourceFiles(directory: string): string[] {
+  const files: string[] = [];
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const fullPath = join(directory, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name === 'node_modules') continue;
+      files.push(...collectRuntimeSourceFiles(fullPath));
+    } else if (
+      entry.isFile() &&
+      RUNTIME_SOURCE_EXTENSION_RE.test(entry.name) &&
+      !TEST_FILE_RE.test(entry.name)
+    ) {
+      files.push(fullPath);
+    }
+  }
+  return files;
+}
 
 describe('scoped-database-principal', () => {
   it('validates scoped database URLs and forbids owner/app_user roles', () => {
@@ -87,17 +108,20 @@ describe('scoped-database-principal', () => {
   });
 
   it('forbids process.env.DATABASE_URL across runtime apps/api/src/', () => {
-    let matches = '';
-    try {
-      matches = execFileSync(
-        'rg',
-        ['-n', '--glob', '!*.spec.*', '--glob', '!*.test.*', 'process\\.env\\.DATABASE_URL', 'src'],
-        { cwd: API_ROOT, encoding: 'utf8' },
-      ).trim();
-    } catch (error) {
-      const status = (error as { status?: number }).status;
-      if (status !== 1) throw error;
+    const runtimeFiles = collectRuntimeSourceFiles(resolve(API_ROOT, 'src')).sort();
+    expect(runtimeFiles.length).toBeGreaterThan(0);
+
+    const matches: string[] = [];
+    for (const filePath of runtimeFiles) {
+      const lines = readFileSync(filePath, 'utf8').split(/\r?\n/u);
+      for (let index = 0; index < lines.length; index += 1) {
+        const line = lines[index] ?? '';
+        if (FORBIDDEN_DATABASE_URL_RE.test(line)) {
+          matches.push(`${relative(API_ROOT, filePath)}:${index + 1}:${line.trim()}`);
+        }
+      }
     }
-    expect(matches).toBe('');
+
+    expect(matches).toEqual([]);
   });
 });

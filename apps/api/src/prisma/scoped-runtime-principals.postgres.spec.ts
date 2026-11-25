@@ -25,7 +25,8 @@ import { createContactReverifyActivities } from '../temporal/contact-reverify.ac
 /**
  * Isolated disposable PostgreSQL verification for M4 scoped non-superuser
  * NOBYPASSRLS principals and the 4 narrow SECURITY DEFINER RPCs.
- * Opt-in via SCOPED_RUNTIME_PRINCIPALS_TEST=1 with loopback /global_test URLs.
+ * Opt-in via SCOPED_RUNTIME_PRINCIPALS_TEST=1 with loopback /global_test
+ * or /global_test_scoped_principals URLs.
  */
 const enabled = process.env.SCOPED_RUNTIME_PRINCIPALS_TEST === '1';
 const ownerUrl = process.env.DATABASE_URL;
@@ -56,9 +57,11 @@ describe.skipIf(!enabled)('scoped runtime principals (disposable PostgreSQL)', (
       const u = new URL(value);
       if (
         !['127.0.0.1', 'localhost', '[::1]'].includes(u.hostname) ||
-        u.pathname !== '/global_test'
+        !['/global_test', '/global_test_scoped_principals'].includes(u.pathname)
       ) {
-        throw new Error(`${name} must target a loopback /global_test database`);
+        throw new Error(
+          `${name} must target a loopback /global_test or /global_test_scoped_principals database`,
+        );
       }
     }
     owner = new PrismaClient({ datasourceUrl: ownerUrl });
