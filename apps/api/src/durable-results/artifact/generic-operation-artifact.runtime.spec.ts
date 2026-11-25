@@ -59,6 +59,7 @@ describe("generic operation artifact runtime composition", () => {
       "crawl4ai-fetch/v1",
       "crawl4ai-render/v1",
       "contact-email-find-hunter/v1",
+      "contact-email-find-prospeo/v1",
     ]);
   });
 

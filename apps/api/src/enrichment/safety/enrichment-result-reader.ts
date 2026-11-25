@@ -64,6 +64,7 @@ export interface EnrichmentResultReaderDeps {
     "readVerified" | "recoverUnknown"
   >;
   readonly finderMaterializer?: ArtifactMaterializer<unknown>;
+  readonly finderMaterializers?: Readonly<Record<string, ArtifactMaterializer<unknown>>>;
   readonly now?: () => Date;
 }
 export class EnrichmentResultReader {
@@ -202,7 +203,7 @@ export class EnrichmentResultReader {
       const step = binding.step;
       if (
         !this.deps.artifacts ||
-        !this.finderReady() ||
+        !this.finderMaterializerFor("contact-email-find-" + step.provider + "/v1") ||
         !reservation ||
         reservation.workspaceId !== step.workspaceId ||
         reservation.accountKey !== step.accountKey ||
@@ -364,11 +365,15 @@ export class EnrichmentResultReader {
       restored,
     };
   }
-  private finderReady(): boolean {
-    return Boolean(
-      this.deps.finderMaterializer?.resultSchema ===
-      "contact-email-find-hunter/v1",
-    );
+  private finderMaterializerFor(schema: string) {
+    if (this.deps.finderMaterializers && schema in this.deps.finderMaterializers) {
+      const m = this.deps.finderMaterializers[schema];
+      if (m?.resultSchema === schema) return m;
+    }
+    if (this.deps.finderMaterializer?.resultSchema === schema) {
+      return this.deps.finderMaterializer;
+    }
+    return null;
   }
   private async loadFinder(
     binding: EnrichmentOriginalResultBinding,
@@ -385,9 +390,11 @@ export class EnrichmentResultReader {
     materialized: unknown;
   } | null> {
     const step = binding.step;
+    const expectedSchema = "contact-email-find-" + step.provider + "/v1";
+    const materializer = this.finderMaterializerFor(expectedSchema);
     if (
       !this.deps.artifacts ||
-      !this.finderReady() ||
+      !materializer ||
       !binding.artifactReference ||
       !binding.originalReceipt
     )
@@ -396,7 +403,7 @@ export class EnrichmentResultReader {
     const receipt = this.receipt(
       binding,
       binding.originalReceipt,
-      "contact-email-find-hunter/v1",
+      expectedSchema,
       "artifact_reference",
     );
     if (
@@ -432,7 +439,7 @@ export class EnrichmentResultReader {
       verified.expectedFacts !== undefined
     )
       return null;
-    const materialized = await this.deps.finderMaterializer!.materialize(
+    const materialized = await materializer.materialize(
       verified.body,
       manifest,
       verified.expectedFacts,
@@ -585,7 +592,7 @@ export class EnrichmentOriginalResultRepository {
             return null;
           const expectedSchema =
             step.phase === "FINDER"
-              ? "contact-email-find-hunter/v1"
+              ? "contact-email-find-" + step.provider + "/v1"
               : step.phase === "SMTP"
                 ? "smtp-probe-verdict/v1"
                 : "contact-email-verify-" + step.provider + "/v1";

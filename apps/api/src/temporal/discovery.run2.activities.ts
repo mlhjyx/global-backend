@@ -829,10 +829,23 @@ export function createRun2Activities(deps: {
         });
         let leads = 0;
         for (const job of jobs) {
-          if (!isQuickVerdict(job.verdictQuick) || job.verdictQuick === 'mismatch') continue;
-          const verdict = job.verdictQuick;
+          if (!isQuickVerdict(job.verdictQuick)) continue;
           const identity = { workspaceId: args.workspaceId, icpId: args.icpId,
             canonicalCompanyId: job.canonicalCompanyId };
+          if (job.verdictQuick === 'mismatch') {
+            await tx.lead.updateMany({
+              where: { ...identity, ...revisableProvisionalLeadWhere() },
+              data: {
+                fitVerdict: 'mismatch',
+                fitReasons: { source: 'quick_scan', tier: 'quick' },
+                queue: 'rejected',
+                status: 'REJECTED',
+                version: { increment: 1 },
+              },
+            });
+            continue;
+          }
+          const verdict = job.verdictQuick;
           const provisional = { fitVerdict: verdict, fitReasons: { source: 'quick_scan', tier: 'quick' },
             queue: 'needs_review' };
           const created = await tx.lead.createMany({ data: [{ ...identity, ...provisional }], skipDuplicates: true });

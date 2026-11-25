@@ -29,6 +29,7 @@ export const RECEIPT_FACT_TOOL_IDS = Object.freeze([
   "samgov.search",
   "sanctions.download",
   "contact_email.find.hunter",
+  "contact_email.find.prospeo",
   "contact_email.verify.millionverifier",
   "contact_email.verify.emailable",
   "contact_email.verify.zerobounce",
@@ -118,6 +119,7 @@ function patentCostFacts(result: ToolResult<unknown>): PatentCostFacts {
 
 const CONTROLLED_CONTACT_RECEIPT_SCHEMAS = Object.freeze({
   "contact_email.find.hunter": "contact-email-find-hunter/v1",
+  "contact_email.find.prospeo": "contact-email-find-prospeo/v1",
   "contact_email.verify.millionverifier":
     "contact-email-verify-millionverifier/v1",
   "contact_email.verify.emailable": "contact-email-verify-emailable/v1",

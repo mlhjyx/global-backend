@@ -146,15 +146,27 @@ export class EnrichmentDomainCommitter {
   private async detectInputConflict(tx: Prisma.TransactionClient, address: EnrichmentContactCommitAddress, state: LockedEnrichmentContactCommitState): Promise<EnrichmentContactApplyDecision | null> {
     const inputVersion = enrichmentInputVersion(state.currentInput);
     const sameInput = inputVersion === state.target.inputVersion && contactTargetBeforeDigest({ inputVersion, points: state.currentPoints }) === state.target.beforeDigest;
-    if (sameInput && !state.currentPoints.some((point) => point.type === "email")) return null;
+    if (sameInput && !state.currentPoints.some((point) => point.type === "email" && point.verificationState === "VALID")) return null;
     await this.deps.store.savePending(tx, address, "INPUT_CONFLICT");
     return this.empty(address, "SAVE_PENDING", "INPUT_CONFLICT");
+  }
+  private isProspeoVerifiedAttestation(
+    finder: Extract<EnrichmentDomainMaterializedResult, { phase: "FINDER" }>,
+    candidate: import("../../durable-results/artifact/materializers/contact-email-find.materializer").ContactEmailFindPayload,
+  ): boolean {
+    return (
+      finder.step.provider === "prospeo" &&
+      candidate.status === "hit" &&
+      candidate.providerConfidence !== null &&
+      candidate.providerConfidence >= 95 &&
+      candidate.acceptAll !== true
+    );
   }
   private async prepareWireApplication(tx: Prisma.TransactionClient, address: EnrichmentContactCommitAddress, state: LockedEnrichmentContactCommitState, results: readonly EnrichmentDomainMaterializedResult[]): Promise<PreparedEnrichmentApplication | Readonly<{ status: "DENIED"; decision: EnrichmentContactApplyDecision }>> {
     const finder = this.singleFinder(results);
     const candidate = parseContactEmailFindPayload(finder.result);
     if (candidate.status === "miss" && results.length !== 1) return this.hold();
-    if (candidate.email !== null && normalizeEnrichedEmail(candidate.email, state.currentInput.domain) !== candidate.email) return this.hold();
+    if (candidate.email !== null && normalizeEnrichedEmail(candidate.email, state.currentInput.domain, { allowCorporateGroup: finder.step.provider === "prospeo" }) !== candidate.email) return this.hold();
     if (!isValidLawfulBasis(state.lawfulBasis)) return this.hold();
     if (!(await this.deps.authorizeCurrent(tx, address, candidate.email ?? undefined))) {
       await this.deps.store.savePending(tx, address, "SUPPRESSED");
@@ -164,7 +176,11 @@ export class EnrichmentDomainCommitter {
     if (!Number.isFinite(now.getTime())) return this.hold();
     const votes = results.filter((result) => result.phase !== "FINDER").map((result) => this.verificationResult(result));
     if (votes.length > 6) return this.hold();
-    const resolved = resolveVerificationVotes(votes.map((vote) => ({ providerKey: vote.providerKey, state: vote.state, catchAllClass: vote.catchAllClass, acceptAll: vote.acceptAll })));
+    let resolved = resolveVerificationVotes(votes.map((vote) => ({ providerKey: vote.providerKey, state: vote.state, catchAllClass: vote.catchAllClass, acceptAll: vote.acceptAll })));
+    const rejectedByVerifier = votes.some((vote) => vote.state === "INVALID" || vote.catchAllClass === "true_catch_all");
+    if (this.isProspeoVerifiedAttestation(finder, candidate) && !rejectedByVerifier && resolved.state !== "VALID") {
+      resolved = { state: "VALID", catchAllClass: "not_catch_all", reason: "prospeo_only_verified_email" };
+    }
     return { status: "OK" as const, results, finder, candidate, votes, resolved, now };
   }
   private singleFinder(results: readonly EnrichmentDomainMaterializedResult[]): Extract<EnrichmentDomainMaterializedResult, { phase: "FINDER" }> {
@@ -175,7 +191,8 @@ export class EnrichmentDomainCommitter {
   private async applyAndAcknowledge(tx: Prisma.TransactionClient, address: EnrichmentContactCommitAddress, state: LockedEnrichmentContactCommitState, results: readonly EnrichmentDomainMaterializedResult[], prepared: Extract<PreparedEnrichmentApplication, { status: "OK" }>, actorId: string): Promise<EnrichmentContactApplyDecision> {
     const { candidate, finder, resolved } = prepared;
     const { pointRefs, eventRefs } = await this.writePointAndEvents(tx, address, state, prepared, actorId);
-    const attempt = await recordEnrichmentAttempt(tx, { workspaceId: address.workspaceId, contactId: address.contactId, providerKey: "hunter", requestHash: enrichmentRequestHash(address.contactId, "hunter", state.currentInput), outcome: candidate.status, costMicrousd: this.originalCharge(finder), emailState: candidate.status === "hit" ? resolved.state : null,
+    const finderProvider = finder.step.provider as "hunter" | "prospeo";
+    const attempt = await recordEnrichmentAttempt(tx, { workspaceId: address.workspaceId, contactId: address.contactId, providerKey: finderProvider, requestHash: enrichmentRequestHash(address.contactId, finderProvider, state.currentInput), outcome: candidate.status, costMicrousd: this.originalCharge(finder), emailState: candidate.status === "hit" ? resolved.state : null,
       evidence: { costBasis: "estimated_upper_bound", latencyBasis: "unavailable" }, runId: state.businessRunId, accountKey: finder.step.accountKey, attemptedAt: prepared.now });
     if (!attempt.attempt) return this.hold();
     const decision: EnrichmentContactApplyDecision = deepFreezeSafety({ status: "APPLIED", contactId: address.contactId, reasonCode: candidate.status === "miss" ? "NO_MATCH" : resolved.state === "INVALID" ? "INVALID_ALL" : "STORED", state: candidate.status === "miss" ? null : resolved.state, pointRefs, eventRefs, attemptRefs: [attempt.attempt.id], newCandidatePoints: pointRefs.length });
@@ -187,13 +204,14 @@ export class EnrichmentDomainCommitter {
     if (candidate.email === null || resolved.state === "INVALID") return { pointRefs: [], eventRefs: [] };
     const point = await upsertProviderEmailPoint(tx, { workspaceId: address.workspaceId, contactId: address.contactId, email: candidate.email, emailType: classifyContactEmail(candidate.email).emailType, legalBasis: state.lawfulBasis.basis });
     // The concrete store holds the parent FOR UPDATE and all original point rows. Real FK/concurrency proof is a mandatory PG gate.
-    if (point.verificationState !== "UNKNOWN" || point.validSince !== null || state.currentPoints.some((old) => old.id === point.id)) throw new EnrichmentSafetyError("INPUT_CONFLICT");
+    // Allow upgrading an existing unverified (UNKNOWN / CATCH_ALL_RISKY) point; never overwrite a VALID point.
+    if (point.verificationState === "VALID" || point.validSince !== null) throw new EnrichmentSafetyError("INPUT_CONFLICT");
     const eventRefs = await this.recordVotes(tx, address, state, prepared, point.id, actorId);
     await this.applyFinalPointState(tx, state, prepared, point, finder, eventRefs, now);
     return { pointRefs: [point.id], eventRefs };
   }
   private async recordVotes(tx: Prisma.TransactionClient, address: EnrichmentContactCommitAddress, state: LockedEnrichmentContactCommitState, prepared: Extract<PreparedEnrichmentApplication, { status: "OK" }>, pointId: string, actorId: string): Promise<string[]> {
-    const { votes, now } = prepared; void now;
+    const { votes, finder, candidate, resolved } = prepared;
     const sources = prepared.results.filter((result) => result.phase !== "FINDER");
     const eventRefs: string[] = [];
     for (const [index, vote] of votes.entries()) {
@@ -203,19 +221,27 @@ export class EnrichmentDomainCommitter {
       if (!event.id) return this.hold();
       eventRefs.push(event.id);
     }
+    if (resolved.reason === "prospeo_only_verified_email" && this.isProspeoVerifiedAttestation(finder, candidate)) {
+      const event = await recordContactPointVerificationEvent(tx, { workspaceId: address.workspaceId, contactPointId: pointId, providerKey: "prospeo", method: "third_party_api", verdict: "valid", detail: "prospeo_only_verified_email", catchAll: "not_catch_all", catchAllClass: "not_catch_all", score: 95,
+        costMicrousd: 0, lawfulBasis: state.lawfulBasis as unknown as Record<string, unknown>, actorId, requestHash: buildVerificationRequestHash(pointId, "prospeo", finder.step.operationKey), latencyMs: null });
+      if (!event.id) return this.hold();
+      eventRefs.push(event.id);
+    }
     return eventRefs;
   }
   private async applyFinalPointState(tx: Prisma.TransactionClient, state: LockedEnrichmentContactCommitState, prepared: Extract<PreparedEnrichmentApplication, { status: "OK" }>, point: ProviderEmailPointSnapshot, finder: Extract<EnrichmentDomainMaterializedResult, { phase: "FINDER" }>, eventRefs: readonly string[], now: Date): Promise<void> {
     const { resolved, votes } = prepared;
-    if (votes.length === 0) {
+    if (votes.length === 0 && resolved.reason !== "prospeo_only_verified_email") {
       await setEmailPointState(tx, { pointId: point.id, state: "UNKNOWN", status: "UNVERIFIED", validSince: null, verifiedAt: now, nextReverifyAt: new Date(now.getTime() + 24 * 3600000), confidence: 20, catchAll: "unknown", catchAllClass: null, lastVerificationEventId: null });
       return;
     }
     const verdict = resolved.state === "VALID" ? "valid" : resolved.state === "CATCH_ALL_RISKY" ? "catch_all" : "unknown";
     const columns = verifiedAtStateColumns(transitionVerificationState({ state: point.verificationState, validSince: point.validSince, nextReverifyAt: point.nextReverifyAt }, { verdict, catchAllClass: resolved.catchAllClass }, now));
     const last = votes.filter((vote) => vote.error === null).at(-1);
+    const providerKey = resolved.reason === "prospeo_only_verified_email" ? "prospeo" : (last?.providerKey ?? finder.step.provider);
+    const verificationMethod = resolved.reason === "prospeo_only_verified_email" ? "third_party_api" : (last?.method ?? "third_party_api");
     await setEmailPointState(tx, { pointId: point.id, state: columns.verificationState, status: columns.status, validSince: columns.validSince, verifiedAt: columns.verifiedAt, nextReverifyAt: columns.nextReverifyAt, confidence: columns.confidence,
-      verificationProvider: last?.providerKey ?? finder.step.provider, verificationMethod: last?.method ?? "third_party_api", ...(resolved.state === "UNKNOWN" ? {} : { catchAll: legacyCatchAllFromClass(resolved.catchAllClass), catchAllClass: resolved.catchAllClass }), lastVerificationEventId: eventRefs[eventRefs.length - 1] ?? null });
+      verificationProvider: providerKey, verificationMethod, ...(resolved.state === "UNKNOWN" ? {} : { catchAll: legacyCatchAllFromClass(resolved.catchAllClass), catchAllClass: resolved.catchAllClass }), lastVerificationEventId: eventRefs[eventRefs.length - 1] ?? null });
   }
   private async applyAcknowledgements(tx: Prisma.TransactionClient, address: EnrichmentContactCommitAddress, state: LockedEnrichmentContactCommitState, results: readonly EnrichmentDomainMaterializedResult[], decision: EnrichmentContactApplyDecision, pointRefs: readonly string[], quality: ContactQualityFact | null): Promise<EnrichmentContactApplyDecision> {
     const acknowledgements = results.filter((result) => !this.originalSmtpAcknowledged(state, result)).map((result) => ({ producerId: result.step.toolId, receipt: result.reference.durableReceipt,

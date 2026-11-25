@@ -49,15 +49,14 @@ export interface GuessWritePlan {
   verificationMethod: 'smtp_rcpt' | 'pattern_guess';
 }
 
-/** 猜测结果 → 落库计划。只 verified/unverified-with-best 才落；其余返回 null（不落）。 */
+/** 猜测结果 → 落库计划。仅 SMTP 已证实（verified）才落库；未证实盲猜返回 null，避免占位污染与阻塞商业查邮。 */
 export function guessedEmailWritePlan(result: GuessResult): GuessWritePlan | null {
   if (!result.best) return null;
-  if (result.status !== 'verified' && result.status !== 'unverified') return null;
-  const verified = result.status === 'verified';
+  if (result.status !== 'verified') return null;
   return {
     email: result.best.email,
-    pointStatus: verified ? 'VALID' : 'RISKY',
-    verified,
+    pointStatus: 'VALID',
+    verified: true,
     pattern: result.best.pattern,
     confidence: result.best.confidence,
     reason: result.reason,

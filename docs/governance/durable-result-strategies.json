@@ -6,7 +6,7 @@
     "protectedFiles": [
       {
         "path": "apps/api/src/tools/tool-broker.ts",
-        "sha256": "5aa5de46ed8a5b518c508657b054baf9bb9b80c25f4a3cd11901ca394a078d60"
+        "sha256": "b09d3ca2d6b2d1a4342557d9ab6c3b88d4d16a4873df1271f7c1ba50cf567a77"
       },
       {
         "path": "apps/api/src/model-gateway/router-model-gateway.ts",
@@ -29,7 +29,8 @@
       "crawl4ai-render/v1",
       "http-get/v1",
       "sanctions-download/v1",
-      "contact-email-find-hunter/v1"
+      "contact-email-find-hunter/v1",
+      "contact-email-find-prospeo/v1"
     ],
     "deniedBeforeWire": true,
     "inlineFallbackAllowed": false
@@ -556,6 +557,22 @@
       }
     },
     {
+      "id": "contact_email.find.prospeo",
+      "declarationPath": "apps/api/src/tools/contact-enrichment-safety-tools.ts",
+      "resultStrategy": "artifact_reference",
+      "resultSchema": "contact-email-find-prospeo/v1",
+      "operationIdentity": "tool:contact_email.find.prospeo:<version>:<stepId>",
+      "privacyClass": "PERSONAL_DATA",
+      "domainAck": {
+        "mode": "SUBJECT_BINDING_HOLD",
+        "consumer": "EnrichmentDomainCommitter.commitContact",
+        "domainAggregateType": "ContactEnrichmentExecution",
+        "identitySource": "execution-contact-and-original-operation",
+        "subjectRefRequired": true,
+        "personalDataDsrCompatible": true
+      }
+    },
+    {
       "id": "contact_email.verify.millionverifier",
       "declarationPath": "apps/api/src/tools/contact-enrichment-safety-tools.ts",
       "resultStrategy": "typed_projection",
@@ -906,6 +923,16 @@
     },
     {
       "schema": "contact-email-find-hunter/v1",
+      "artifactIdRequired": true,
+      "privacyClass": "PERSONAL_DATA",
+      "mediaTypes": [
+        "application/octet-stream"
+      ],
+      "maxBytes": 16384,
+      "ttlSeconds": 86400
+    },
+    {
+      "schema": "contact-email-find-prospeo/v1",
       "artifactIdRequired": true,
       "privacyClass": "PERSONAL_DATA",
       "mediaTypes": [

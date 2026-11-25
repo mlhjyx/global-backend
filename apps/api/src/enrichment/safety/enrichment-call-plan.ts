@@ -180,8 +180,10 @@ export function assertSupportedEnrichmentSlot(
 ): void {
   const supported =
     slot.phase === "FINDER"
-      ? slot.provider === "hunter" &&
-        slot.toolId === "contact_email.find.hunter"
+      ? (slot.provider === "hunter" &&
+          slot.toolId === "contact_email.find.hunter") ||
+        (slot.provider === "prospeo" &&
+          slot.toolId === "contact_email.find.prospeo")
       : slot.phase === "SMTP"
         ? slot.provider === "smtp_self" && slot.toolId === "smtp.rcpt_probe"
         : slot.phase === "VERIFY" &&

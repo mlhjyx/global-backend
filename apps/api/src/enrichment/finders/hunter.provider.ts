@@ -120,6 +120,83 @@ export function parseHunterDomainSearch(
   };
 }
 
+export type HunterEmailFinderParse =
+  | {
+      ok: true;
+      match: HunterPersonMatch | null;
+      acceptAll: boolean | null;
+      verificationStatus: string | null;
+      position: string | null;
+      missReason: string | null;
+    }
+  | { ok: false; errorCode: string; detail: string };
+
+/** Hunter `/v2/email-finder` 响应解析（纯函数；按姓名+域名直查单人邮箱，畸形体 fail-closed 为 error）。 */
+export function parseHunterEmailFinder(raw: unknown): HunterEmailFinderParse {
+  if (!raw || typeof raw !== 'object') {
+    return { ok: false, errorCode: 'malformed_response', detail: 'hunter_response_not_object' };
+  }
+  const body = raw as Record<string, unknown>;
+  const data = body.data;
+  if (!data || typeof data !== 'object') {
+    return { ok: false, errorCode: 'malformed_response', detail: 'hunter_data_missing' };
+  }
+  const record = data as Record<string, unknown>;
+  const verification =
+    record.verification && typeof record.verification === 'object'
+      ? (record.verification as Record<string, unknown>)
+      : null;
+  const verificationStatus =
+    typeof verification?.status === 'string' && verification.status.trim()
+      ? verification.status.trim().toLowerCase()
+      : null;
+  const acceptAll =
+    typeof record.accept_all === 'boolean'
+      ? record.accept_all
+      : verificationStatus === 'accept_all'
+        ? true
+        : verificationStatus === 'valid'
+          ? false
+          : null;
+  const position =
+    typeof record.position === 'string' && record.position.trim() ? record.position.trim() : null;
+  const email = typeof record.email === 'string' && record.email.trim() ? record.email.trim() : null;
+  if (!email) {
+    return {
+      ok: true,
+      match: null,
+      acceptAll,
+      verificationStatus,
+      position,
+      missReason: 'no_match',
+    };
+  }
+  if (verificationStatus === 'invalid') {
+    return {
+      ok: true,
+      match: null,
+      acceptAll,
+      verificationStatus,
+      position,
+      missReason: 'invalid_verification',
+    };
+  }
+  const confidence =
+    typeof record.score === 'number' && Number.isFinite(record.score)
+      ? record.score
+      : typeof record.confidence === 'number' && Number.isFinite(record.confidence)
+        ? record.confidence
+        : null;
+  return {
+    ok: true,
+    match: { email, confidence },
+    acceptAll,
+    verificationStatus,
+    position,
+    missReason: null,
+  };
+}
+
 export class HunterProvider implements EmailEnrichmentAdapter {
   readonly key = 'hunter' as const;
   readonly domain = 'api.hunter.io';
@@ -145,9 +222,15 @@ export class HunterProvider implements EmailEnrichmentAdapter {
     const startedAt = Date.now();
     if (!this.config.apiKey) return unconfiguredFindEmailOutcome();
 
-    const url = new URL(`${this.config.baseUrl}/v2/domain-search`);
+    const url = new URL(`${this.config.baseUrl}/v2/email-finder`);
     url.searchParams.set('domain', input.domain);
-    url.searchParams.set('limit', '10');
+    const parts = personNameParts(input.fullName);
+    if (parts) {
+      url.searchParams.set('first_name', parts.first);
+      url.searchParams.set('last_name', parts.last);
+    } else {
+      url.searchParams.set('full_name', input.fullName.trim());
+    }
     url.searchParams.set('api_key', this.config.apiKey);
 
     let response: Response;
@@ -203,7 +286,7 @@ export class HunterProvider implements EmailEnrichmentAdapter {
     }
 
     const json: unknown = await response.json().catch(() => null);
-    const parsed = parseHunterDomainSearch(json, input);
+    const parsed = parseHunterEmailFinder(json);
     if (!parsed.ok) {
       return {
         status: 'error',
@@ -216,9 +299,10 @@ export class HunterProvider implements EmailEnrichmentAdapter {
     }
     const evidence = {
       provider: this.key,
+      api: 'email-finder',
       accept_all: parsed.acceptAll,
-      pattern: parsed.pattern,
-      candidate_count: parsed.candidateCount,
+      verification_status: parsed.verificationStatus,
+      ...(parsed.position ? { position: parsed.position } : {}),
     };
     if (!parsed.match) {
       return {
@@ -247,7 +331,7 @@ export class HunterProvider implements EmailEnrichmentAdapter {
           ? {}
           : { providerConfidence: parsed.match.confidence }),
         acceptAll: parsed.acceptAll,
-        pattern: parsed.pattern,
+        pattern: null,
         raw: { ...evidence, confidence: parsed.match.confidence },
       },
       costMicrousd: this.config.costMicrousd,

@@ -13,7 +13,8 @@ export type SubjectBoundArtifactSchema =
   | "http-get/v1"
   | "crawl4ai-fetch/v1"
   | "crawl4ai-render/v1"
-  | "contact-email-find-hunter/v1";
+  | "contact-email-find-hunter/v1"
+  | "contact-email-find-prospeo/v1";
 
 export type ArtifactSubjectBindingDecision =
   | Readonly<{
@@ -41,6 +42,7 @@ const WORKSPACE_SUBJECT_SCHEMAS: ReadonlySet<string> = new Set([
   "crawl4ai-fetch/v1",
   "crawl4ai-render/v1",
   "contact-email-find-hunter/v1",
+  "contact-email-find-prospeo/v1",
 ]);
 
 const DENIED: ArtifactSubjectBindingDecision = Object.freeze({
@@ -167,7 +169,8 @@ export class ArtifactSubjectBindingContract {
     }
 
     if (
-      source.resultSchema === "contact-email-find-hunter/v1" &&
+      (source.resultSchema === "contact-email-find-hunter/v1" ||
+        source.resultSchema === "contact-email-find-prospeo/v1") &&
       subjectRef.subjectType !== "contact"
     )
       return DENIED;

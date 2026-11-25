@@ -164,6 +164,31 @@ describe('M0④ 公司级深挖子工作流', () => {
     );
   });
 
+  it('Batch 1.6: profile_failed 时提前收工，不再空跑 fit/signals/contacts', async () => {
+    acts.profileCompanyOnce.mockResolvedValue({
+      profiled: false,
+      matched: false,
+      unclassified: false,
+      reason: 'profile_failed',
+    });
+
+    await expect(companyPipelineWorkflow(INPUT)).resolves.toEqual({ stage: 'done' });
+    expect(markedStages()).toEqual(['profiling', 'done']);
+    expect(acts.fitCompanyOnce).not.toHaveBeenCalled();
+    expect(acts.signalsCompanyOnce).not.toHaveBeenCalled();
+    expect(acts.contactsCompanyOnce).not.toHaveBeenCalled();
+  });
+
+  it('Batch 1.6: weak 线索保留 signals，但跳过重度 contacts 与 enrich', async () => {
+    acts.fitCompanyOnce.mockResolvedValue({ judged: true, verdict: 'weak' });
+
+    await expect(companyPipelineWorkflow(INPUT)).resolves.toEqual({ stage: 'done' });
+    expect(markedStages()).toEqual(['profiling', 'fitting', 'signals', 'done']);
+    expect(acts.signalsCompanyOnce).toHaveBeenCalledTimes(1);
+    expect(acts.contactsCompanyOnce).not.toHaveBeenCalled();
+    expect(acts.enrichContactsForCompany).not.toHaveBeenCalled();
+  });
+
   it('marks the job skipped(DEEP_STOPPED) and rethrows when the parent cancels the child', async () => {
     acts.signalsCompanyOnce.mockRejectedValue(
       Object.assign(new Error('cancelled'), { name: 'CancelledFailure' }),

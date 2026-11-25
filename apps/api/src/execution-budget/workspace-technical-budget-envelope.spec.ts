@@ -43,11 +43,12 @@ describe('workspace execution technical envelope catalog', () => {
       },
       {},
     );
-    // 4 governed tools × 10 contacts × 1 cent/call = 40 cents = 400000 µUSD.
-    expect(envelope.requiredCapMicrousd).toBe(400_000n);
+    // 5 governed tools: (1 + 2 + 1 + 1 + 1) cents × 10 contacts = 60 cents = 600000 µUSD.
+    expect(envelope.requiredCapMicrousd).toBe(600_000n);
     expect(envelope.policy.models).toEqual([]);
     expect(envelope.policy.tools).toEqual([
       { toolId: 'contact_email.find.hunter', version: '1.0.0', maxPhysicalInvocations: 10, estimatedCents: 1, costUnit: 'request' },
+      { toolId: 'contact_email.find.prospeo', version: '1.0.0', maxPhysicalInvocations: 10, estimatedCents: 2, costUnit: 'request' },
       { toolId: 'contact_email.verify.millionverifier', version: '1.0.0', maxPhysicalInvocations: 10, estimatedCents: 1, costUnit: 'request' },
       { toolId: 'contact_email.verify.emailable', version: '1.0.0', maxPhysicalInvocations: 10, estimatedCents: 1, costUnit: 'request' },
       { toolId: 'contact_email.verify.zerobounce', version: '1.0.0', maxPhysicalInvocations: 10, estimatedCents: 1, costUnit: 'request' },
@@ -60,6 +61,7 @@ describe('workspace execution technical envelope catalog', () => {
       softDeadlineMs: 600_000,
       contactEnrichPricePolicyVersion: 1,
       hunterUnitQuoteUpperMicrousd: 1_700,
+      prospeoUnitQuoteUpperMicrousd: 19_800,
       millionverifierUnitQuoteUpperMicrousd: 1_780,
       emailableUnitQuoteUpperMicrousd: 7_600,
       zerobounceUnitQuoteUpperMicrousd: 9_900,

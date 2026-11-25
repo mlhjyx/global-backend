@@ -9,6 +9,7 @@ import {
 
 const CONTACT_RECEIPT_TOOL_IDS = [
   "contact_email.find.hunter",
+  "contact_email.find.prospeo",
   "contact_email.verify.millionverifier",
   "contact_email.verify.emailable",
   "contact_email.verify.zerobounce",
@@ -22,15 +23,15 @@ const modelResult = (overrides: Record<string, unknown> = {}) => ({
 });
 
 describe("execution receipt fact producers", () => {
-  it("locks explicit fact producers to 19 legacy plus four controlled contact Tools and 11 Model tasks", () => {
-    expect(RECEIPT_FACT_TOOL_IDS).toHaveLength(23);
+  it("locks explicit fact producers to 19 legacy plus five controlled contact Tools and 11 Model tasks", () => {
+    expect(RECEIPT_FACT_TOOL_IDS).toHaveLength(24);
     expect(
       RECEIPT_FACT_TOOL_IDS.filter(
         (id) => !CONTACT_RECEIPT_TOOL_IDS.some((contactId) => contactId === id),
       ),
     ).toHaveLength(19);
     expect(RECEIPT_FACT_MODEL_TASK_IDS).toHaveLength(11);
-    expect(new Set(RECEIPT_FACT_TOOL_IDS).size).toBe(23);
+    expect(new Set(RECEIPT_FACT_TOOL_IDS).size).toBe(24);
     expect(new Set(RECEIPT_FACT_MODEL_TASK_IDS).size).toBe(11);
   });
 
@@ -254,6 +255,7 @@ describe("execution receipt fact producers", () => {
 
 const contactReceiptProtocols = [
   ["contact_email.find.hunter", "contact-email-find-hunter/v1"],
+  ["contact_email.find.prospeo", "contact-email-find-prospeo/v1"],
   [
     "contact_email.verify.millionverifier",
     "contact-email-verify-millionverifier/v1",

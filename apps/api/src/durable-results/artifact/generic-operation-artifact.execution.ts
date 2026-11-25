@@ -31,7 +31,8 @@ type WorkspaceArtifactSchema =
   | "crawl4ai-fetch/v1"
   | "crawl4ai-render/v1"
   | "http-get/v1"
-  | "contact-email-find-hunter/v1";
+  | "contact-email-find-hunter/v1"
+  | "contact-email-find-prospeo/v1";
 
 interface ArtifactPayload {
   readonly body: string;
@@ -201,6 +202,7 @@ const PAYLOADS: Readonly<
   "crawl4ai-render/v1": crawl4aiRenderPayload,
   "http-get/v1": httpGetPayload,
   "contact-email-find-hunter/v1": contactEmailFindPayload,
+  "contact-email-find-prospeo/v1": contactEmailFindPayload,
 });
 
 function workspaceSchema(
@@ -294,9 +296,16 @@ export class GenericOperationArtifactExecution implements ArtifactExecutionPort 
     } catch {
       return invalid();
     }
-    if (schema === "contact-email-find-hunter/v1") {
+    const isContactFind =
+      schema === "contact-email-find-hunter/v1" ||
+      schema === "contact-email-find-prospeo/v1";
+    const expectedContactFindToolId =
+      schema === "contact-email-find-prospeo/v1"
+        ? "contact_email.find.prospeo"
+        : "contact_email.find.hunter";
+    if (isContactFind) {
       if (
-        input.tool.id !== "contact_email.find.hunter" ||
+        input.tool.id !== expectedContactFindToolId ||
         input.subjectRef.subjectType !== "contact" ||
         typeof input.result.costMicrousd !== "string" ||
         observedMicrousd > 150000n ||
@@ -356,7 +365,7 @@ export class GenericOperationArtifactExecution implements ArtifactExecutionPort 
     return {
       data: payload.data as O,
       costCents,
-      ...(schema === "contact-email-find-hunter/v1"
+      ...(isContactFind
         ? { costMicrousd: observedMicrousd.toString() }
         : {}),
       durableReceipt: settled.durableReceipt,
@@ -391,7 +400,8 @@ export class GenericOperationArtifactExecution implements ArtifactExecutionPort 
       data,
       costCents,
       durableReceipt,
-      ...(schema === "contact-email-find-hunter/v1"
+      ...(schema === "contact-email-find-hunter/v1" ||
+      schema === "contact-email-find-prospeo/v1"
         ? { costMicrousd: "0" }
         : {}),
       ...(page

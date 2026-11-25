@@ -279,7 +279,7 @@ describe('guessEmailsForRunCompany —— M3 自动补全的双闸与红线', ()
     expect(result.probes).toBe(calls.length);
   });
 
-  it('未证实猜测落 RISKY（allowedActions 无 outreach），绝不升 VALID', async () => {
+  it('未证实猜测不落库，避免占位阻塞商业查邮与误导用户', async () => {
     const { deps, contactById, upsertedPoints, evidence } = makeDeps();
     contactById.set('ct1', contact('ct1', 'Hans Herold'));
     const { adapter } = verifierReturning(RISKY_VERDICT);
@@ -299,13 +299,10 @@ describe('guessEmailsForRunCompany —— M3 自动补全的双闸与红线', ()
       },
     );
 
-    expect(upsertedPoints).toHaveLength(1);
-    expect(upsertedPoints[0]!.status).toBe('RISKY');
-    const guessEvidence = evidence.find((row) => row.field === 'email.guess');
-    expect(guessEvidence?.status).toBe('RISKY');
-    expect(guessEvidence?.allowedActions).toEqual(['display', 'match']);
-    expect(result.persisted).toBe(1);
-    expect(result.risky).toBe(1);
+    expect(upsertedPoints).toHaveLength(0);
+    expect(evidence.find((row) => row.field === 'email.guess')).toBeUndefined();
+    expect(result.persisted).toBe(0);
+    expect(result.risky).toBe(0);
     expect(result.verified).toBe(0);
   });
 
@@ -402,7 +399,7 @@ describe('guessEmailsForRunCompany —— M3 自动补全的双闸与红线', ()
       key: 'smtp_self',
       verifyEmail: vi.fn(async (email: string): Promise<EmailVerdict> => {
         if (email.includes('sabine')) throw new Error('smtp blew up');
-        return RISKY_VERDICT;
+        return VALID_VERDICT;
       }),
     };
 

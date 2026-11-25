@@ -19,6 +19,7 @@ import {
   isExecutionControlError,
 } from "../execution-budget/execution-control-error";
 import { HunterProvider } from "../enrichment/finders/hunter.provider";
+import { ProspeoProvider } from "../enrichment/finders/prospeo.provider";
 import {
   enrichmentInputVersion,
   normalizeEnrichedEmail,
@@ -47,13 +48,19 @@ import {
 } from "./tool-contract";
 export const CONTROLLED_ENRICHMENT_PROVIDERS = [
   "hunter",
+  "prospeo",
   "millionverifier",
   "emailable",
   "zerobounce",
 ] as const;
 export type ControlledEnrichmentProvider =
   (typeof CONTROLLED_ENRICHMENT_PROVIDERS)[number];
-/** Closed registration truth for the four governance-listed producers; the factory takes ids from here. */
+export function isControlledFinderProvider(
+  provider: ControlledEnrichmentProvider,
+): provider is "hunter" | "prospeo" {
+  return provider === "hunter" || provider === "prospeo";
+}
+/** Closed registration truth for the five governance-listed producers; the factory takes ids from here. */
 export const CONTROLLED_ENRICHMENT_TOOL_DECLARATIONS = Object.freeze([
   Object.freeze({
     id: "contact_email.find.hunter",
@@ -61,6 +68,18 @@ export const CONTROLLED_ENRICHMENT_TOOL_DECLARATIONS = Object.freeze([
     durableResultStrategy: {
       kind: "artifact_reference",
       schema: "contact-email-find-hunter/v1",
+      maxBytes: 16384,
+      mediaTypes: ["application/octet-stream"],
+      privacyClass: "PERSONAL_DATA",
+      ttlSeconds: 86400,
+    },
+  }),
+  Object.freeze({
+    id: "contact_email.find.prospeo",
+    version: "1.0.0",
+    durableResultStrategy: {
+      kind: "artifact_reference",
+      schema: "contact-email-find-prospeo/v1",
       maxBytes: 16384,
       mediaTypes: ["application/octet-stream"],
       privacyClass: "PERSONAL_DATA",
@@ -84,7 +103,9 @@ export const CONTROLLED_ENRICHMENT_TOOL_DECLARATIONS = Object.freeze([
   }),
 ]);
 export function controlledEnrichmentToolId(provider: ControlledEnrichmentProvider): string {
-  return provider === "hunter" ? "contact_email.find.hunter" : "contact_email.verify." + provider;
+  return isControlledFinderProvider(provider)
+    ? "contact_email.find." + provider
+    : "contact_email.verify." + provider;
 }
 export interface ControlledEnrichmentProviderState {
   readonly provider: ControlledEnrichmentProvider;
@@ -131,6 +152,7 @@ export interface ContactEnrichmentSafetyToolDeps {
 
 export const CONTROLLED_ENRICHMENT_API_HOSTS = Object.freeze({
   hunter: "api.hunter.io",
+  prospeo: "api.prospeo.io",
   millionverifier: "api.millionverifier.com",
   emailable: "api.emailable.com",
   zerobounce: "api.zerobounce.net",
@@ -204,10 +226,7 @@ function assertBinding(
   config: ControlledEnrichmentProviderState,
 ): void {
   const step = wire.step;
-  const toolId =
-    provider === "hunter"
-      ? "contact_email.find.hunter"
-      : "contact_email.verify." + provider;
+  const toolId = controlledEnrichmentToolId(provider);
   if (
     step.stepId !== input.stepId ||
     step.provider !== provider ||
@@ -222,7 +241,7 @@ function assertBinding(
     ctx.artifactSubject.subjectId !== step.contactId
   )
     return denied();
-  if (provider === "hunter") {
+  if (isControlledFinderProvider(provider)) {
     if (
       step.phase !== "FINDER" ||
       !wire.finder ||
@@ -282,11 +301,15 @@ function controlledFetch(
   return async (input, init) => {
     try {
       capture.fetches += 1;
+      const isProspeoPost = provider === "prospeo";
       if (
         capture.fetches !== 1 ||
-        init?.method !== "GET" ||
-        init.body !== undefined ||
-        init.signal?.aborted
+        init?.signal?.aborted ||
+        (isProspeoPost
+          ? init?.method !== "POST" ||
+            typeof init.body !== "string" ||
+            Buffer.byteLength(init.body, "utf8") > 16384
+          : init?.method !== "GET" || init.body !== undefined)
       )
         return denied();
       const raw =
@@ -297,10 +320,20 @@ function controlledFetch(
             : input.url;
       const url = new URL(raw);
       if (url.origin !== new URL(used.baseUrl).origin) return denied();
+      if (isProspeoPost && url.pathname !== "/enrich-person") return denied();
       const response = await requestPublicHttp(
         raw,
         {
-          method: "GET",
+          method: isProspeoPost ? "POST" : "GET",
+          ...(isProspeoPost
+            ? {
+                headers: {
+                  "x-key": used.apiKey!,
+                  "content-type": "application/json",
+                },
+                body: init!.body as string,
+              }
+            : {}),
           timeoutMs: timeoutOf(used),
           maxBytes: 1000000,
           maxRedirects: 0,
@@ -364,7 +397,7 @@ function rethrowCaptured(capture: PhysicalCapture): void {
   return denied();
 }
 function verificationProvider(
-  provider: Exclude<ControlledEnrichmentProvider, "hunter">,
+  provider: Exclude<ControlledEnrichmentProvider, "hunter" | "prospeo">,
   config: ControlledEnrichmentProviderState,
   fetchImpl: typeof fetch,
 ): EmailVerificationProvider {
@@ -388,7 +421,7 @@ async function executeControlled(
   const input = parseInput(inputValue);
   const current = await deps.currentProvider(provider);
   assertProvider(provider, current, initial);
-  if (provider === "hunter") assertPiiKeyConfigured();
+  if (isControlledFinderProvider(provider)) assertPiiKeyConfigured();
   const wire = await deps.loadTrustedInput(input.stepId, ctx);
   assertBinding(provider, wire, input, ctx, current);
   const capture: PhysicalCapture = { fetches: 0, wires: 0, failure: undefined };
@@ -403,9 +436,15 @@ async function executeControlled(
   );
   const costMicrousd = quoteOf(initial);
   const costCents = Number(costMicrousd) / 10000;
-  if (provider === "hunter") {
+  if (isControlledFinderProvider(provider)) {
     const payload = wire.finder!;
-    const adapter = new HunterProvider(current, fetchImpl);
+    const adapter =
+      provider === "hunter"
+        ? new HunterProvider(current, fetchImpl)
+        : new ProspeoProvider(
+            { ...current, minIntervalMs: 0, max429Retries: 0 },
+            fetchImpl,
+          );
     const outcome = await adapter.findEmail({
       ...payload,
       workspaceId: wire.step.workspaceId,
@@ -480,7 +519,7 @@ export function createContactEnrichmentSafetyTools(
   return Object.freeze(
     CONTROLLED_ENRICHMENT_PROVIDERS.map((provider) => {
       const initial = Object.freeze({ ...deps.providers[provider] });
-      const finder = provider === "hunter";
+      const finder = isControlledFinderProvider(provider);
       const quote = quoteOf(initial);
       if (
         !Number.isSafeInteger(initial.retentionSeconds) ||
@@ -518,7 +557,10 @@ export function createContactEnrichmentSafetyTools(
         durableResultStrategy: finder
           ? {
               kind: "artifact_reference",
-              schema: "contact-email-find-hunter/v1",
+              schema:
+                provider === "prospeo"
+                  ? "contact-email-find-prospeo/v1"
+                  : "contact-email-find-hunter/v1",
               maxBytes: 16384,
               mediaTypes: ["application/octet-stream"],
               privacyClass: "PERSONAL_DATA",
@@ -555,11 +597,12 @@ export function registerContactEnrichmentSafetyTools(
   registry: ToolRegistry,
   deps: ContactEnrichmentSafetyToolDeps,
 ): ToolRegistry {
-  const [hunterTool, millionVerifierTool, emailableTool, zeroBounceTool] =
+  const [hunterTool, prospeoTool, millionVerifierTool, emailableTool, zeroBounceTool] =
     createContactEnrichmentSafetyTools(deps);
-  if (!hunterTool || !millionVerifierTool || !emailableTool || !zeroBounceTool)
+  if (!hunterTool || !prospeoTool || !millionVerifierTool || !emailableTool || !zeroBounceTool)
     throw new ExecutionControlError("BUDGET_OPERATION_REPLAY_UNAVAILABLE");
   registry.register(hunterTool as Tool);
+  registry.register(prospeoTool as Tool);
   registry.register(millionVerifierTool as Tool);
   registry.register(emailableTool as Tool);
   registry.register(zeroBounceTool as Tool);

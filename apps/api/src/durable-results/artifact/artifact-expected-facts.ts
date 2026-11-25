@@ -194,7 +194,8 @@ export function parseArtifactExpectedFactsForResultSchema(
 ): ArtifactExpectedFacts | undefined {
   if (
     resultSchema === "sanctions-download/v1" ||
-    resultSchema === "contact-email-find-hunter/v1"
+    resultSchema === "contact-email-find-hunter/v1" ||
+    resultSchema === "contact-email-find-prospeo/v1"
   ) {
     return value === undefined ? undefined : invalid();
   }
@@ -256,7 +257,10 @@ export function parseArtifactExpectedFactsColumns(
   resultSchema: string,
   columns: ArtifactExpectedFactsColumns,
 ): ArtifactExpectedFacts | undefined {
-  if (resultSchema === "contact-email-find-hunter/v1") {
+  if (
+    resultSchema === "contact-email-find-hunter/v1" ||
+    resultSchema === "contact-email-find-prospeo/v1"
+  ) {
     const snapshot = snapshotClosed(columns, [
       "expectedHttpStatus",
       "expectedHttpOk",

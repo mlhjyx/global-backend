@@ -479,10 +479,18 @@ export function createRun2PipelineActivities(deps: {
         return { profiled: false, matched: false, unclassified: false, reason: 'persist_failed' };
       }
 
+      if (profile === null) {
+        return {
+          profiled: false,
+          matched: false,
+          unclassified: false,
+          reason: 'profile_failed',
+        };
+      }
       return {
         profiled: true,
         matched: committed,
-        unclassified: profile !== null && profile.tradeRoleSource === null,
+        unclassified: profile.tradeRoleSource === null,
       };
     },
 

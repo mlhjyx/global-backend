@@ -27,7 +27,7 @@ describe('native-pool safe preflight composition, fake database and zero physica
     const find = vi.spyOn(HunterProvider.prototype, 'findEmail').mockRejectedValue(new Error('must_not_invoke_during_preflight'));
     try {
       const x = world(); const result = await x.prepare(x.input); expect(result.status).toBe('PREPARED'); if (result.status !== 'PREPARED') throw new Error('expected prepared');
-      expect(x.tx.canonicalContact.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { companyId: C, contactPoints: { none: { type: 'email' } } }, take: 10 }));
+      expect(x.tx.canonicalContact.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { companyId: C, contactPoints: { none: { type: 'email', verificationState: 'VALID' } } }, take: 10 }));
       expect(result.plan.targets[0]?.inputVersion).toBe(enrichmentInputVersion({ fullName: 'Synthetic Person', domain: 'company.example.invalid', companyName: 'Synthetic Company' }));
       expect(result.plan.slots.map((slot) => slot.provider)).toEqual(['hunter','millionverifier','emailable']); expect(result.plan.slots.map((slot) => slot.quoteMicrousd)).toEqual(['1700','1780','7600']);
       expect(result.plan.deadlineAtMs).toBe(601000); expect(JSON.stringify(result.plan)).not.toMatch(/Synthetic Person|company\.example\.invalid|fake-hunter/); expect(find).not.toHaveBeenCalled();
@@ -317,7 +317,7 @@ describe("F02/F15 real managed composition root", () => {
       buildBroker: (ports) => { captured = ports; return broker as never; },
     });
     expect(captured).toBeDefined();
-    expect(Object.keys(captured!.providers).sort()).toEqual(["emailable", "hunter", "millionverifier", "zerobounce"]);
+    expect(Object.keys(captured!.providers).sort()).toEqual(["emailable", "hunter", "millionverifier", "prospeo", "zerobounce"]);
     expect(typeof captured!.currentProvider).toBe("function");
     expect(typeof captured!.loadTrustedInput).toBe("function");
     expect(managed.broker).toBe(broker);

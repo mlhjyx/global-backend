@@ -29,8 +29,8 @@ describe('email-guess-persist · 落库计划（纯）', () => {
   it('verified → VALID 计划', () => {
     expect(guessedEmailWritePlan(verifiedResult)).toMatchObject({ email: 'h.herold@acme.de', pointStatus: 'VALID', verified: true, pattern: 'f.last' });
   });
-  it('unverified → RISKY 计划', () => {
-    expect(guessedEmailWritePlan(unverifiedResult)).toMatchObject({ email: 'hans.herold@acme.de', pointStatus: 'RISKY', verified: false });
+  it('unverified → 不落库(null)，避免未证实盲猜占位阻塞商业查邮', () => {
+    expect(guessedEmailWritePlan(unverifiedResult)).toBeNull();
   });
   it('blocked/exhausted/无 best → 不落(null)', () => {
     expect(guessedEmailWritePlan(blockedResult)).toBeNull();
@@ -102,14 +102,12 @@ describe('email-guess-persist · 落库（fake tx）', () => {
     expect(create.mock.calls[0][0].data.value.personal_data).toBe(true);
   });
 
-  it('unverified：contact_point status=RISKY 无 verifiedAt，证据不含 outreach', async () => {
+  it('unverified：拒绝落库，不写 contact_point 或证据', async () => {
     const { tx, upsert, create } = fakeTx();
     const out = await persistGuessedEmail(tx, { workspaceId: 'w', contactId: 'c1', result: unverifiedResult, suppressedEmails: new Set(), now: NOW });
-    expect(out).toMatchObject({ persisted: true, status: 'RISKY' });
-    expect(upsert.mock.calls[0][0].create.status).toBe('RISKY');
-    expect(upsert.mock.calls[0][0].create.verifiedAt).toBeNull();
-    expect(upsert.mock.calls[0][0].update.verifiedAt).toBeNull(); // 降级也显式清 verifiedAt（不留 stale）
-    expect(create.mock.calls[0][0].data.allowedActions).not.toContain('outreach');
+    expect(out).toMatchObject({ persisted: false, reason: 'catch_all_domain_unconfirmable' });
+    expect(upsert).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
   });
 
   it('suppression 命中：不落，upsert 不调用', async () => {
@@ -262,7 +260,7 @@ describe('A4：分类/验证元数据落库', () => {
     expect(verificationMethodFromVerdictDetail(null)).toBe('pattern_guess');
   });
 
-  it('未触网（gate 不可用）的落库如实记 pattern_guess', async () => {
+  it('未触网（gate 不可用）的 unverified 结果不落库', async () => {
     const failureResult: GuessResult = {
       status: 'unverified',
       domainFact: 'unreachable',
@@ -272,7 +270,7 @@ describe('A4：分类/验证元数据落库', () => {
       reason: 'smtp_unreachable_unconfirmable',
     };
     const { tx, upsert } = fakeTx();
-    await persistGuessedEmail(tx, {
+    const out = await persistGuessedEmail(tx, {
       workspaceId: 'w',
       contactId: 'c1',
       result: failureResult,
@@ -280,7 +278,8 @@ describe('A4：分类/验证元数据落库', () => {
       lawfulBasis: LIA,
       now: NOW,
     });
-    expect(upsert.mock.calls[0][0].create).toMatchObject({ verificationMethod: 'pattern_guess' });
+    expect(out).toMatchObject({ persisted: false, reason: 'smtp_unreachable_unconfirmable' });
+    expect(upsert).not.toHaveBeenCalled();
   });
 
   it('落库携带 personal/pattern_guess/smtp_rcpt/catch_all 与 lawful basis', async () => {

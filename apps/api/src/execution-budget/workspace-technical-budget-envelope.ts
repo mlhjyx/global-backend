@@ -502,6 +502,7 @@ function enrichContactsEnvelope(
       softDeadlineMs: ENRICH_SOFT_DEADLINE_MS,
       contactEnrichPricePolicyVersion: ENRICH_CONTACT_PRICE_POLICY_VERSION,
       hunterUnitQuoteUpperMicrousd: unit('hunter'),
+      prospeoUnitQuoteUpperMicrousd: unit('prospeo'),
       millionverifierUnitQuoteUpperMicrousd: unit('millionverifier'),
       emailableUnitQuoteUpperMicrousd: unit('emailable'),
       zerobounceUnitQuoteUpperMicrousd: unit('zerobounce'),
