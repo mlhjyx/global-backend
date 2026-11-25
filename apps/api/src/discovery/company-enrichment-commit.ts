@@ -6,6 +6,7 @@ import {
   sanitizeCanonicalCompanyAttributes,
   sanitizeStoredCompanyFieldEvidence,
 } from './canonical-company-attributes';
+import { resolveCompanyJurisdiction } from './jurisdiction-resolver';
 
 export interface CompanyEnrichmentHit {
   key: string;
@@ -96,15 +97,45 @@ export async function commitCompanyEnrichmentResults(
     });
   }
   if (governedHits.length === 0) return false;
+  const backfilledCountry = current.country
+    ? null
+    : resolveCompanyJurisdiction({
+        name: current.name,
+        domain: current.domain,
+        country: current.country,
+        attributes: merged,
+      });
   const updated = await tx.canonicalCompany.updateMany({
     where: { id: current.id, status: { not: 'SUPPRESSED' } },
     data: {
       attributes: merged as Prisma.InputJsonValue,
+      ...(backfilledCountry ? { country: backfilledCountry.iso } : {}),
       ...(args.status ? { status: args.status } : {}),
       version: { increment: 1 },
     },
   });
   if (updated.count !== 1) return false;
+
+  if (backfilledCountry) {
+    await tx.fieldEvidence.create({
+      data: {
+        workspaceId: args.workspaceId,
+        entityType: 'company',
+        entityId: current.id,
+        field: 'country',
+        value: {
+          iso: backfilledCountry.iso,
+          source: backfilledCountry.source,
+          evidence: backfilledCountry.evidence,
+        } as Prisma.InputJsonValue,
+        providerKey: 'jurisdiction_resolver',
+        confidence: 0.9,
+        license: 'public',
+        allowedActions: ['display', 'match'] as Prisma.InputJsonValue,
+        dataClass: 'green',
+      },
+    });
+  }
 
   for (const hit of governedHits) {
     // L1: the website profile's provenance URL is the page its facts came from (design §8: BI-14's

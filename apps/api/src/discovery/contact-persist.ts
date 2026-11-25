@@ -13,7 +13,11 @@ import { lockWorkspaceSuppressionPolicy } from './suppression-policy-lock';
 import { assertProductDiscoveryProvenance, resolveEvidenceLicense } from './evidence-license';
 import { sourceTypeForContactObservation } from './contact-point-verification-state';
 import { upsertObservedContactPoint } from './contact-point-writer';
-import { inferCountryFromCcTld } from './domain-country';
+import {
+  conservativeCountryCodeForFallback,
+  inferConservativeEuUkFallback,
+  resolveCompanyJurisdiction,
+} from './jurisdiction-resolver';
 
 /** field_evidence 的 email 值分级：职能邮箱 amber（ePrivacy），人名邮箱 red（GDPR Art.4）。 */
 function emailDataClass(email: string): 'amber' | 'red' {
@@ -79,8 +83,8 @@ export async function persistDiscoveredContacts(
   // 🔒 Codex P1「Prevent inserts after the company contact re-read」的写入侧硬底：在**本写入事务内**对公司行
   // 取 FOR SHARE 锁并复读 status（与删除擦除活动的 FOR UPDATE 互斥）。载入闸门在长网络 fan-out 后可能已失效
   //（发现载入时 ACTIVE、擦除随后标 SUPPRESSED）——此处是提交前最后一道确定性闸：公司已 SUPPRESSED 则整批不入库。
-  const locked = await tx.$queryRaw<{ status: string; name: string; domain: string | null; country?: string | null }[]>`
-    SELECT status, name, domain, country FROM canonical_company WHERE id = ${args.company.id}::uuid FOR SHARE`;
+  const locked = await tx.$queryRaw<{ status: string; name: string; domain: string | null; country?: string | null; attributes?: unknown }[]>`
+    SELECT status, name, domain, country, attributes FROM canonical_company WHERE id = ${args.company.id}::uuid FOR SHARE`;
   if (!locked[0] || locked[0].status === 'SUPPRESSED') {
     return {
       created: 0,
@@ -258,8 +262,10 @@ export async function persistDiscoveredContacts(
     await maybeScheduleContactArticle14(tx, {
       workspaceId: args.workspaceId,
       contactId,
+      name: locked[0].name,
       country: locked[0].country,
       domain: locked[0].domain,
+      attributes: locked[0].attributes,
       adapterKey: args.adapterKey,
       email,
       personalData: c.personalData,
@@ -270,32 +276,66 @@ export async function persistDiscoveredContacts(
   return { created, merged, skippedSuppressed, skippedInvalid };
 }
 
-/** 具名联系人或 personal/other 邮箱在 EU/UK 入库时同事务排期 GDPR Art.14 通知。 */
+/** 具名联系人或 personal/other 邮箱在 EU/UK 入库时同事务排期 GDPR Art.14 通知（缺国别时对明确欧洲信号保守 Fail-Closed）。 */
 async function maybeScheduleContactArticle14(
   tx: Prisma.TransactionClient,
   args: {
     workspaceId: string;
     contactId: string;
+    name?: string | null;
     country?: string | null;
     domain?: string | null;
+    attributes?: unknown;
     adapterKey: string;
     email?: string;
     personalData?: boolean;
   },
 ): Promise<void> {
-  const effectiveCountry = args.country ?? inferCountryFromCcTld(args.domain);
-  if (!effectiveCountry) return;
   const emailType = args.email ? classifyContactEmail(args.email).emailType : null;
   const isPersonalRecord =
     Boolean(args.personalData) || emailType === 'personal' || emailType === 'other';
   if (!isPersonalRecord) return;
   const noticeModel = (tx as { article14Notice?: { findFirst?: unknown } }).article14Notice;
   if (typeof noticeModel?.findFirst !== 'function') return;
+
+  const resolvedCountry = resolveCompanyJurisdiction({
+    name: args.name,
+    domain: args.domain,
+    country: args.country,
+    attributes: args.attributes,
+  })?.iso;
+
+  let effectiveCountry: string | undefined = resolvedCountry;
+  let sourceCategory = args.adapterKey;
+  if (!effectiveCountry) {
+    let targetMarkets: string[] | undefined;
+    const directFallback = inferConservativeEuUkFallback({ name: args.name, domain: args.domain });
+    let fallback = directFallback;
+    if (!fallback) {
+      const icpModel = (tx as { icpDefinition?: { findMany?: unknown } }).icpDefinition;
+      if (typeof icpModel?.findMany === 'function') {
+        const icps = await tx.icpDefinition.findMany({
+          where: { workspaceId: args.workspaceId, status: 'ACTIVE' },
+          select: { targetMarkets: true },
+          take: 5,
+        });
+        targetMarkets = icps.flatMap((row) =>
+          Array.isArray(row.targetMarkets)
+            ? row.targetMarkets.filter((m): m is string => typeof m === 'string')
+            : [],
+        );
+        fallback = inferConservativeEuUkFallback({ name: args.name, domain: args.domain }, targetMarkets);
+      }
+    }
+    if (!fallback) return;
+    effectiveCountry = conservativeCountryCodeForFallback(fallback);
+    sourceCategory = `${args.adapterKey}:conservative_eu_fallback`;
+  }
   await scheduleArticle14NoticeInTransaction(tx, {
     workspaceId: args.workspaceId,
     subjectId: args.contactId,
     country: effectiveCountry,
-    sourceCategory: args.adapterKey,
+    sourceCategory,
   });
 }
 

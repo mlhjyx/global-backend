@@ -32,6 +32,7 @@ import {
   readSelectionMarker,
   type OfferingSelectionMarker,
 } from '../company/offering-selection';
+import { isNavigationNoiseOffering } from '../discovery/offering-noise-filter';
 import {
   applyDomainAckConsumerTransaction,
   applyDomainAckConsumerTransactions,
@@ -641,7 +642,7 @@ export function createUnderstandingActivities(deps: {
       const merged = new Map<string, ExtractedOffering & { sourceUrl: string }>();
       for (const page of args.pages) {
         for (const o of page.offerings) {
-          if (!o.name?.trim()) continue;
+          if (!o.name?.trim() || isNavigationNoiseOffering(o.name)) continue;
           const key = o.name.toLowerCase().replace(/\s+/g, ' ').trim();
           const existing = merged.get(key);
           if (!existing || (o.confidence ?? 0) > (existing.confidence ?? 0)) {

@@ -1,0 +1,66 @@
+/**
+ * 统一企业国别与法域解析中枢（Batch 1.5-A）。
+ *
+ * 解决现网实跑 run 607b314d 暴露的「41.8% 公司 country=NULL、58.2% 联系人归属空国别公司、
+ * 导致德国 Centroplan GmbH 28 个具名员工静默漏排 GDPR Art.14」问题：
+ *  1) 复用 `inferPrefilterCountry` 五级高置信信号（权威列 → GLEIF/VAT → 70+ 单国 ccTLD →
+ *     28 类单国专属法定后缀如 S.r.l./S.p.A./B.V./GmbH & Co. KG → 60+ 国际电话区号）；
+ *  2) 提供保守的 EU/UK 合规 Fail-Closed 兜底（仅当确定性解析仍为空，且命中 `.eu`、
+ *     德语/欧盟跨国企业形态如 `GmbH`/`KGaA`/`SE`/`UG`/`mbH`，或所属工作区目标市场全部为 EU/UK 时
+ *     触发，绝不误伤美国/中东/拉美/亚太市场）。
+ */
+import { normalizeJurisdiction } from '../compliance/jurisdiction';
+import {
+  inferPrefilterCountry,
+  type PrefilterCountryInference,
+  type PrefilterCountryInput,
+} from './prefilter-country';
+import { normalizeMarketIsos } from './judgment/gates';
+
+export type ResolvedCompanyJurisdiction = PrefilterCountryInference;
+
+/** 多国共用但均落入 EU/EEA/CH 高保护法域的企业后缀（如 GmbH 跨 DE/AT/CH，不可定单国但必受 GDPR/FADP 约束）。 */
+const EU_BLOC_LEGAL_SUFFIX_RE =
+  /(?:^|[\s,(-])(?:GmbH|mbH|KGaA|UG\s*\(haftungsbeschr[äa]nkt\)|SE\s*&\s*Co\.|SA\/NV)(?:$|[\s.,)])/u;
+
+/** 确定性解析公司 ISO 3166-1 alpha-2 国别（不猜多国共用后缀或泛用域名）。 */
+export function resolveCompanyJurisdiction(
+  input: PrefilterCountryInput,
+): ResolvedCompanyJurisdiction | null {
+  return inferPrefilterCountry(input);
+}
+
+/**
+ * GDPR Art.14 保守 Fail-Closed 兜底：
+ * 当公司 `country` 仍无法确定单国 ISO 时，仅在存在明确欧洲法域信号时返回 `'EU'` 或 `'UK'`：
+ *  1) 域名后缀为 `.eu`；
+ *  2) 企业法定名称命中多国欧盟/DACH 专属后缀（如 `Centroplan GmbH`）；
+ *  3) 工作区显式配置的目标市场非空且全部落入 EU/UK（如仅投意大利/德国光伏市场）。
+ */
+export function inferConservativeEuUkFallback(
+  company: { readonly name?: string | null; readonly domain?: string | null },
+  workspaceTargetMarkets?: readonly string[] | null,
+): 'EU' | 'UK' | null {
+  const domain = (company.domain ?? '').trim().toLowerCase().replace(/^https?:\/\//u, '').replace(/\/.*$/u, '');
+  if (domain.endsWith('.eu')) return 'EU';
+
+  const name = (company.name ?? '').trim();
+  if (name && EU_BLOC_LEGAL_SUFFIX_RE.test(name)) return 'EU';
+
+  if (workspaceTargetMarkets && workspaceTargetMarkets.length > 0) {
+    const isos = normalizeMarketIsos(workspaceTargetMarkets);
+    if (isos.length > 0) {
+      const jurisdictions = new Set(isos.map((iso) => normalizeJurisdiction(iso)));
+      const allEuOrUk = [...jurisdictions].every((j) => j === 'EU' || j === 'UK');
+      if (allEuOrUk) {
+        return jurisdictions.size === 1 && jurisdictions.has('UK') ? 'UK' : 'EU';
+      }
+    }
+  }
+  return null;
+}
+
+/** 将保守法域兜底转换为 `scheduleArticle14NoticeInTransaction` 接受的国别代表码。 */
+export function conservativeCountryCodeForFallback(fallback: 'EU' | 'UK'): 'DE' | 'GB' {
+  return fallback === 'UK' ? 'GB' : 'DE';
+}

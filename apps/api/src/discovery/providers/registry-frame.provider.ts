@@ -30,6 +30,7 @@ import {
 import { RegistryQueryError, parseRegistryQueryFilters, queryRegistryEntities } from '../../registry/query';
 import { isIso3166Alpha2 } from '../iso3166';
 import { targetCountryCodes } from '../search-localization';
+import { isExecutionControlError } from '../../execution-budget/execution-control-error';
 import type {
   CompanyDiscoveryAdapter,
   CompanyDiscoveryQuery,
@@ -141,7 +142,19 @@ export class RegistryFrameDiscoveryProvider implements CompanyDiscoveryAdapter {
       }
       throw error;
     }
-    const records = await queryRegistryEntities(prisma, filters);
+    let records;
+    try {
+      records = await queryRegistryEntities(prisma, filters);
+    } catch (error) {
+      if (isExecutionControlError(error)) throw error;
+      console.warn(
+        `[registry_frame] query failed (fail-safe empty): ${error instanceof Error ? error.message.slice(0, 140) : String(error).slice(0, 140)}`,
+      );
+      return this.emptyResult(ctx, {
+        errorClass: 'EMPTY_RESULT',
+        reasonCode: 'REGISTRY_QUERY_UNAVAILABLE',
+      });
+    }
     const emptyOutcome: DiscoveryOutcome | undefined =
       records.length === 0
         ? { errorClass: 'EMPTY_RESULT', reasonCode: 'NO_ROWS' }

@@ -642,15 +642,6 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/discovery/providers/bigquery-patents.provider.ts#discoverContacts": {
-      "file": "apps/api/src/discovery/providers/bigquery-patents.provider.ts",
-      "name": "discoverContacts",
-      "line": 167,
-      "complexity": 25,
-      "owner": "P6-CI-10",
-      "expiresAt": "2027-01-31",
-      "reason": "存量高复杂度函数（棘轮：只许降低）"
-    },
     "apps/api/src/discovery/providers/decision-maker.provider.ts#extractAnchorsFromHtml": {
       "file": "apps/api/src/discovery/providers/decision-maker.provider.ts",
       "name": "extractAnchorsFromHtml",

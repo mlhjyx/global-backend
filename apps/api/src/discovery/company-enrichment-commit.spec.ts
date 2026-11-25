@@ -117,6 +117,41 @@ describe('company enrichment commit evidence provenance (L1)', () => {
     expect(data).not.toHaveProperty('sourceUrl');
     expect(data.fetchedAt).toEqual(new Date('2026-10-01T00:00:00.000Z'));
   });
+
+  it('backfills canonical_company.country and writes green field_evidence when enrichment yields VAT country on a NULL-country company', async () => {
+    const create = vi.fn(async () => ({}));
+    const tx = txWith(create);
+    await commitCompanyEnrichmentResults(tx, {
+      workspaceId: 'ws-1',
+      companyId: 'co-1',
+      hits: [
+        {
+          key: 'website_profile',
+          result: {
+            matched: true,
+            confidence: 0.9,
+            attributes: { vat_id: 'DE255123456' },
+            costCents: 0,
+          },
+        },
+      ],
+    });
+    expect(vi.mocked(tx.canonicalCompany.updateMany)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ country: 'DE' }),
+      }),
+    );
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          field: 'country',
+          providerKey: 'jurisdiction_resolver',
+          dataClass: 'green',
+          value: expect.objectContaining({ iso: 'DE', source: 'vat_id' }),
+        }),
+      }),
+    );
+  });
 });
 
 describe('company enrichment commit suppression boundary', () => {

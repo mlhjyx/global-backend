@@ -16,6 +16,56 @@ export const ARTICLE14_DEADLINE_DAYS = 30;
 export const PERSONAL_CONTACT_RETENTION_DAYS = 730;
 const DAY_MS = 86_400_000;
 
+/**
+ * 面向中国出海 B2B 企业的标准合法利益评估（LIA）默认模板（Batch 1.5-A）。
+ * 供租户在启用欧盟/英国市场时一键激活留档，避免前台要求非法律人员手工起草 LIA 文档。
+ */
+export const DEFAULT_B2B_OUTREACH_LIA_TEMPLATE = Object.freeze({
+  basis: 'legitimate_interest' as const,
+  purpose: 'B2B corporate procurement and supply-chain partnership outreach in EU/UK markets',
+  necessityNote:
+    'Limited to publicly disclosed corporate role/decision-maker business contact data strictly necessary to initiate B2B commercial inquiries.',
+  balancingNote:
+    'Low privacy impact (work-context data only, no consumer profiling); mitigated by Art.14 compact disclosure in first contact, one-click opt-out, permanent suppression, and Art.17 erasure.',
+  ref: 'LIA-B2B-DEFAULT-V1',
+});
+
+/** 事务内幂等激活工作区级默认 B2B LIA 记录（已有 ACTIVE 记录时直接复用，不重复写入）。 */
+export async function ensureDefaultWorkspaceLiaInTransaction(
+  tx: Prisma.TransactionClient,
+  input: { readonly workspaceId: string; readonly recordedBy: string },
+): Promise<{ id: string; created: boolean; ref: string | null }> {
+  const existing = await tx.liaRecord.findFirst({
+    where: {
+      workspaceId: input.workspaceId,
+      scope: 'workspace',
+      scopeRef: null,
+      status: 'ACTIVE',
+    },
+    select: { id: true, ref: true },
+    orderBy: { effectiveAt: 'desc' },
+  });
+  if (existing) {
+    return { id: existing.id, created: false, ref: existing.ref };
+  }
+  const created = await tx.liaRecord.create({
+    data: {
+      workspaceId: input.workspaceId,
+      scope: 'workspace',
+      scopeRef: null,
+      basis: DEFAULT_B2B_OUTREACH_LIA_TEMPLATE.basis,
+      purpose: DEFAULT_B2B_OUTREACH_LIA_TEMPLATE.purpose,
+      necessityNote: DEFAULT_B2B_OUTREACH_LIA_TEMPLATE.necessityNote,
+      balancingNote: DEFAULT_B2B_OUTREACH_LIA_TEMPLATE.balancingNote,
+      ref: DEFAULT_B2B_OUTREACH_LIA_TEMPLATE.ref,
+      recordedBy: input.recordedBy,
+      status: 'ACTIVE',
+    },
+    select: { id: true, ref: true },
+  });
+  return { id: created.id, created: true, ref: created.ref };
+}
+
 export interface ScheduleArticle14Input {
   readonly workspaceId: string;
   readonly subjectId: string;

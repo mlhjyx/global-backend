@@ -136,6 +136,25 @@ describe('M0③ 快扫：批量粗判解析', () => {
     expect(prompt).toContain('Beta');
     expect(prompt).toContain('DE pump distributors');
   });
+
+  it('passes inferred country, extraction_evidence, and two-layer buyer-role guidance without requiring seller tech specs', () => {
+    const prompt = buildQuickJudgePrompt({ icp_name: 'Italy HJT 730W PV EPCs' }, [
+      {
+        id: 'c-it',
+        name: 'Omnia Solar S.r.l.',
+        domain: 'omniasolar.it',
+        country: null,
+        industry: 'solar',
+        attributes: {
+          extraction_evidence: 'Omnia Solar S.r.l. - Impianti fotovoltaici industriali EPC in Italia',
+        },
+      },
+    ]);
+    expect(prompt).toContain('"country": "IT"');
+    expect(prompt).toContain('Impianti fotovoltaici industriali EPC in Italia');
+    expect(prompt).toContain('必过层');
+    expect(prompt).toContain('绝不作拒判门槛');
+  });
 });
 
 describe('QUICK_SCAN_POOL_LIMIT —— 产品帽 vs 防爆安全界', () => {

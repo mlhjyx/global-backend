@@ -38,6 +38,7 @@ import {
   type BattleCsvRow,
   type BattleDecisionMaker,
 } from './battle-csv-builder';
+import { filterOfferingNames } from '../discovery/offering-noise-filter';
 
 /** A week's accepted leads are reviewed by hand; more than this is refused, never truncated. */
 export const WEEKLY_REPORT_MAX_LEADS = 1_000;
@@ -498,12 +499,11 @@ export class WeeklyReportService {
             where: { companyId: icp.companyId },
             select: { name: true },
             orderBy: { createdAt: 'asc' },
-            take: 3,
+            take: 8,
           })
         : [];
-    const offeringSummary = offerings
-      .map((item) => item.name.trim())
-      .filter(Boolean)
+    const offeringSummary = filterOfferingNames(offerings.map((item) => item.name))
+      .slice(0, 3)
       .join(', ');
     const sellerProductSummary =
       offeringSummary || seller?.summary?.trim() || seller?.industry?.trim() || null;

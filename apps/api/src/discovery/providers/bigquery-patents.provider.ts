@@ -85,21 +85,52 @@ export function toContactRecord(rawName: string, applicantName: string): Provide
  * 🔴 用途门：google_patents.search = required 工具，直连前过 §8.8 fail-closed（无 broker = 不出网）。
  * fail-safe：任何失败（无 creds/网络/闸门拒绝/超额）返空、不抛穿（单源不阻断其余）。
  */
-/** 专利源模式（env `PATENT_SOURCE_MODE`）：cache=读 postgres 缓存（生产，零 BQ 字节/零 egress）|
- *  direct=逐公司 BQ（仅 verify/调试，走 §8.8 broker）| off=关（默认；未签 LIA 前恒 off）。无效值 → off。 */
-export type PatentSourceMode = 'cache' | 'direct' | 'off';
+/**
+ * 专利源模式（env `PATENT_SOURCE_MODE`）：
+ *  - `cache`：读 postgres 缓存（生产，零 BQ 字节/零 egress）；
+ *  - `workspace_lia`：按租户实时校验 `lia_record(status='ACTIVE')`，仅已签 LIA 的工作区读缓存，未签者静默空（多租户推荐）；
+ *  - `direct`：逐公司 BQ（仅 verify/调试，走 §8.8 broker）；
+ *  - `off`：关（默认）。无效值 → off。
+ */
+export type PatentSourceMode = 'cache' | 'workspace_lia' | 'direct' | 'off';
 export function resolvePatentSourceMode(raw?: string): PatentSourceMode {
   const m = (raw ?? process.env.PATENT_SOURCE_MODE ?? 'off').toLowerCase();
-  return m === 'cache' || m === 'direct' ? m : 'off';
+  return m === 'cache' || m === 'workspace_lia' || m === 'direct' ? m : 'off';
+}
+
+/** 🟢 纯企业级专利研发信号摘要（零发明人 PII，无需 LIA 即可用于企业画像与破冰话题）。 */
+export interface CompanyPatentSignalSummary {
+  readonly patentCount: number;
+  readonly soleApplicantCount: number;
+  readonly filingJurisdictions: readonly string[];
+}
+
+export function summarizeCompanyPatentSignals(
+  patents: readonly PatentRecord[],
+): CompanyPatentSignalSummary {
+  let soleApplicantCount = 0;
+  const jurisdictions = new Set<string>();
+  for (const p of patents) {
+    if (p.applicants.length === 1) soleApplicantCount += 1;
+    const prefix = /^([A-Z]{2})/.exec((p.publicationNumber ?? '').trim().toUpperCase())?.[1];
+    if (prefix) jurisdictions.add(prefix);
+  }
+  return {
+    patentCount: patents.length,
+    soleApplicantCount,
+    filingJurisdictions: [...jurisdictions].sort(),
+  };
 }
 
 export interface GooglePatentsProviderDeps {
   broker?: ExecutionBroker;
   now?: () => number;
-  /** cache 模式读缓存（读 postgres，无 egress，不经 broker）。缺失 → cache 模式降级空。 */
+  /** cache / workspace_lia 模式读缓存（读 postgres，无 egress，不经 broker）。缺失 → 降级空。 */
   cacheReader?: (companyName: string, opts: PatentSearchOptions) => Promise<PatentRecord[]>;
   /** cache miss → 攒集队列预热（best-effort）。 */
   enqueue?: (companyName: string, country?: string) => Promise<void>;
+  /** workspace_lia 模式下的工作区 LIA 激活校验（未注入或返回 false 时 fail-closed 返空）。 */
+  hasActiveWorkspaceLia?: (workspaceId: string) => Promise<boolean>;
   /** 显式覆盖模式（测试用）；缺省读 env `PATENT_SOURCE_MODE`。 */
   mode?: PatentSourceMode;
 }
@@ -133,9 +164,10 @@ export class GooglePatentsInventorProvider implements ContactDiscoveryAdapter {
       purpose: string;
     },
   ): Promise<PatentRecord[]> {
-    if (this.mode() === 'cache') {
+    const effectiveMode = this.mode();
+    if (effectiveMode === 'cache' || effectiveMode === 'workspace_lia') {
       if (!this.deps?.cacheReader) {
-        this.log('skip: cache 模式但无 cacheReader（降级空）');
+        this.log(`skip: ${effectiveMode} 模式但无 cacheReader（降级空）`);
         return [];
       }
       const patents = await this.deps.cacheReader(company.name, {
@@ -164,6 +196,71 @@ export class GooglePatentsInventorProvider implements ContactDiscoveryAdapter {
     return res.data.patents ?? [];
   }
 
+  private async isAllowedByMode(mode: PatentSourceMode, workspaceId: string): Promise<boolean> {
+    if (mode === 'off') {
+      this.log('skip: PATENT_SOURCE_MODE=off（未启用）');
+      return false;
+    }
+    if (mode !== 'workspace_lia') return true;
+    if (!this.deps?.hasActiveWorkspaceLia) {
+      this.log('skip: workspace_lia 模式缺少 hasActiveWorkspaceLia 校验器（fail-closed）');
+      return false;
+    }
+    const liaActive = await this.deps.hasActiveWorkspaceLia(workspaceId).catch(() => false);
+    if (!liaActive) {
+      this.log(`skip ${workspaceId}: workspace LIA not active`);
+      return false;
+    }
+    return true;
+  }
+
+  private alignApplicant(
+    name: string,
+    companyCountry: string | undefined,
+    patents: readonly PatentRecord[],
+  ): { item: PatentApplicant; score: number } | null {
+    // 1) 收集 distinct applicant 候选（按归一名去重，同归一名多国别时偏好与本公司国别不冲突的代表）。
+    const applicantMap = new Map<string, PatentApplicant>();
+    for (const p of patents) {
+      for (const a of p.applicants) {
+        const key = normForMatch(a.name);
+        if (!a.name || !key) continue;
+        const existing = applicantMap.get(key);
+        if (!existing || (countryConflicts(companyCountry, existing.country) && !countryConflicts(companyCountry, a.country))) {
+          applicantMap.set(key, a);
+        }
+      }
+    }
+    const best = pickBestByName(name, [...applicantMap.values()], (a) => a.name);
+    if (!best || best.score < ALIGN_MIN_SCORE || best.margin < ALIGN_MIN_MARGIN) return null;
+    if (countryConflicts(companyCountry, best.item.country)) return null;
+    return { item: best.item, score: best.score };
+  }
+
+  private collectSoleApplicantInventors(
+    aligned: PatentApplicant,
+    companyCountry: string | undefined,
+    patents: readonly PatentRecord[],
+  ): ProviderContactRecord[] {
+    // 3) 只留独家申请人为对齐公司的专利 → 收发明人（合著专利整条弃，逐专利再过国别门）。
+    const alignedNorm = normForMatch(aligned.name);
+    const seen = new Set<string>();
+    const contacts: ProviderContactRecord[] = [];
+    outer: for (const p of patents) {
+      const sole = p.applicants[0];
+      if (p.applicants.length !== 1 || normForMatch(sole.name) !== alignedNorm) continue;
+      if (countryConflicts(companyCountry, sole.country)) continue;
+      for (const inv of p.inventors) {
+        const norm = normalizePersonName(inv.name);
+        if (!norm || seen.has(norm)) continue;
+        seen.add(norm);
+        contacts.push(toContactRecord(inv.name, aligned.name));
+        if (contacts.length >= MAX_INVENTORS) break outer;
+      }
+    }
+    return contacts;
+  }
+
   async discoverContacts(
     company: { name: string; domain?: string; country?: string },
     ctx: ExecutionContext,
@@ -171,9 +268,7 @@ export class GooglePatentsInventorProvider implements ContactDiscoveryAdapter {
   ): Promise<ContactDiscoveryResult> {
     const name = company.name?.trim();
     if (!name) return { contacts: [], costCents: 0 };
-    const mode = this.mode();
-    if (mode === 'off') {
-      this.log('skip: PATENT_SOURCE_MODE=off（未启用）');
+    if (!(await this.isAllowedByMode(this.mode(), ctx.workspaceId))) {
       return { contacts: [], costCents: 0 };
     }
     const toYear = currentYear(this.deps?.now);
@@ -185,56 +280,9 @@ export class GooglePatentsInventorProvider implements ContactDiscoveryAdapter {
     try {
       const patents = await this.fetchPatents({ name, country: company.country }, fromYear, toYear, purposeCtx);
       if (!patents.length) return { contacts: [], costCents: 0 };
-
-      // 1) 收集 distinct applicant 候选（**按归一名去重**：同一公司的拼写变体 "Siemens AG"/"Siemens
-      //    Aktiengesellschaft" 不自相竞争把 margin 压到 0 而误弃）→ 高置信对齐（歧义/低置信即弃，绝不挂错公司）。
-      const applicantMap = new Map<string, PatentApplicant>();
-      for (const p of patents) {
-        for (const a of p.applicants) {
-          const key = normForMatch(a.name);
-          if (!a.name || !key) continue;
-          const existing = applicantMap.get(key);
-          if (!existing) {
-            applicantMap.set(key, a);
-            continue;
-          }
-          // 🔴 同归一名多国别（缓存路径尤甚：一家公司跨国 → 多个 (norm,country) 组，如 Siemens de/us/at…）→
-          // 偏好与本公司国别**不冲突**的代表，令下面 step2 的 country 门不因任意排序恰好选中他国同名组而误弃整源。
-          // step3 仍逐记录过国别门（护栏③不放松，绝不并他国同名公司发明人）；company.country 未知则不改（保首见）。
-          if (countryConflicts(company.country, existing.country) && !countryConflicts(company.country, a.country)) {
-            applicantMap.set(key, a);
-          }
-        }
-      }
-      const best = pickBestByName(name, [...applicantMap.values()], (a) => a.name);
-      if (!best || best.score < ALIGN_MIN_SCORE || best.margin < ALIGN_MIN_MARGIN) {
-        return { contacts: [], costCents: 0 };
-      }
-      // 2) 国别门（都为 alpha-2 且冲突 → 弃）。
-      if (countryConflicts(company.country, best.item.country)) return { contacts: [], costCents: 0 };
-
-      // 3) 只留**独家申请人**为对齐公司的专利 → 收发明人（按归一名去重、上限 cap）。
-      // 🔴 biblio 的 applicants[]/inventors[] 无「谁属谁」映射：合著专利（Siemens+Bosch）无法判定某发明人
-      //    属哪家 → 若保留会把合作方员工误挂到对齐公司（还会喂错下游邮箱猜测）。故**只取独家申请人专利**，
-      //    合著专利整条弃（诚实边界：漏采 < 错挂）。applicant 比对走归一名（容同公司拼写变体）。
-      const alignedNorm = normForMatch(best.item.name);
-      const seen = new Set<string>();
-      const contacts: ProviderContactRecord[] = [];
-      outer: for (const p of patents) {
-        const sole = p.applicants[0];
-        if (p.applicants.length !== 1 || normForMatch(sole.name) !== alignedNorm) continue;
-        // 🔴 跨境同名防漏并：归一名去重只留了**首个** applicant，同归一名但不同国别的 applicant
-        //    （DE "Acme" 对齐后，US "Acme Inc" 归一同为 'acme'）其专利会溜进本循环 → 逐专利再过国别门，
-        //    把国别与本公司冲突的独家申请人专利整条弃，绝不把他国同名公司的发明人并进本公司。
-        if (countryConflicts(company.country, sole.country)) continue;
-        for (const inv of p.inventors) {
-          const norm = normalizePersonName(inv.name);
-          if (!norm || seen.has(norm)) continue;
-          seen.add(norm);
-          contacts.push(toContactRecord(inv.name, best.item.name));
-          if (contacts.length >= MAX_INVENTORS) break outer;
-        }
-      }
+      const best = this.alignApplicant(name, company.country, patents);
+      if (!best) return { contacts: [], costCents: 0 };
+      const contacts = this.collectSoleApplicantInventors(best.item, company.country, patents);
       this.log(`✓ ${name} → ${best.item.name} (${best.score.toFixed(2)}): ${contacts.length} inventors`);
       return { contacts, costCents: 0 };
     } catch (err) {

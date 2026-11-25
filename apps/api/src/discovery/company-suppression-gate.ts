@@ -246,11 +246,17 @@ export async function loadCompanyForSuppressionSafeWrite(
   tx: Prisma.TransactionClient,
   workspaceId: string,
   companyId: string,
-): Promise<{ id: string; attributes: Record<string, unknown> } | null> {
+): Promise<{
+  id: string;
+  name: string;
+  domain: string | null;
+  country: string | null;
+  attributes: Record<string, unknown>;
+} | null> {
   await lockWorkspaceSuppressionPolicy(tx, workspaceId);
   const company = await tx.canonicalCompany.findUnique({
     where: { id: companyId },
-    select: { id: true, name: true, domain: true, status: true, attributes: true },
+    select: { id: true, name: true, domain: true, country: true, status: true, attributes: true },
   });
   if (!company) return null;
 
@@ -281,9 +287,15 @@ export async function loadCompanyForSuppressionSafeWrite(
   );
   const mailboxSuppressed =
     !!mailbox && (suppressedEmails.has(mailbox) || (!!mailboxDomain && suppressedDomains.has(mailboxDomain)));
-  if (!mailboxSuppressed) return { id: company.id, attributes };
+  const base = {
+    id: company.id,
+    name: company.name,
+    domain: company.domain ?? null,
+    country: company.country ?? null,
+  };
+  if (!mailboxSuppressed) return { ...base, attributes };
   const { contact_email: _removedMailbox, ...safeAttributes } = attributes;
-  return { id: company.id, attributes: safeAttributes };
+  return { ...base, attributes: safeAttributes };
 }
 
 /**

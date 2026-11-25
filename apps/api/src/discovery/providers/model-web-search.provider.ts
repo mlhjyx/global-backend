@@ -17,7 +17,7 @@ import {
   type WebSearchToolHit,
 } from '../model-web-search/model-web-search';
 import { normalizeDomain } from '../identity';
-import { inferCountryFromCcTld } from '../domain-country';
+import { resolveCompanyJurisdiction } from '../jurisdiction-resolver';
 import { isStableSafeHttpsUrl } from '../raw-source-provider-normalizer';
 import { settledModelFailureReason } from '../settled-model-failure';
 import {
@@ -423,7 +423,7 @@ export class ModelWebSearchDiscoveryProvider implements CompanyDiscoveryAdapter 
       const country =
         (typeof candidate.countryCode === 'string' && /^[A-Z]{2}$/u.test(candidate.countryCode)
           ? candidate.countryCode
-          : undefined) ?? inferCountryFromCcTld(domain);
+          : undefined) ?? resolveCompanyJurisdiction({ name, domain })?.iso;
       records.push({
         externalId: `${PROVIDER_KEY}:${domain}`,
         name: name.slice(0, 500),
