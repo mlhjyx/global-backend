@@ -20,6 +20,7 @@ import { normalizePersonName } from '../person-name';
 import { cleanEmail, cleanPhone } from '../../acquisition/clean';
 import { localizedCommitteeXrayQuery, prioritizeBuyingCommitteeContacts } from '../../enrichment/buying-committee';
 import { ExtractedPerson, cleanPersonName, extractPeopleFromPage } from './contact-extraction';
+import { isCrossCompanySocialMismatch, isJunkContactCandidate } from './contact-quality-filter';
 
 /**
  * 社媒/渠道联系人适配器（M2a 索引层 + M2b 档案/直抓层）。
@@ -316,7 +317,7 @@ function hasRoleEvidence(
  */
 export function parseSocialResults(
   results: readonly SearxResultLike[],
-  company: { name: string; domain?: string },
+  company: { name: string; domain?: string; country?: string },
   onDropped?: (reason: 'namesake' | 'organisation' | 'uninformative' | 'generic_name') => void,
 ): ProviderContactRecord[] {
   const found = new Map<string, ProviderContactRecord>();
@@ -348,7 +349,7 @@ export function parseSocialResults(
     // 就不能证明此人是该公司员工；标题里去掉人名后必须仍有独立的公司佐证。
     const remainder = headline.split(parsed.fullName).join(' ');
     const companyEvidence = companyMatchLevel(remainder, company);
-    if (companyEvidence === 'none') {
+    if (companyEvidence === 'none' || isCrossCompanySocialMismatch(remainder, company)) {
       onDropped?.('namesake');
       continue;
     }
@@ -361,7 +362,7 @@ export function parseSocialResults(
     }
     // 专业佐证（M5 第三轮）：公司名之外必须仍有职位/职能词——只有公司名的 headline（「<人名> - 公司」）
     // 不再因「含公司名」放行（URL slug 与姓名一致也不足以证明其与本公司的关系）。
-    if (!hasRoleEvidence(headline, parsed.fullName, company)) {
+    if (!hasRoleEvidence(headline, parsed.fullName, company) || isJunkContactCandidate({ fullName, title: parsed.title })) {
       onDropped?.('uninformative');
       continue;
     }

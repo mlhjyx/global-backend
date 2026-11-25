@@ -66,6 +66,7 @@ import {
   type ExecutionBudgetBinding,
 } from '../execution-budget/execution-budget-authority.service';
 import { workspaceExecutionBudgetRequestScope } from '../execution-budget/execution-budget-request-scope';
+import { filterUnmatchableIcpRules, sanitizeIcpAttributesInPlace, sanitizeIcpExclusions } from './icp-output-sanitizer';
 import {
   buildIcpGenerationPrompt,
   completeTargetMarkets,
@@ -227,14 +228,17 @@ export class IcpService {
       : guardrailsEnabled
         ? modelMarkets
         : completeTargetMarkets(out.target_markets, profileMarkets);
-    const companyAttributesForIcp = icpInputLineage({
-      modelCompanyAttributes: out.company_attributes,
-      offeringBasis,
-      confirmedMarkets,
-      guardrailsEnabled,
-      offerings,
-      modelMarkets,
-    });
+    const companyAttributesForIcp = sanitizeIcpAttributesInPlace(
+      icpInputLineage({
+        modelCompanyAttributes: out.company_attributes,
+        offeringBasis,
+        confirmedMarkets,
+        guardrailsEnabled,
+        offerings,
+        modelMarkets,
+      }),
+    );
+    const sanitizedExclusions = sanitizeIcpExclusions(out.exclusions);
 
     addConfirmedBuyerScenarioDrafts(companyAttributesForIcp, offeringBasis, offerings, confirmedMarkets);
     if (documentDependencies.length > 0) {
@@ -272,7 +276,7 @@ export class IcpService {
           companyAttributes: json(companyAttributesForIcp),
           painPoints: json(out.pain_points),
           triggerSignals: json(out.trigger_signals),
-          exclusions: json(out.exclusions),
+          exclusions: json(sanitizedExclusions),
           valueProps: json(out.value_props),
           targetMarkets: json(targetMarketsForIcp),
         },
@@ -300,11 +304,14 @@ export class IcpService {
         });
       }
       // 结构化验证规则（LED-003）：AI 提议 → 落库 → 由确定性规则引擎评估。
-      const proposed = (out.qualification_rules ?? []).flatMap((r) => {
-        const kind = String(r.kind).toUpperCase();
-        if (!RULE_KINDS.includes(kind as never) || !RULE_OPERATORS.includes(r.operator)) return []; // 丢弃不合法提议
-        return [{ ...r, kind: kind as RuleLike['kind'] }];
-      });
+      const proposed = filterUnmatchableIcpRules(
+        (out.qualification_rules ?? []).flatMap((r) => {
+          const kind = String(r.kind).toUpperCase();
+          if (!RULE_KINDS.includes(kind as never) || !RULE_OPERATORS.includes(r.operator)) return []; // 丢弃不合法提议
+          return [{ ...r, kind: kind as RuleLike['kind'] }];
+        }),
+        targetMarketsForIcp,
+      );
       // 评分规则 v3：拒绝与 MUST_HAVE 同 field 同 value 的镜像 EXCLUSION（否定操作符）——模型常把每条
       // MUST_HAVE 复述成 not_contains / not_in（xin ICP 22202d3c 6 条），公司属性是受控英文词表时它对每家
       // 公司都命中。MUST_HAVE 不满足本就 no_match，镜像只会把「复核」硬变成「拒绝」。

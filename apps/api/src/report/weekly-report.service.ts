@@ -39,6 +39,7 @@ import {
   type BattleDecisionMaker,
 } from './battle-csv-builder';
 import { filterOfferingNames } from '../discovery/offering-noise-filter';
+import { filterReachableCompanyChannels, loadCompanyContactChannels } from '../lead/lead-channels';
 
 /** A week's accepted leads are reviewed by hand; more than this is refused, never truncated. */
 export const WEEKLY_REPORT_MAX_LEADS = 1_000;
@@ -58,6 +59,8 @@ export interface BattleCsvReportRequest {
   icpId?: unknown;
   week?: unknown;
   maskEmails?: unknown;
+  /** delivered（默认，仅 QUALIFIED/CONTACTED/CONVERTED）或 reviewable（含待复核的 match 线索）。 */
+  scope?: unknown;
 }
 
 export interface BattleCsvReport {
@@ -255,11 +258,15 @@ export class WeeklyReportService {
     const range = hasWeek ? parseIsoWeek(String(request.week).trim()) : null;
     if (hasWeek && !range) throw invalid('week must be an ISO week such as 2026-W42');
     const maskEmails = request.maskEmails === true || request.maskEmails === 'true' || request.maskEmails === '1';
+    const rawScope = typeof request.scope === 'string' ? request.scope.trim().toLowerCase() : 'delivered';
+    if (rawScope !== 'delivered' && rawScope !== 'reviewable') {
+      throw invalid('scope must be delivered or reviewable');
+    }
     const reportId = randomUUID();
 
     const snapshot = await this.prisma.withWorkspace(
       ctx.workspaceId,
-      (tx) => this.readForBattleCsv(tx, ctx.workspaceId, icpId, range),
+      (tx) => this.readForBattleCsv(tx, ctx.workspaceId, icpId, range, rawScope),
       TRANSACTION,
     );
     const built = snapshot ? this.buildBattleRows(ctx, reportId, snapshot) : null;
@@ -397,25 +404,40 @@ export class WeeklyReportService {
     return { leads, facts: await this.loadFacts(tx, workspaceId, icpId, leads) };
   }
 
-  private async readForBattleCsv(tx: Tx, workspaceId: string, icpId: string, range: IsoWeekRange | null) {
+  private async readForBattleCsv(
+    tx: Tx,
+    workspaceId: string,
+    icpId: string,
+    range: IsoWeekRange | null,
+    scope: 'delivered' | 'reviewable' = 'delivered',
+  ) {
     const icp = await tx.icpDefinition.findUnique({
       where: { id: icpId },
       select: { id: true, companyId: true, name: true },
     });
     if (!icp) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'icp not found' } });
 
-    const where: Prisma.LeadWhereInput = {
-      icpId,
-      status: { in: [...DELIVERED_LEAD_STATUSES] },
-      ...(range
+    const where: Prisma.LeadWhereInput =
+      scope === 'reviewable'
         ? {
-            decisions: {
-              some: { action: 'accept', createdAt: { gte: range.start, lt: range.end } },
-              none: { createdAt: { gte: range.end } },
-            },
+            icpId,
+            OR: [
+              { status: { in: [...DELIVERED_LEAD_STATUSES] } },
+              { status: 'REVIEW', fitVerdict: 'match' },
+            ],
           }
-        : {}),
-    };
+        : {
+            icpId,
+            status: { in: [...DELIVERED_LEAD_STATUSES] },
+            ...(range
+              ? {
+                  decisions: {
+                    some: { action: 'accept', createdAt: { gte: range.start, lt: range.end } },
+                    none: { createdAt: { gte: range.end } },
+                  },
+                }
+              : {}),
+          };
     const candidates: ReportLead[] = await tx.lead.findMany({
       where,
       select: {
@@ -576,6 +598,7 @@ export class WeeklyReportService {
           lead,
           company,
           companyContactPoints: facts.reachablePoints(company),
+          companyContactChannels: facts.reachableChannels(company),
           decisionMakers: snapshot.battleDecisionMakers.get(company.id) ?? [],
           draft: facts.draftsByLead.get(lead.id) ?? null,
           article14StatusByContactId: snapshot.article14StatusByContactId,
@@ -687,6 +710,7 @@ export class WeeklyReportService {
       select: { companyId: true, kind: true, value: true, status: true },
       orderBy: [{ kind: 'asc' }, { value: 'asc' }],
     });
+    const companyChannels = await loadCompanyContactChannels(tx, companyIds);
     // M4: named decision makers + their contact points. The PII read extension decrypts fullName
     // and contact_point.value on this transaction; suppressed emails/domains are filtered below.
     const decisionMakerRows = await tx.canonicalContact.findMany({
@@ -737,6 +761,10 @@ export class WeeklyReportService {
       }
     }
     const pointsByCompany = groupBy(contactPoints, (row) => row.companyId);
+    const channelsByCompany = groupBy(
+      companyChannels.filter((row): row is typeof row & { companyId: string } => Boolean(row.companyId)),
+      (row) => row.companyId,
+    );
     // Suppressed emails/domains never leave the platform, even when they still sit on a contact.
     const decisionMakersByCompany = new Map<
       string,
@@ -776,6 +804,8 @@ export class WeeklyReportService {
        */
       reachablePoints: (company: ReportCompany) =>
         reachableCompanyContactPoints(pointsByCompany.get(company.id) ?? [], suppressions, company),
+      reachableChannels: (company: ReportCompany) =>
+        filterReachableCompanyChannels(channelsByCompany.get(company.id) ?? [], suppressions, company),
       screenings: new Map<string, PriorScreening>(screenings.map((row) => [row.canonicalCompanyId, row])),
       /** Same canonical keys as the accept-time suppression check (companyMatchesSuppression). */
       isListed: (company: ReportCompany): boolean => {

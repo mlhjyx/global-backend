@@ -142,6 +142,33 @@ const LEAD_PACKAGE_SCHEMA = {
         properties: { kind: { type: 'string' }, url: { type: 'string' }, status: { type: 'string' } },
       },
     },
+    company_channels: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['channel', 'value', 'status', 'source_type'],
+        properties: {
+          channel: { type: 'string', enum: ['email', 'phone', 'form_url'] },
+          value: { type: 'string' },
+          email_type: { type: 'string', nullable: true },
+          status: { type: 'string' },
+          source_type: { type: 'string' },
+          source_url: { type: 'string', nullable: true },
+        },
+      },
+    },
+    social_profiles: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['platform', 'url', 'source'],
+        properties: {
+          platform: { type: 'string' },
+          url: { type: 'string' },
+          source: { type: 'string' },
+        },
+      },
+    },
     suggested_contact_path: {
       type: 'object',
       nullable: true,

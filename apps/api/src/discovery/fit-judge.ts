@@ -40,6 +40,7 @@ import {
   currentEvidenceBundle,
   type EvidenceBundle,
 } from './evidence-bundle';
+import { enrichIcpBriefForJudge } from './judgment/icp-judge-guidance';
 
 /**
  * ICP 资格门（四门判别：材质/角色/工艺/商业模式）的共享核心 ——
@@ -57,6 +58,8 @@ export interface IcpBrief {
   company_attributes?: unknown;
   exclusions?: unknown;
   target_markets?: unknown;
+  /** 可选的判定口径澄清（注入在受信任 ICP 块，不改动受冻结 rubric/system prompt）。 */
+  evaluation_guidance?: readonly string[];
 }
 
 export interface FitJudgeCompany {
@@ -297,7 +300,7 @@ export async function loadIcpBrief(tx: Prisma.TransactionClient, icpId: string, 
   const companyAttributes = runId && readBuyerProcurementScenario(icp.companyAttributes)
     ? Object.fromEntries(Object.entries(icp.companyAttributes as object).filter(([key]) => key !== 'procurement_scenario'))
     : icp.companyAttributes;
-  return {
+  return enrichIcpBriefForJudge({
     seller: icp.company?.name ?? 'unknown',
     seller_summary: icp.company?.summary ?? null,
     icp_name: icp.name,
@@ -307,7 +310,7 @@ export async function loadIcpBrief(tx: Prisma.TransactionClient, icpId: string, 
     company_attributes: companyAttributes,
     exclusions: icp.exclusions,
     target_markets: icp.targetMarkets,
-  };
+  });
 }
 
 /**

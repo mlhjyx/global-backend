@@ -1,5 +1,10 @@
 import { qualify, QualifyResult, RuleLike } from '../icp/rule-engine';
 import { TENDER_PUBLISHED, US_FED_SOURCES_SOUGHT } from '../signals/signal-mappers';
+import {
+  effectiveIndustryForDataQuality,
+  hasReachableCompanyChannel,
+  resolveFitDimension,
+} from './lead-fit-score';
 
 /**
  * 六维评分（LED-006, PRD 5.6/7.5）—— 全部确定性计算，AI 不参与打分：
@@ -39,6 +44,8 @@ export interface CompanyForScoring {
    * status ∈ VALID/UNVERIFIED 读取并在读时做禁联过滤；这里再按 kind 与 status 兜底。
    */
   companyContactPoints: { kind: string; status: string }[];
+  /** 可选的公司级公开渠道（`company_contact_channel`：phone/email/form_url），与 contactPoints 并列计入可达性。 */
+  companyContactChannels?: { channel: string; status: string }[];
 }
 
 export interface IcpForScoring {
@@ -107,7 +114,6 @@ export const REACHABLE_COMPANY_CONTACT_KINDS: ReadonlySet<string> = new Set([
   'contact_form',
   'supplier_page',
 ]);
-const REACHABLE_COMPANY_CONTACT_STATUSES: ReadonlySet<string> = new Set(['VALID', 'UNVERIFIED']);
 export const MISSING_CONTACT_POINT = 'MISSING_CONTACT_POINT';
 
 function companyAttributes(c: CompanyForScoring): Record<string, unknown> {
@@ -134,6 +140,8 @@ export interface ScoreLeadOpts {
    * EXCLUSION（如手加的 country not_in […]）照旧排除。
    */
   authoritativeFit?: 'match' | 'weak' | 'mismatch' | null;
+  /** 可选的 L2 资格门分项理由（`lead.fit_reasons`）：用于把不同质量的 `match`/`weak` 拉开分差；缺省时回退静态映射。 */
+  fitReasons?: unknown;
   /**
    * 制裁筛查命中（qualify 第五门）：有未决命中（potential_match/confirmed_true_hit）→ `sanctionsHold=true`
    * → queue 强制 `'sanctions_hold'`（隔离队列，**压过一切**——含 exclude/权威 match/阈值）。命中≠低分而是合规硬停，
@@ -141,9 +149,6 @@ export interface ScoreLeadOpts {
    */
   sanctionsHold?: boolean;
 }
-
-/** 权威 Fit 判定 → Fit 维分值（match 高带、weak 复核带、mismatch 零）。 */
-const AUTHORITATIVE_FIT_SCORE: Record<'match' | 'weak' | 'mismatch', number> = { match: 0.85, weak: 0.45, mismatch: 0 };
 
 function isTedBuyerRoleGateEnabled(): boolean {
   return (process.env.TED_BUYER_ROLE_GATE ?? '').trim().toLowerCase() !== 'off';
@@ -164,15 +169,7 @@ export function scoreLead(company: CompanyForScoring, icp: IcpForScoring, opts?:
   // Fit：权威资格门判过 → 用它（只覆盖本维）；否则规则引擎。
   // clamp01（J）：nice-to-have 权重若混入负值，归一化比可超 1 → fit>1 会污染 totalScore 与队列排序
   //（与 intent 维已有的 clamp 对齐；DTO @Min(0) 是第一道门，此处是系统边界兜底）。
-  const fit = clamp01(
-    authoritative
-      ? AUTHORITATIVE_FIT_SCORE[authoritative]
-      : fitResult.verdict === 'match'
-        ? 0.6 + 0.4 * (fitResult.score ?? 0.5)
-        : fitResult.verdict === 'review'
-          ? 0.3 + 0.3 * (fitResult.score ?? 0)
-          : 0,
-  );
+  const fit = clamp01(resolveFitDimension(authoritative, opts?.fitReasons, fitResult));
   if (authoritative) notes.push(`Fit 维由 ICP 资格门（LLM 四门）判定=${authoritative}，覆盖规则引擎（词表归一欠账）`);
   const advisoryHits = fitResult.evaluations.filter((e) => e.advisory && e.outcome === 'pass');
   if (advisoryHits.length) {
@@ -200,24 +197,25 @@ export function scoreLead(company: CompanyForScoring, icp: IcpForScoring, opts?:
   const matchedSignals = intentDim.matchedSignals;
   notes.push(intentDim.note);
 
-  // DataQuality：关键字段完整度
+  // DataQuality：关键字段完整度（已做过官网画像并落定 trade_role 的公司视为行业/角色已补全）
   const keyFields: [string, unknown][] = [
     ['domain', company.domain],
     ['country', company.country],
-    ['industry', company.industry],
+    ['industry', effectiveIndustryForDataQuality(company.industry, attrs)],
     ['employee_count', company.employeeCount],
   ];
   const missingFields = keyFields.filter(([, v]) => v == null).map(([k]) => k);
   const dataQuality = (keyFields.length - missingFields.length) / keyFields.length;
 
   // Reachability（v3，BI-14 D-028）= max(公司级, 个人旧口径)：
-  //  - 公司级：任一联系路径 kind（contact_page / impressum_page / contact_form / supplier_page）且
-  //    status ∈ VALID/UNVERIFIED → 1.0；社交页不计；INVALID 不计。自动链路只写 UNVERIFIED，VALID 只能由人给出。
+  //  - 公司级：任一联系路径 kind（contact_page / impressum_page / contact_form / supplier_page）或
+  //    公司级渠道（company_contact_channel: email / phone / form_url）且 status ∈ VALID/UNVERIFIED → 1.0；社交页不计；INVALID 不计。
   //  - 个人旧口径不变（Q4，不收回已有能力）：VALID 1 / UNVERIFIED|RISKY 0.5。🔴 **排除标识点 external_id**——它不是可达渠道
   //   （#58 P1：CH officer_id 默认 UNVERIFIED，若计入会让「无邮箱/电话的董事」被误判可达、越过推荐队列 Reachability 硬底）。
   //    用黑名单（非白名单 email/phone）以保留 linkedin 等真实联系渠道（#62 复审 P2）。
-  const companyReachability = company.companyContactPoints.some(
-    (p) => REACHABLE_COMPANY_CONTACT_KINDS.has(p.kind) && REACHABLE_COMPANY_CONTACT_STATUSES.has(p.status),
+  const companyReachability = hasReachableCompanyChannel(
+    company.companyContactPoints,
+    company.companyContactChannels,
   )
     ? 1
     : 0;

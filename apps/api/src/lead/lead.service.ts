@@ -17,6 +17,7 @@ import {
   leadCandidateBatchRef,
 } from './lead-qualified-snapshot';
 import { buildLeadPackage, packageSanctionsStatus, type LeadPackage } from './lead-package';
+import { filterReachableCompanyChannels, loadCompanyContactChannels, loadLeadListChannelSummaries, type LeadPackageCompanyChannel } from './lead-channels';
 import { isOutcomeReasonCode, isRejectReasonCode, REJECT_REASON_CODES } from './reason-codes';
 import { reachableCompanyContactPoints } from '../discovery/company-contact-points';
 import { DataRightsService } from '../compliance/data-rights.service';
@@ -184,41 +185,27 @@ export class LeadService {
           // 附公司摘要（跨表查询而非 include：lead 与 canonical 无 Prisma relation）
           const companies = await tx.canonicalCompany.findMany({
             where: { id: { in: rows.map((lead) => lead.canonicalCompanyId) } },
-            select: {
-              id: true,
-              name: true,
-              domain: true,
-              country: true,
-              industry: true,
-              employeeCount: true,
-            },
+            select: { id: true, name: true, domain: true, country: true, industry: true, employeeCount: true, status: true, attributes: true },
           });
+          const channelSummaries = await loadLeadListChannelSummaries(tx, companies);
           const evidenceRows = companies.length
             ? await tx.fieldEvidence.findMany({
-                where: {
-                  entityType: 'company',
-                  entityId: { in: companies.map((company) => company.id) },
-                },
+                where: { entityType: 'company', entityId: { in: companies.map((company) => company.id) } },
                 select: { entityId: true, providerKey: true, license: true },
               })
             : [];
-          const quarantinedCompanyIds = new Set(
-            evidenceRows
-              .filter(isSyntheticDiscoveryProvenance)
-              .map((evidence) => evidence.entityId),
-          );
-          const byId = new Map(companies.map((company) => [company.id, company]));
+          const quarantinedCompanyIds = new Set(evidenceRows.filter(isSyntheticDiscoveryProvenance).map((e) => e.entityId));
+          const byId = new Map(companies.map(({ status: _s, attributes: _a, ...summary }) => [summary.id, summary]));
           return rows
             .filter((lead) => !quarantinedCompanyIds.has(lead.canonicalCompanyId))
             .map(({ decisions, ...lead }) => ({
               cursor: lead.id,
               value: {
                 ...lead,
-                // 预置队列 vs 已评分：scored = total_score 非空；queueBasis 见 lead-queue-basis.ts。
                 scored: isLeadScored(lead),
-                // 探针只装 reject 裁决；旧形状的行没有该字段 → 视为无。
                 queueBasis: leadQueueBasis(lead, Array.isArray(decisions) && decisions.length > 0),
                 company: byId.get(lead.canonicalCompanyId) ?? null,
+                channelSummary: channelSummaries.get(lead.canonicalCompanyId) ?? null,
               },
             }));
         },
@@ -285,6 +272,7 @@ export class LeadService {
     }>,
   ): Promise<{
     contactPoints: Array<{ kind: string; value: string; status: string }>;
+    companyChannels: LeadPackageCompanyChannel[];
     evidence: Array<{ field: string; sourceUrl: string | null; fetchedAt: Date }>;
   }> {
     const contactPoints = await tx.companyContactPoint.findMany({
@@ -292,6 +280,7 @@ export class LeadService {
       select: { kind: true, value: true, status: true },
       orderBy: [{ kind: 'asc' }, { value: 'asc' }],
     });
+    const rawChannels = await loadCompanyContactChannels(tx, [company.id]);
     const evidenceRows =
       companyEvidence ??
       (await tx.fieldEvidence.findMany({
@@ -319,6 +308,7 @@ export class LeadService {
     const sourceById = new Map(rawSources.map((row) => [row.id, row.sourceUrl]));
     return {
       contactPoints: reachableCompanyContactPoints(contactPoints, suppressions, company),
+      companyChannels: filterReachableCompanyChannels(rawChannels, suppressions, company),
       evidence: newest.map((row) => ({
         field: row.field,
         sourceUrl: row.sourceUrl ?? (row.rawRecordId ? sourceById.get(row.rawRecordId) ?? null : null),
@@ -348,7 +338,7 @@ export class LeadService {
       const contactIds = contacts.map((contact) => contact.id);
       await this.assertProductProvenance(tx, [company.id, ...contactIds]);
       const suppressions = await tx.suppressionRecord.findMany({
-        where: { type: { in: ['domain', 'company_name'] } },
+        where: { type: { in: ['domain', 'company_name', 'email'] } },
         select: { type: true, value: true },
       });
       const facts = await this.loadDeliveryFacts(tx, company, suppressions);
@@ -376,6 +366,8 @@ export class LeadService {
         lead: leadFields,
         company,
         contactPoints: undeliverable ? [] : facts.contactPoints,
+        companyChannels: undeliverable ? [] : facts.companyChannels,
+        omitSocials: undeliverable,
         evidence: facts.evidence,
         sanctions: {
           status: sanctionsStatus,
