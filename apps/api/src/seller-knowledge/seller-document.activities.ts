@@ -8,18 +8,31 @@ import type { DoclingClient } from '../site-builder/docling.client';
 import type { EmbeddingsClient } from '../site-builder/embeddings.client';
 import type { SellerDocumentsStorage } from './seller-documents.storage';
 import { createSellerDocumentPendingCleanupActivities } from './seller-document-pending-cleanup.activities';
+import type { SellerDocumentClaimsService } from './seller-document-claims.service';
 
 /**
  * 卖家资料解析（模块 02 · Phase 2b）：租约认领 → 下载 → Docling/文本直读 →
- * 结构感知分块 → BGE-M3 批量嵌入 → 事务写 chunk 并置 ready。
+ * 结构感知分块 → BGE-M3 批量嵌入 → 事务写 chunk 并置 ready → 尽力跑 S2 确定性原句核验要点草稿。
  * 真值在 seller_document 状态机；Temporal 只负责 activity 级重试与心跳。
  * 失败按 attempt 指数退避（60s→1h，最多 8 次）回 queued，超过即 failed_terminal。
  */
 const MAX_INGEST_ATTEMPTS = 8;
 const MAX_DOCUMENT_BYTES = 50 * 1024 * 1024 + 1024 * 1024;
 const MAX_CHUNKS = 512;
-const EMBED_BATCH = 32;
+const DEFAULT_EMBED_BATCH = 8;
+const MAX_EMBED_BATCH = 32;
 const HEARTBEAT_INTERVAL_MS = 5_000;
+const AUTO_ASSISTED_MAX_CHUNKS = 25;
+const AUTO_ASSISTED_MAX_CANDIDATES = 20;
+
+function resolveEmbedBatchSize(): number {
+  const raw = process.env.SELLER_DOCUMENTS_EMBED_BATCH;
+  const parsed = raw === undefined ? Number.NaN : Number(raw);
+  if (Number.isSafeInteger(parsed) && parsed >= 1 && parsed <= MAX_EMBED_BATCH) {
+    return parsed;
+  }
+  return DEFAULT_EMBED_BATCH;
+}
 
 const TEXT_MIMES = new Set(['text/plain', 'text/markdown']);
 const EXT_FOR_MIME: Record<string, string> = {
@@ -42,6 +55,8 @@ export interface SellerDocumentActivityDeps {
   storage: SellerDocumentsStorage;
   docling: DoclingClient;
   embeddings: EmbeddingsClient;
+  /** 可选 S2 自动要点草稿抽取器：文档置 ready 后尽力生成带字节原句证据的 NEEDS_REVIEW 草稿。 */
+  claims?: Pick<SellerDocumentClaimsService, 'createAssistedDrafts'>;
 }
 
 type ClaimedRow = {
@@ -49,6 +64,7 @@ type ClaimedRow = {
   object_key: string;
   mime: string;
   processing_attempt: number;
+  uploaded_by?: string | null;
 };
 
 function backoffSeconds(attempt: number): number {
@@ -120,7 +136,7 @@ export function createSellerDocumentActivities(deps: SellerDocumentActivityDeps)
             ("status" = 'queued' AND ("retry_at" IS NULL OR "retry_at" <= now()))
             OR ("status" = 'processing' AND ("lease_until" IS NULL OR "lease_until" <= now()))
           )
-        RETURNING "filename", "object_key", "mime", "processing_attempt"
+        RETURNING "filename", "object_key", "mime", "processing_attempt", "uploaded_by"
       `);
       if (rows.length > 0) return { claim: rows[0], leaseToken };
       const current = await tx.sellerDocument.findFirst({
@@ -138,14 +154,19 @@ export function createSellerDocumentActivities(deps: SellerDocumentActivityDeps)
     attempt: number,
     code: string,
     options: { terminal?: boolean; immediateRetry?: boolean } = {},
-  ): Promise<'queued' | 'failed_terminal'> {
+  ): Promise<{ outcome: 'queued' | 'failed_terminal'; retryAfterSeconds?: number }> {
     const terminal = options.terminal === true || attempt >= MAX_INGEST_ATTEMPTS;
     const nextStatus = terminal ? 'failed_terminal' : 'queued';
+    const retryAfterSeconds = terminal
+      ? undefined
+      : options.immediateRetry
+        ? 5
+        : backoffSeconds(attempt);
     const retryAt = terminal
       ? null
       : options.immediateRetry
         ? new Date()
-        : new Date(Date.now() + backoffSeconds(attempt) * 1000);
+        : new Date(Date.now() + (retryAfterSeconds ?? 60) * 1000);
     await deps.prisma.withWorkspace(input.workspaceId, async (tx) => {
       await tx.$executeRaw(Prisma.sql`
         UPDATE "seller_document"
@@ -162,7 +183,30 @@ export function createSellerDocumentActivities(deps: SellerDocumentActivityDeps)
           AND "status" = 'processing'
       `);
     });
-    return nextStatus;
+    return retryAfterSeconds === undefined
+      ? { outcome: nextStatus }
+      : { outcome: nextStatus, retryAfterSeconds };
+  }
+
+  async function recordStage(
+    input: SellerDocumentIngestInput,
+    leaseToken: string,
+    nextStage: string,
+  ): Promise<void> {
+    await deps.prisma
+      .withWorkspace(input.workspaceId, async (tx) => {
+        await tx.$executeRaw(Prisma.sql`
+          UPDATE "seller_document"
+          SET "processing_stage" = ${nextStage},
+              "lease_until" = now() + interval '10 minutes',
+              "updated_at" = now()
+          WHERE "id" = ${input.documentId}::uuid
+            AND "workspace_id" = ${input.workspaceId}::uuid
+            AND "lease_token" = ${leaseToken}
+            AND "status" = 'processing'
+        `);
+      })
+      .catch(() => undefined);
   }
 
   async function parseDocument(
@@ -192,11 +236,12 @@ export function createSellerDocumentActivities(deps: SellerDocumentActivityDeps)
     onBatch: (stage: string) => void,
     signal?: AbortSignal,
   ): Promise<{ ok: true; vectors: number[][] } | { ok: false; code: string; terminal: boolean }> {
+    const batchSize = resolveEmbedBatchSize();
     const vectors: number[][] = [];
-    for (let index = 0; index < chunks.length; index += EMBED_BATCH) {
+    for (let index = 0; index < chunks.length; index += batchSize) {
       signal?.throwIfAborted();
-      onBatch(`embed:${index / EMBED_BATCH}`);
-      const batch = chunks.slice(index, index + EMBED_BATCH);
+      onBatch(`embed:${index / batchSize}`);
+      const batch = chunks.slice(index, index + batchSize);
       try {
         const embedded = await deps.embeddings.embed(
           batch.map((chunk) => chunk.text),
@@ -225,7 +270,11 @@ export function createSellerDocumentActivities(deps: SellerDocumentActivityDeps)
     /** 单文档解析：一条工作流只处理一份资料（fenced lease 防重复写；5s 心跳 + 取消透传）。 */
     async processSellerDocument(
       input: SellerDocumentIngestInput,
-    ): Promise<{ documentId: string; outcome: 'ready' | 'queued' | 'failed_terminal' | 'not_due' | 'gone' }> {
+    ): Promise<{
+      documentId: string;
+      outcome: 'ready' | 'queued' | 'failed_terminal' | 'not_due' | 'gone';
+      retryAfterSeconds?: number;
+    }> {
       const activity = currentActivityContext();
       const signal = activity?.cancellationSignal;
       let stage = 'claim';
@@ -256,45 +305,48 @@ export function createSellerDocumentActivities(deps: SellerDocumentActivityDeps)
         try {
           content = await deps.storage.getBufferBounded(row.object_key, MAX_DOCUMENT_BYTES);
         } catch {
-          const outcome = await fail(input, leaseToken, attempt, 'DOCUMENT_DOWNLOAD_UNAVAILABLE');
-          return { documentId: input.documentId, outcome };
+          const failed = await fail(input, leaseToken, attempt, 'DOCUMENT_DOWNLOAD_UNAVAILABLE');
+          return { documentId: input.documentId, ...failed };
         }
 
         pulse('parse');
+        await recordStage(input, leaseToken, 'parse');
         signal?.throwIfAborted();
         const parsed = await parseDocument(input.documentId, row, content, signal);
         if (!parsed.ok) {
-          const outcome = await fail(input, leaseToken, attempt, parsed.code, {
+          const failed = await fail(input, leaseToken, attempt, parsed.code, {
             terminal: parsed.terminal,
           });
-          return { documentId: input.documentId, outcome };
+          return { documentId: input.documentId, ...failed };
         }
         if (!parsed.markdown.trim()) {
-          const outcome = await fail(input, leaseToken, attempt, 'DOCUMENT_NO_CONTENT', {
+          const failed = await fail(input, leaseToken, attempt, 'DOCUMENT_NO_CONTENT', {
             terminal: true,
           });
-          return { documentId: input.documentId, outcome };
+          return { documentId: input.documentId, ...failed };
         }
 
         pulse('chunk');
         const chunks = chunkMarkdown(parsed.markdown).slice(0, MAX_CHUNKS);
         if (chunks.length === 0) {
-          const outcome = await fail(input, leaseToken, attempt, 'DOCUMENT_NO_CONTENT', {
+          const failed = await fail(input, leaseToken, attempt, 'DOCUMENT_NO_CONTENT', {
             terminal: true,
           });
-          return { documentId: input.documentId, outcome };
+          return { documentId: input.documentId, ...failed };
         }
 
         pulse('embed');
+        await recordStage(input, leaseToken, 'embed');
         const embedded = await embedChunks(chunks, pulse, signal);
         if (!embedded.ok) {
-          const outcome = await fail(input, leaseToken, attempt, embedded.code, {
+          const failed = await fail(input, leaseToken, attempt, embedded.code, {
             terminal: embedded.terminal,
           });
-          return { documentId: input.documentId, outcome };
+          return { documentId: input.documentId, ...failed };
         }
 
         pulse('persist');
+        await recordStage(input, leaseToken, 'persist');
         signal?.throwIfAborted();
         // 新 chunks/metadata 发布、parseRevision 递增与 ready 同一事务：旧引用在提交前不可见，
         // 提交后即指向新修订；租约丢失时不覆盖新持有者的真值。
@@ -335,6 +387,33 @@ export function createSellerDocumentActivities(deps: SellerDocumentActivityDeps)
         if (published === null) {
           log.warn(`seller document finalize lost lease (${input.documentId})`);
           return { documentId: input.documentId, outcome: 'not_due' };
+        }
+        // S2 确定性原句核验要点草稿（零模型费用，严格 NEEDS_REVIEW）：
+        // 尽力执行，任何异常不影响已发布的 ready 文档状态。
+        if (deps.claims) {
+          pulse('extract_claims');
+          try {
+            await deps.claims.createAssistedDrafts(
+              {
+                workspaceId: input.workspaceId,
+                userId: row.uploaded_by?.trim() || input.workspaceId,
+                roles: [],
+                scopes: [],
+              },
+              input.companyId,
+              input.documentId,
+              {
+                maxChunks: AUTO_ASSISTED_MAX_CHUNKS,
+                maxCandidates: AUTO_ASSISTED_MAX_CANDIDATES,
+              },
+            );
+          } catch (extractError) {
+            log.warn(
+              `seller document assisted claim extraction skipped (${input.documentId}): ${
+                extractError instanceof Error ? extractError.message : String(extractError)
+              }`,
+            );
+          }
         }
         return { documentId: input.documentId, outcome: 'ready' };
       } catch (error) {

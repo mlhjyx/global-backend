@@ -15,13 +15,14 @@ const INPUT: SellerDocumentIngestInput = {
 };
 
 function fixture(options: {
-  claimRows?: Array<{ filename?: string | null; object_key: string; mime: string; processing_attempt: number }>;
+  claimRows?: Array<{ filename?: string | null; object_key: string; mime: string; processing_attempt: number; uploaded_by?: string | null }>;
   currentStatus?: { status: string; deletedAt: Date | null } | null;
   content?: Buffer | Error;
   markdown?: string;
   doclingError?: Error;
   embedError?: Error;
   publishRows?: unknown[];
+  claims?: { createAssistedDrafts: ReturnType<typeof vi.fn> };
 } = {}) {
   const executeRaw = vi.fn(async () => 1);
   const deleteMany = vi.fn(async () => ({ count: 0 }));
@@ -33,7 +34,7 @@ function fixture(options: {
       if (sql.includes('RETURNING "parse_revision"'))
         return options.publishRows ?? [{ parse_revision: 1 }];
       return options.claimRows ?? [
-        { filename: 'catalog.md', object_key: 'ws/k', mime: 'text/markdown', processing_attempt: 1 },
+        { filename: 'catalog.md', object_key: 'ws/k', mime: 'text/markdown', processing_attempt: 1, uploaded_by: '20000000-0000-4000-8000-000000000002' },
       ];
     }),
     $executeRaw: executeRaw,
@@ -74,6 +75,7 @@ function fixture(options: {
     storage: storage as unknown as SellerDocumentsStorage,
     docling: docling as never,
     embeddings: embeddings as never,
+    ...(options.claims ? { claims: options.claims as never } : {}),
   });
   return { activities, prisma, tx, storage, docling, embeddings, executeRaw, deleteMany };
 }
@@ -157,5 +159,40 @@ describe('createSellerDocumentActivities（Phase 2b ingest）', () => {
     const { activities } = fixture({ publishRows: [] });
     const result = await activities.processSellerDocument(INPUT);
     expect(result.outcome).toBe('not_due');
+  });
+
+  it('ready 发布后自动触发 S2 辅助要点草稿抽取，且抽取异常不回滚 ready', async () => {
+    const createAssistedDrafts = vi.fn(async () => ({
+      documentId: INPUT.documentId,
+      parseRevision: 1,
+      scannedChunks: 2,
+      droppedModelSuggestions: 0,
+      drafts: [],
+    }));
+    const okFix = fixture({ claims: { createAssistedDrafts } });
+    const okRes = await okFix.activities.processSellerDocument(INPUT);
+    expect(okRes.outcome).toBe('ready');
+    expect(createAssistedDrafts).toHaveBeenCalledTimes(1);
+    expect(createAssistedDrafts).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: INPUT.workspaceId,
+        userId: '20000000-0000-4000-8000-000000000002',
+      }),
+      INPUT.companyId,
+      INPUT.documentId,
+      expect.objectContaining({ maxChunks: 25, maxCandidates: 20 }),
+    );
+
+    const failingClaims = { createAssistedDrafts: vi.fn(async () => { throw new Error('extract boom'); }) };
+    const resilientFix = fixture({ claims: failingClaims });
+    const resilientRes = await resilientFix.activities.processSellerDocument(INPUT);
+    expect(resilientRes.outcome).toBe('ready');
+  });
+
+  it('嵌入失败返回 retryAfterSeconds 供工作流按退避窗口自动重跑', async () => {
+    const { activities } = fixture({ embedError: new Error('embed timeout') });
+    const result = await activities.processSellerDocument(INPUT);
+    expect(result.outcome).toBe('queued');
+    expect(result.retryAfterSeconds).toBe(60);
   });
 });

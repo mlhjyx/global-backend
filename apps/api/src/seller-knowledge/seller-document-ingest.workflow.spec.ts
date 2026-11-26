@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@temporalio/workflow', () => import('../temporal/testing/temporal-workflow.mock'));
 
-import { acts, resetActivities } from '../temporal/testing/temporal-workflow.mock';
+import { acts, resetActivities, setPatched, sleep } from '../temporal/testing/temporal-workflow.mock';
 import { sellerDocumentIngestWorkflow } from './seller-document-ingest.workflow';
 
 beforeEach(() => resetActivities());
@@ -23,7 +23,31 @@ describe('sellerDocumentIngestWorkflow（Phase 2b）', () => {
 
     expect(acts.processSellerDocument).toHaveBeenCalledTimes(1);
     expect(acts.processSellerDocument).toHaveBeenCalledWith(INPUT);
+    expect(sleep).not.toHaveBeenCalled();
     expect(out).toEqual({ documentId: INPUT.documentId, outcome: 'ready' });
+  });
+
+  it('瞬态失败回 queued 后按 retryAfterSeconds 自动休眠重跑直至 ready', async () => {
+    acts.processSellerDocument
+      .mockResolvedValueOnce({ documentId: INPUT.documentId, outcome: 'queued', retryAfterSeconds: 60 })
+      .mockResolvedValueOnce({ documentId: INPUT.documentId, outcome: 'ready' });
+
+    const out = await sellerDocumentIngestWorkflow(INPUT);
+
+    expect(acts.processSellerDocument).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledWith(62_000);
+    expect(out).toEqual({ documentId: INPUT.documentId, outcome: 'ready' });
+  });
+
+  it('旧历史 replay（patched=false）保持单次调用不触发 sleep', async () => {
+    setPatched(() => false);
+    acts.processSellerDocument.mockResolvedValue({ documentId: INPUT.documentId, outcome: 'queued', retryAfterSeconds: 60 });
+
+    const out = await sellerDocumentIngestWorkflow(INPUT);
+
+    expect(acts.processSellerDocument).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+    expect(out.outcome).toBe('queued');
   });
 
   it('activity 失败原样上抛（Temporal retry 拥有重试权，状态机保持 queued/retryAt）', async () => {

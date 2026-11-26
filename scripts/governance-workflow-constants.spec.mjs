@@ -199,6 +199,12 @@ test("frozen replay defaults keep their pinned values", async () => {
   assert.equal(understanding.get("EXECUTION_CONTRACT_VERSION"), 2);
   const discovery = await constantsOf("apps/api/src/temporal/discovery.workflow.ts");
   assert.equal(discovery.get("EXECUTION_CONTRACT_VERSION"), 2);
+
+  const sellerDocIngest = await constantsOf("apps/api/src/seller-knowledge/seller-document-ingest.workflow.ts");
+  assert.equal(sellerDocIngest.get("MAX_QUEUED_RETRIES"), 3);
+  assert.equal(sellerDocIngest.get("MIN_RETRY_SLEEP_SECONDS"), 5);
+  assert.equal(sellerDocIngest.get("MAX_RETRY_SLEEP_SECONDS"), 300);
+  assert.equal(sellerDocIngest.get("RETRY_CLOCK_BUFFER_SECONDS"), 2);
 });
 
 test("argument parsing rejects unknown flags and a missing --root value", () => {

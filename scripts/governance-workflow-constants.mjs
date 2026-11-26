@@ -133,6 +133,16 @@ export const WORKFLOW_CONSTANT_ALLOWLIST = Object.freeze({
     DOMAIN_RESOLUTION_MAX_COMPANIES:
       "pending input-ization (tracked in docs/superpowers/plans/2026-11-08-workflow-constant-input-ization.md); frozen until then — it is the pre-activity input bound, and lowering it would make an already-recorded larger input fail its replay at validation",
   }),
+  "apps/api/src/seller-knowledge/seller-document-ingest.workflow.ts": Object.freeze({
+    MAX_QUEUED_RETRIES:
+      "frozen replay bound guarded by patched('seller-document-queued-retry-v1'); changing it would alter the retry loop command count on replay (pinned by governance-workflow-constants.spec.mjs)",
+    MIN_RETRY_SLEEP_SECONDS:
+      "frozen replay clamp floor for activity-returned retryAfterSeconds guarded by patched('seller-document-queued-retry-v1'); changing it would shift timer durations on replay (pinned)",
+    MAX_RETRY_SLEEP_SECONDS:
+      "frozen replay clamp cap for activity-returned retryAfterSeconds guarded by patched('seller-document-queued-retry-v1'); changing it would shift timer durations on replay (pinned)",
+    RETRY_CLOCK_BUFFER_SECONDS:
+      "frozen replay clock-skew buffer added to retry sleep timers guarded by patched('seller-document-queued-retry-v1'); changing it would shift timer durations on replay (pinned)",
+  }),
 });
 
 function issue(code, path, message) {
