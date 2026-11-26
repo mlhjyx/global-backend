@@ -26,7 +26,6 @@ describe('acquisition compliance error OpenAPI', () => {
     expect(codes('/api/v1/leads/{leadId}/accept', 'post', '409')).toEqual([
       'SUPPRESSED',
       'INVALID_STATE',
-      'LEAD_FIT_MISMATCH_BLOCKED',
       'SUPPRESSED_CONTACT_UNREACHABLE',
       'STORAGE_RIGHTS_NOT_GRANTED',
       'SANCTIONS_HOLD_UNRESOLVED',

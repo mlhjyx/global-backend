@@ -60,7 +60,9 @@ export class LeadService {
     @Optional() private readonly feedback?: IcpFeedbackService,
   ) {}
   private assertLeadAcceptFitEligible(action: 'accept' | 'reject', lead: { fitVerdict?: string | null; fitReasons?: unknown }): void {
-    if (action === 'accept' && isLeadAcceptBlockedByFit(lead)) throw new ConflictException({ error: { code: 'LEAD_FIT_MISMATCH_BLOCKED', message: 'lead failed fit evaluation (mismatch or core criterion failure) and cannot be accepted' } });
+    if (action !== 'accept' || !isLeadAcceptBlockedByFit(lead)) return;
+    const message = 'lead failed fit evaluation (mismatch or core criterion failure) and cannot be accepted';
+    throw new ConflictException({ error: { code: 'INVALID_STATE', message } });
   }
 
   /** 触发对某 ACTIVE ICP 的评分（异步，Temporal）。 */

@@ -116,7 +116,7 @@ describe('LeadService.decide — reject reason code (BI-20)', () => {
       serviceWithTx(mismatchTx).decide(ctx, 'lead-1', 'accept', 'override', 'GOOD_FIT'),
     ).rejects.toMatchObject({
       status: 409,
-      response: { error: { code: 'LEAD_FIT_MISMATCH_BLOCKED' } },
+      response: { error: { code: 'INVALID_STATE', message: expect.stringContaining('failed fit evaluation') } },
     });
 
     const coreFailTx = {
@@ -132,7 +132,7 @@ describe('LeadService.decide — reject reason code (BI-20)', () => {
       serviceWithTx(coreFailTx).decide(ctx, 'lead-1', 'accept', 'override', 'GOOD_FIT'),
     ).rejects.toMatchObject({
       status: 409,
-      response: { error: { code: 'LEAD_FIT_MISMATCH_BLOCKED' } },
+      response: { error: { code: 'INVALID_STATE', message: expect.stringContaining('failed fit evaluation') } },
     });
 
     // Weak + unclear (like genuine solar distributors missing full corroboration) passes the fit guard.

@@ -580,7 +580,6 @@ export class LeadController {
     schema: leadDecisionErrorSchema([
       'SUPPRESSED',
       'INVALID_STATE',
-      'LEAD_FIT_MISMATCH_BLOCKED',
       'SUPPRESSED_CONTACT_UNREACHABLE',
       'STORAGE_RIGHTS_NOT_GRANTED',
       'SANCTIONS_HOLD_UNRESOLVED',
