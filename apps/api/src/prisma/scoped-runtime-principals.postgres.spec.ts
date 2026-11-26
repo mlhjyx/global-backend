@@ -320,7 +320,10 @@ describe.skipIf(!enabled)('scoped runtime principals (disposable PostgreSQL)', (
     await expect(
       badDncApp.suppressGlobal({ email: probeEmail, reason: 'bounce', source: 'pg-test' }),
     ).rejects.toMatchObject({ status: 503 });
-    const probeHash = badDncOwner.emailHash(badDncOwner.canonicalEmail(probeEmail));
+    const canonicalProbe = badDncOwner.canonicalEmail(probeEmail);
+    const unsaltedHash = badDncOwner.emailHash(canonicalProbe);
+    const probeHash = badDncOwner.storageEmailHash(canonicalProbe);
+    expect(probeHash).not.toBe(unsaltedHash);
     expect(
       await owner.outreachGlobalSuppression.findUnique({ where: { emailHash: probeHash } }),
     ).toBeNull();
@@ -368,6 +371,9 @@ describe.skipIf(!enabled)('scoped runtime principals (disposable PostgreSQL)', (
       expect(
         await owner.outreachGlobalSuppression.findUnique({ where: { emailHash: probeHash } }),
       ).not.toBeNull();
+      expect(
+        await owner.outreachGlobalSuppression.findUnique({ where: { emailHash: unsaltedHash } }),
+      ).toBeNull();
     } finally {
       await owner.outreachGlobalSuppression.deleteMany({ where: { emailHash: probeHash } });
     }

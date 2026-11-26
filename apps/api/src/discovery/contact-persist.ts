@@ -2,7 +2,12 @@ import { Prisma } from '@prisma/client';
 import { contactIdentity, contactSuppressionKeys, declinedContactIdentity } from './identity';
 import { resolvePersonIdentity, PersonResolveHit } from './person-identity';
 import { LawfulBasis, ProviderContactRecord } from './provider-contract';
-import { encryptPii, blindContactKey } from '../compliance/pii-crypto';
+import {
+  encryptPii,
+  blindContactKey,
+  blindContactKeyCandidates,
+  PII_PURPOSE,
+} from '../compliance/pii-crypto';
 import { scheduleArticle14NoticeInTransaction } from '../compliance/article14-lia.service';
 import { cleanEmail } from '../acquisition/clean';
 import { classifyContactEmail } from './contact-classifier';
@@ -149,9 +154,14 @@ export async function persistDiscoveredContacts(
     }
     // person-level 禁联复检（公司域内、email-独立键**变体集**，与冻结所写同源）：换邮箱/无邮箱/**跨源不同拼写**
     //（变音丢弃/德语 ASCII/分解 Unicode/"Surname,Given" 语序）再现，任一变体命中禁联表即拦下。
-    const personKeys = contactSuppressionKeys(c.fullName, args.company.dedupeKey).map((k) =>
-      blindContactKey(k).toLowerCase(),
-    );
+    const personKeys = contactSuppressionKeys(c.fullName, args.company.dedupeKey)
+      .flatMap((k) =>
+        blindContactKeyCandidates(k, {
+          workspaceId: args.workspaceId,
+          purpose: PII_PURPOSE.CONTACT_DEDUPE_KEY,
+        }),
+      )
+      .map((k) => k.toLowerCase());
     if (personKeys.some((k) => suppressedContactKeys.has(k))) {
       skippedSuppressed += 1;
       continue;
@@ -218,7 +228,12 @@ export async function persistDiscoveredContacts(
           entityType: 'contact',
           entityId: contactId,
           field: p.type,
-          value: (isPii ? encryptPii(p.value) : p.value) as unknown as Prisma.InputJsonValue,
+          value: (isPii
+            ? encryptPii(p.value, {
+                workspaceId: args.workspaceId,
+                purpose: PII_PURPOSE.FIELD_EVIDENCE_VALUE,
+              })
+            : p.value) as unknown as Prisma.InputJsonValue,
           providerKey: args.adapterKey,
           license: evidenceLicense,
           allowedActions: ['display', 'match'] as unknown as Prisma.InputJsonValue,
@@ -367,19 +382,42 @@ async function createContact(
   email: string | undefined,
   ambiguous: boolean,
 ): Promise<string> {
-  const plainKey = blindContactKey(contactIdentity({ fullName: c.fullName, email }, args.company.dedupeKey));
+  const plainKeyRaw = contactIdentity(
+    { fullName: c.fullName, email },
+    args.company.dedupeKey,
+  );
+  const plainKey = blindContactKey(plainKeyRaw, {
+    workspaceId: args.workspaceId,
+    purpose: PII_PURPOSE.CONTACT_DEDUPE_KEY,
+  });
+  const plainKeyCandidates = blindContactKeyCandidates(plainKeyRaw, {
+    workspaceId: args.workspaceId,
+    purpose: PII_PURPOSE.CONTACT_DEDUPE_KEY,
+  });
   // 探测明文键是否已被既有**不同**联系人占用。用途有二：① 非歧义时决定是否走拒并键；
   // ② 决定 email 能否作拒并判别符（占用 = catch-all/RISKY 共享 → 不可信，退回人名）。
-  const plainCollides =
-    (await tx.canonicalContact.findUnique({
-      where: {
-        workspaceId_dedupeKey: {
-          workspaceId: args.workspaceId,
-          dedupeKey: plainKey,
-        },
+  const activeKeyHit = await tx.canonicalContact.findUnique({
+    where: {
+      workspaceId_dedupeKey: {
+        workspaceId: args.workspaceId,
+        dedupeKey: plainKey,
       },
-      select: { id: true },
-    })) != null;
+    },
+    select: { id: true },
+  });
+  const retiredKeyHit =
+    activeKeyHit == null &&
+    plainKeyCandidates.length > 1 &&
+    typeof (tx.canonicalContact as { findFirst?: unknown }).findFirst === 'function'
+      ? await tx.canonicalContact.findFirst({
+          where: {
+            workspaceId: args.workspaceId,
+            dedupeKey: { in: plainKeyCandidates.slice(1) },
+          },
+          select: { id: true },
+        })
+      : null;
+  const plainCollides = activeKeyHit != null || retiredKeyHit != null;
   const usableEmail = email && !plainCollides ? email : undefined; // 未占用的 email 才可信作判别符
   const dedupeKey =
     ambiguous || plainCollides
@@ -392,6 +430,10 @@ async function createContact(
             },
             args.company.dedupeKey,
           ),
+          {
+            workspaceId: args.workspaceId,
+            purpose: PII_PURPOSE.CONTACT_DEDUPE_KEY,
+          },
         )
       : plainKey;
   const contact = await tx.canonicalContact.upsert({

@@ -90,11 +90,12 @@ function fakeTx(
 }
 const NOW = new Date('2026-07-10T00:00:00.000Z');
 const LIA = { basis: 'legitimate_interest' as const, ref: 'LIA-1' };
+const WS = '00000000-0000-4000-8000-0000000000aa';
 
 describe('email-guess-persist · 落库（fake tx）', () => {
   it('verified：contact_point status=VALID + verifiedAt，证据 allowedActions 含 outreach', async () => {
     const { tx, upsert, create } = fakeTx();
-    const out = await persistGuessedEmail(tx, { workspaceId: 'w', contactId: 'c1', result: verifiedResult, suppressedEmails: new Set(), lawfulBasis: LIA, now: NOW });
+    const out = await persistGuessedEmail(tx, { workspaceId: WS, contactId: 'c1', result: verifiedResult, suppressedEmails: new Set(), lawfulBasis: LIA, now: NOW });
     expect(out).toMatchObject({ persisted: true, email: 'h.herold@acme.de', status: 'VALID' });
     expect(upsert.mock.calls[0][0].create).toMatchObject({ status: 'VALID', verifiedAt: NOW, type: 'email' });
     expect(upsert.mock.calls[0][0].update).toMatchObject({ status: 'VALID', verifiedAt: NOW }); // 重 upsert 也置 verifiedAt
@@ -104,7 +105,7 @@ describe('email-guess-persist · 落库（fake tx）', () => {
 
   it('unverified：拒绝落库，不写 contact_point 或证据', async () => {
     const { tx, upsert, create } = fakeTx();
-    const out = await persistGuessedEmail(tx, { workspaceId: 'w', contactId: 'c1', result: unverifiedResult, suppressedEmails: new Set(), now: NOW });
+    const out = await persistGuessedEmail(tx, { workspaceId: WS, contactId: 'c1', result: unverifiedResult, suppressedEmails: new Set(), now: NOW });
     expect(out).toMatchObject({ persisted: false, reason: 'catch_all_domain_unconfirmable' });
     expect(upsert).not.toHaveBeenCalled();
     expect(create).not.toHaveBeenCalled();
@@ -112,7 +113,7 @@ describe('email-guess-persist · 落库（fake tx）', () => {
 
   it('suppression 命中：不落，upsert 不调用', async () => {
     const { tx, upsert } = fakeTx();
-    const out = await persistGuessedEmail(tx, { workspaceId: 'w', contactId: 'c1', result: verifiedResult, suppressedEmails: new Set(['h.herold@acme.de']), now: NOW });
+    const out = await persistGuessedEmail(tx, { workspaceId: WS, contactId: 'c1', result: verifiedResult, suppressedEmails: new Set(['h.herold@acme.de']), now: NOW });
     expect(out).toEqual({ persisted: false, reason: 'suppressed' });
     expect(upsert).not.toHaveBeenCalled();
   });
@@ -120,7 +121,7 @@ describe('email-guess-persist · 落库（fake tx）', () => {
   it('长 SMTP 调用后新增的 suppression 在写事务内复读，即使载入快照为空也不落库', async () => {
     const { tx, upsert } = fakeTx(['h.herold@acme.de']);
     const out = await persistGuessedEmail(tx, {
-      workspaceId: 'w',
+      workspaceId: WS,
       contactId: 'c1',
       result: verifiedResult,
       suppressedEmails: new Set(),
@@ -135,7 +136,7 @@ describe('email-guess-persist · 落库（fake tx）', () => {
       companySuppressions: [{ type: 'domain', value: 'https://www.acme.de/path' }],
     });
     const out = await persistGuessedEmail(tx, {
-      workspaceId: 'w',
+      workspaceId: WS,
       contactId: 'c1',
       result: verifiedResult,
       suppressedEmails: new Set(),
@@ -155,7 +156,7 @@ describe('email-guess-persist · 落库（fake tx）', () => {
       companySuppressions: [{ type: 'domain', value: 'agency.example' }],
     });
     const out = await persistGuessedEmail(tx, {
-      workspaceId: 'w',
+      workspaceId: WS,
       contactId: 'c1',
       result: agencyResult,
       suppressedEmails: new Set(),
@@ -167,13 +168,15 @@ describe('email-guess-persist · 落库（fake tx）', () => {
 
   it('contact_key 命中时不为已冻结具名人补写猜测邮箱', async () => {
     const { contactSuppressionKeys } = await import('./identity');
-    const { blindContactKey } = await import('../compliance/pii-crypto');
-    const keys = contactSuppressionKeys('Hans Herold', 'd:acme.de').map((value) => blindContactKey(value));
+    const { PII_PURPOSE, blindContactKey } = await import('../compliance/pii-crypto');
+    const keys = contactSuppressionKeys('Hans Herold', 'd:acme.de').map((value) =>
+      blindContactKey(value, { workspaceId: WS, purpose: PII_PURPOSE.CONTACT_DEDUPE_KEY }),
+    );
     const { tx, upsert } = fakeTx([], {
       companySuppressions: keys.map((value) => ({ type: 'contact_key', value })),
     });
     const out = await persistGuessedEmail(tx, {
-      workspaceId: 'w',
+      workspaceId: WS,
       contactId: 'c1',
       result: verifiedResult,
       suppressedEmails: new Set(),
@@ -185,7 +188,7 @@ describe('email-guess-persist · 落库（fake tx）', () => {
 
   it('blocked/无可用地址：不落，upsert 不调用', async () => {
     const { tx, upsert } = fakeTx();
-    const out = await persistGuessedEmail(tx, { workspaceId: 'w', contactId: 'c1', result: blockedResult, suppressedEmails: new Set(), now: NOW });
+    const out = await persistGuessedEmail(tx, { workspaceId: WS, contactId: 'c1', result: blockedResult, suppressedEmails: new Set(), now: NOW });
     expect(out.persisted).toBe(false);
     expect(upsert).not.toHaveBeenCalled();
   });
@@ -233,6 +236,60 @@ describe('email-guess-persist · authoritative replay readback', () => {
     })).resolves.toEqual({ persisted: false, reason: 'suppressed' });
     expect(tx.contactPoint.findUnique).not.toHaveBeenCalled();
   });
+
+  it('finds old-key VALID point via value IN candidates during keyring rotation window', async () => {
+    const { PII_PURPOSE, encryptPiiCandidates } = await import('../compliance/pii-crypto');
+    const { runWithWorkspacePiiContext } = await import('../compliance/pii-crypto.extension');
+    vi.stubEnv(
+      'PII_KEYRING_JSON',
+      JSON.stringify({ activeKeyId: 'k2', keys: { k1: '0'.repeat(64), k2: '2'.repeat(64) } }),
+    );
+    vi.stubEnv('PII_ENCRYPTION_KEY', '');
+    try {
+      const expectedCandidates = encryptPiiCandidates('h.herold@acme.de', {
+        workspaceId: WS,
+        purpose: PII_PURPOSE.CONTACT_POINT_VALUE,
+      });
+      const findFirst = vi.fn().mockResolvedValue({ status: 'VALID' });
+      const findUnique = vi.fn().mockResolvedValue(null);
+      const tx = { contactPoint: { findFirst, findUnique } } as never;
+
+      await expect(
+        readbackGuessedEmail(tx, { workspaceId: WS, contactId: 'c1', result: verifiedResult }),
+      ).resolves.toEqual({
+        persisted: true,
+        email: 'h.herold@acme.de',
+        status: 'VALID',
+        reason: verifiedResult.reason,
+      });
+      expect(findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            contactId: 'c1',
+            type: 'email',
+            value: { in: expectedCandidates },
+          },
+          select: { status: true },
+        }),
+      );
+      expect(findUnique).not.toHaveBeenCalled();
+
+      findFirst.mockClear();
+      await expect(
+        runWithWorkspacePiiContext(WS, () =>
+          readbackGuessedEmail(tx, { contactId: 'c1', result: verifiedResult }),
+        ),
+      ).resolves.toEqual({
+        persisted: true,
+        email: 'h.herold@acme.de',
+        status: 'VALID',
+        reason: verifiedResult.reason,
+      });
+      expect(findFirst).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
 });
 
 describe('A4：分类/验证元数据落库', () => {
@@ -271,7 +328,7 @@ describe('A4：分类/验证元数据落库', () => {
     };
     const { tx, upsert } = fakeTx();
     const out = await persistGuessedEmail(tx, {
-      workspaceId: 'w',
+      workspaceId: WS,
       contactId: 'c1',
       result: failureResult,
       suppressedEmails: new Set(),
@@ -285,7 +342,7 @@ describe('A4：分类/验证元数据落库', () => {
   it('落库携带 personal/pattern_guess/smtp_rcpt/catch_all 与 lawful basis', async () => {
     const { tx, upsert } = fakeTx();
     await persistGuessedEmail(tx, {
-      workspaceId: 'w',
+      workspaceId: WS,
       contactId: 'c1',
       result: verifiedResult,
       suppressedEmails: new Set(),

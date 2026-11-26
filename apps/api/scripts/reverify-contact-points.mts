@@ -20,6 +20,7 @@ import {
   withSmtpProbeFallback,
 } from '../src/enrichment/verification/provider-pool';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { assertPiiKeyConfigured } from '../src/compliance/pii-crypto';
 import { buildToolBroker, sourcePolicyReaderFrom } from '../src/tools/tool-broker.factory';
 import type { ExecutionBroker } from '../src/tools/tool-contract';
 
@@ -50,9 +51,7 @@ export function parseReverifyArgs(argv: string[]): ReverifyOptions {
 
 async function main(): Promise<void> {
   const options = parseReverifyArgs(process.argv.slice(2));
-  if (!process.env.PII_ENCRYPTION_KEY) {
-    throw new Error('PII_ENCRYPTION_KEY 未配置——无法解密联系点值（fail-closed）');
-  }
+  assertPiiKeyConfigured();
   const prisma = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
   // SMTP 兜底票（第二票）经 ToolBroker 出网：预算账需要 app_user 连接（RLS withWorkspace）。
   // 缺 APP_DATABASE_URL 时不装配 broker——兜底票不参与，外部验证器行为不变。

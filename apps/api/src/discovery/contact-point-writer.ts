@@ -1,5 +1,25 @@
 import type { Prisma } from '@prisma/client';
+import {
+  encryptPiiCandidates,
+  PII_PURPOSE,
+  piiKeyConfigured,
+} from '../compliance/pii-crypto';
 import { projectLegacyStatus, type EmailVerificationState } from './contact-point-verification-state';
+
+const PII_POINT_TYPES = new Set(['email', 'phone', 'linkedin']);
+
+function rotationLookupCandidates(
+  workspaceId: string,
+  type: string,
+  value: string,
+): string[] | null {
+  if (!PII_POINT_TYPES.has(type) || !piiKeyConfigured()) return null;
+  const candidates = encryptPiiCandidates(value, {
+    workspaceId,
+    purpose: PII_PURPOSE.CONTACT_POINT_VALUE,
+  });
+  return candidates.length > 1 ? candidates : null;
+}
 
 /**
  * contact_point 的**唯一写入器**（P1-02）。所有写路径必须经由本模块——
@@ -43,6 +63,19 @@ export async function upsertObservedContactPoint(
   tx: Prisma.TransactionClient,
   input: ObservedContactPointInput,
 ): Promise<void> {
+  const candidates = rotationLookupCandidates(input.workspaceId, input.type, input.value);
+  if (candidates && typeof tx.contactPoint.findFirst === 'function') {
+    const existing = await tx.contactPoint.findFirst({
+      where: {
+        contactId: input.contactId,
+        type: input.type,
+        value: { in: candidates },
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: { id: true },
+    });
+    if (existing) return;
+  }
   await tx.contactPoint.upsert({
     where: {
       contactId_type_value: { contactId: input.contactId, type: input.type, value: input.value },
@@ -98,19 +131,39 @@ export async function upsertGuessedEmailPoint(
     validSince: input.validSince,
     nextReverifyAt: input.nextReverifyAt,
   };
+  const updateData = {
+    status: input.status,
+    verifiedAt: input.verifiedAt,
+    emailType: input.emailType,
+    verificationMethod: input.verificationMethod,
+    catchAll: input.catchAll,
+    ...stateFields,
+    ...(input.legalBasis ? { legalBasis: input.legalBasis } : {}),
+  };
+  const candidates = rotationLookupCandidates(input.workspaceId, 'email', input.email);
+  if (candidates && typeof tx.contactPoint.findFirst === 'function') {
+    const existing = await tx.contactPoint.findFirst({
+      where: {
+        contactId: input.contactId,
+        type: 'email',
+        value: { in: candidates },
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: { id: true },
+    });
+    if (existing) {
+      return tx.contactPoint.update({
+        where: { id: existing.id },
+        data: updateData,
+        select: { id: true },
+      });
+    }
+  }
   return tx.contactPoint.upsert({
     where: {
       contactId_type_value: { contactId: input.contactId, type: 'email', value: input.email },
     },
-    update: {
-      status: input.status,
-      verifiedAt: input.verifiedAt,
-      emailType: input.emailType,
-      verificationMethod: input.verificationMethod,
-      catchAll: input.catchAll,
-      ...stateFields,
-      ...(input.legalBasis ? { legalBasis: input.legalBasis } : {}),
-    },
+    update: updateData,
     create: {
       workspaceId: input.workspaceId,
       contactId: input.contactId,
@@ -155,6 +208,26 @@ export async function upsertProviderEmailPoint(
   tx: Prisma.TransactionClient,
   input: ProviderEmailPointInput,
 ): Promise<ProviderEmailPointSnapshot> {
+  const candidates = rotationLookupCandidates(input.workspaceId, 'email', input.email);
+  if (candidates && typeof tx.contactPoint.findFirst === 'function') {
+    const existing = await tx.contactPoint.findFirst({
+      where: {
+        contactId: input.contactId,
+        type: 'email',
+        value: { in: candidates },
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: { id: true, verificationState: true, validSince: true, nextReverifyAt: true },
+    });
+    if (existing) {
+      return {
+        id: existing.id,
+        verificationState: existing.verificationState as EmailVerificationState,
+        validSince: existing.validSince,
+        nextReverifyAt: existing.nextReverifyAt,
+      };
+    }
+  }
   const row = await tx.contactPoint.upsert({
     where: {
       contactId_type_value: { contactId: input.contactId, type: 'email', value: input.email },
@@ -266,6 +339,89 @@ export async function linkLastVerificationEvent(
     where: { id: input.pointId },
     data: { lastVerificationEventId: input.eventId },
   });
+}
+
+/**
+ * MT-P2 密钥轮换受控写出口：只更新密文 `value` 与/或 `domainBlindKey`，
+ * 绝不触碰四态验证列或事件账（守住 P1-02 单一写入器不变式）。
+ */
+export async function rekeyContactPointPii(
+  tx: Prisma.TransactionClient,
+  input: { pointId: string; value?: string; domainBlindKey?: string },
+): Promise<void> {
+  if (input.value === undefined && input.domainBlindKey === undefined) return;
+  await tx.contactPoint.update({
+    where: { id: input.pointId },
+    data: {
+      ...(input.value !== undefined ? { value: input.value } : {}),
+      ...(input.domainBlindKey !== undefined ? { domainBlindKey: input.domainBlindKey } : {}),
+    },
+  });
+}
+
+/**
+ * MT-P2 密钥轮换去重/归并受控写出口：重加密或联系人合并导致重复 contact_point 碰撞时，
+ * 始终保留验证态更强的原行（保住四态列与 `contact_point_verification_event` 级联账本）：
+ * 先删弱行释放 `(contact_id, type, value)` 唯一索引，再原地更新强行密文或归属联系人。
+ */
+export async function mergeOrReparentContactPoint(
+  tx: Prisma.TransactionClient,
+  input:
+    | {
+        kind: 'delete_duplicate';
+        duplicatePointId: string;
+      }
+    | {
+        kind: 'replace_weaker_and_rekey';
+        weakerPointId: string;
+        survivorPointId: string;
+        value?: string;
+        domainBlindKey?: string;
+      }
+    | {
+        kind: 'replace_weaker_and_reparent';
+        weakerPointId: string;
+        survivorPointId: string;
+        targetContactId: string;
+      }
+    | {
+        kind: 'reparent';
+        pointId: string;
+        targetContactId: string;
+      },
+): Promise<void> {
+  switch (input.kind) {
+    case 'delete_duplicate':
+      await tx.contactPoint.delete({ where: { id: input.duplicatePointId } });
+      return;
+    case 'replace_weaker_and_rekey':
+      await tx.contactPoint.delete({ where: { id: input.weakerPointId } });
+      if (input.value !== undefined || input.domainBlindKey !== undefined) {
+        await tx.contactPoint.update({
+          where: { id: input.survivorPointId },
+          data: {
+            ...(input.value !== undefined ? { value: input.value } : {}),
+            ...(input.domainBlindKey !== undefined
+              ? { domainBlindKey: input.domainBlindKey }
+              : {}),
+          },
+        });
+      }
+      return;
+    case 'replace_weaker_and_reparent':
+      await tx.contactPoint.delete({ where: { id: input.weakerPointId } });
+      await tx.contactPoint.update({
+        where: { id: input.survivorPointId },
+        data: { contactId: input.targetContactId },
+      });
+      return;
+    case 'reparent':
+      await tx.contactPoint.update({
+        where: { id: input.pointId },
+        data: { contactId: input.targetContactId },
+      });
+      return;
+  }
 }
 
 /** 投影便捷导出：写入器是 legacy status 的唯一产地（守卫 spec 校验调用方不再自算 VALID/RISKY）。 */

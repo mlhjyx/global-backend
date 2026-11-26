@@ -151,7 +151,7 @@ export class ChannelsController {
   @Get('source-channels/:channelId/records')
   @RequireScopes('ops:read')
   @ApiOperation({
-    summary: '查看渠道最近物化的抓取记录（含观察名单状态与计数；PII 按 OWNER-DECISION-2026-11-05 明文存储）',
+    summary: '查看渠道最近物化的抓取记录（含观察名单状态与计数；联系人 PII 经平台密钥加密存储并在读路径解密）',
   })
   // 可选过滤参数必须显式 required:false：@Query 推断默认 required，会把已有端点判成破坏性变更。
   @ApiQuery({ name: 'reviewStatus', required: false, enum: ['PENDING', 'APPROVED', 'REJECTED'] })

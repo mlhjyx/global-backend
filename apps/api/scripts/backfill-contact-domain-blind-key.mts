@@ -1,27 +1,20 @@
 /**
- * P1-01：存量 contact_point.domain_blind_key 回填（一次性数据迁移；在迁移
- * 20261109120000_contact_point_four_state 之后运行，幂等可重跑）。
+ * P1-01 / MT-P2：存量 contact_point.domain_blind_key 回填（幂等可重跑）。
  *
- * 背景：contact_point.value 是确定性 AES-GCM 密文（enc:v1:），按域聚合/去重不能明文查询。
- * 本脚本用 PII_ENCRYPTION_KEY 解密每条 email 值 → 取域 → HMAC 盲索引
- * （blindContactKey(`domain:<lower(domain>)`) = `bi:v1:<64hex>`）→ 批量回写。**绝不落明文域**，
- * 失败行保留 NULL 并计入报告（迁移 CHECK 允许 NULL）。
- *
- * 幂等：只扫 domain_blind_key IS NULL 的行；已回填行天然跳过。分批（默认 500/批），
- * 单行解密失败不中断全批。
- *
- * 运行（需 PII_ENCRYPTION_KEY 与 DATABASE_URL；owner 连接，绕过 RLS 是预期——
- * 回填跨租户，与 backfill-pii-encryption.mts 同一纪律）：
- *   cd /global/backend/apps/api && node --import tsx scripts/backfill-contact-domain-blind-key.mts
- *   cd /global/backend/apps/api && node --import tsx scripts/backfill-contact-domain-blind-key.mts --dry-run
- *
- * ⚠️ 未跑此回填：domain_blind_key 全 NULL，按域聚合的 pattern 学习/验重读到 0 条——不是
- * 数据没有，是索引没建（迁移只加列，不建值）。
+ * 背景：contact_point.value 是租户作用域确定性 AES-GCM 密文（enc:v2: 或遗留 enc:v1:）。
+ * 本脚本在每条记录所属 workspaceId 上下文下解密 email → 取域 → 计算每租户盲索引
+ * （`blindContactKey('domain:<lower(domain>)', { workspaceId, purpose: PII_PURPOSE.DOMAIN_BLIND_KEY })`）
+ * → 批量回写。绝不落明文域，失败行保留 NULL 并计入报告。
  */
 import 'dotenv/config';
 import { fileURLToPath } from 'node:url';
 import { PrismaClient } from '@prisma/client';
-import { blindContactKey, decryptPii } from '../src/compliance/pii-crypto';
+import {
+  assertPiiKeyConfigured,
+  blindContactKey,
+  decryptPii,
+  PII_PURPOSE,
+} from '../src/compliance/pii-crypto';
 import { emailDomainOfAddress } from '../src/discovery/contact-point-verification-state';
 
 export interface BackfillOptions {
@@ -59,7 +52,7 @@ export async function runBackfill(
         domainBlindKey: null,
         ...(cursor ? { id: { gt: cursor } } : {}),
       },
-      select: { id: true, value: true },
+      select: { id: true, workspaceId: true, value: true },
       orderBy: { id: 'asc' },
       take: options.batchSize,
     });
@@ -68,10 +61,12 @@ export async function runBackfill(
       counts.scanned += 1;
       let domain: string | null = null;
       try {
-        const plaintext = decryptPii(row.value);
+        const plaintext = decryptPii(row.value, {
+          workspaceId: row.workspaceId,
+          purpose: PII_PURPOSE.CONTACT_POINT_VALUE,
+        });
         domain = emailDomainOfAddress(plaintext);
       } catch {
-        // 解密失败（密钥不匹配/密文损坏）：不把任何值写进日志。
         domain = null;
       }
       if (!domain) {
@@ -82,7 +77,12 @@ export async function runBackfill(
       if (!options.dryRun) {
         await prisma.contactPoint.update({
           where: { id: row.id },
-          data: { domainBlindKey: blindContactKey(`domain:${domain}`) },
+          data: {
+            domainBlindKey: blindContactKey(`domain:${domain}`, {
+              workspaceId: row.workspaceId,
+              purpose: PII_PURPOSE.DOMAIN_BLIND_KEY,
+            }),
+          },
         });
       }
       counts.updated += 1;
@@ -95,9 +95,7 @@ export async function runBackfill(
 
 async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
-  if (!process.env.PII_ENCRYPTION_KEY) {
-    throw new Error('PII_ENCRYPTION_KEY 未配置——无法解密联系点值（fail-closed）');
-  }
+  assertPiiKeyConfigured();
   const prisma = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
   try {
     const counts = await runBackfill(prisma, options);
@@ -113,7 +111,6 @@ async function main(): Promise<void> {
   }
 }
 
-// 直接执行才跑（被 import 时不自动触发全表回填）。
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   main().catch((error) => {
     console.error(error instanceof Error ? error.message : error);

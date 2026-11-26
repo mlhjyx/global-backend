@@ -7,7 +7,9 @@ import {
   loadMaterializableCompanyState,
 } from './company-suppression-gate';
 import { contactSuppressionKeys } from './identity';
-import { blindContactKey } from '../compliance/pii-crypto';
+import { blindContactKey, PII_PURPOSE } from '../compliance/pii-crypto';
+
+const WS = '00000000-0000-4000-8000-0000000000aa';
 
 function fakeTx(opts: {
   company: { id: string; name: string; domain: string | null; status: string } | null;
@@ -46,7 +48,7 @@ describe('company suppression terminal gate', () => {
     } as unknown as Prisma.TransactionClient;
 
     await expect(
-      companyMayBeMaterialized(tx, 'ws-1', {
+      companyMayBeMaterialized(tx, WS, {
         name: 'Müller Pumpen GmbH',
         domain: null,
       }),
@@ -60,7 +62,7 @@ describe('company suppression terminal gate', () => {
       suppressions: [{ type: 'domain', value: ' HTTPS://WWW.Acme.DE/path ' }],
     });
 
-    await expect(companyMayUseExternalProcessing(tx, 'ws-1', 'co-1')).resolves.toBe(false);
+    await expect(companyMayUseExternalProcessing(tx, WS, 'co-1')).resolves.toBe(false);
     expect(updateMany).toHaveBeenCalledWith({
       where: { id: 'co-1', status: { not: 'SUPPRESSED' } },
       data: { status: 'SUPPRESSED', version: { increment: 1 } },
@@ -97,7 +99,7 @@ describe('company suppression terminal gate', () => {
     } as unknown as Prisma.TransactionClient;
 
     await expect(
-      loadMaterializableCompanyState(tx, 'ws-1', 'name:source office|de', {
+      loadMaterializableCompanyState(tx, WS, 'name:source office|de', {
         name: 'Source Office',
       }),
     ).resolves.toMatchObject({ allowed: false, prior: { id: 'co-1' } });
@@ -125,7 +127,7 @@ describe('company suppression terminal gate', () => {
     } as unknown as Prisma.TransactionClient;
 
     await expect(loadMaterializableCompanyState(
-      tx, 'ws-1', 'id:registry:1', { name: 'Source Alias' }, {
+      tx, WS, 'id:registry:1', { name: 'Source Alias' }, {
         precomputedSuppressionDecision: {
           canonicalCompanyId: 'co-1', sourceMatched: false, canonicalMatched: true,
           sourceSuppressionIds: [], canonicalSuppressionIds: ['sup-1'],
@@ -144,7 +146,7 @@ describe('company suppression terminal gate', () => {
       company: { id: 'co-1', name: 'Canonical GmbH', domain: 'blocked.example', status: 'SUPPRESSED' },
     });
     await expect(loadMaterializableCompanyState(
-      tx, 'ws-1', 'id:registry:1', { name: 'Alias' }, {
+      tx, WS, 'id:registry:1', { name: 'Alias' }, {
         precomputedSuppressionDecision: {
           canonicalCompanyId: 'co-1', sourceMatched: false, canonicalMatched: false,
           sourceSuppressionIds: [], canonicalSuppressionIds: [],
@@ -173,7 +175,7 @@ describe('company suppression terminal gate', () => {
     } as unknown as Prisma.TransactionClient;
 
     await expect(
-      loadMaterializableCompanyState(tx, 'ws-1', 'd:acme.de', { name: 'Acme GmbH', domain: 'acme.de' }),
+      loadMaterializableCompanyState(tx, WS, 'd:acme.de', { name: 'Acme GmbH', domain: 'acme.de' }),
     ).resolves.toMatchObject({ allowed: false, prior: { id: 'co-1' } });
     expect(updateMany).toHaveBeenCalledWith({
       where: { id: 'co-1' },
@@ -200,7 +202,7 @@ describe('company suppression terminal gate', () => {
     } as unknown as Prisma.TransactionClient;
 
     await expect(
-      loadMaterializableCompanyState(tx, 'ws-1', 'd:acme.de', { name: 'Acme GmbH', domain: 'acme.de' }),
+      loadMaterializableCompanyState(tx, WS, 'd:acme.de', { name: 'Acme GmbH', domain: 'acme.de' }),
     ).resolves.toMatchObject({ allowed: false });
     expect(updateMany).toHaveBeenNthCalledWith(2, {
       where: { id: 'co-1' },
@@ -213,18 +215,18 @@ describe('company suppression terminal gate', () => {
       company: { id: 'co-1', name: '  Müller   Pumpen GmbH ', domain: null, status: 'NEW' },
       suppressions: [{ type: 'company_name', value: 'MÜLLER PUMPEN GMBH' }],
     });
-    await expect(companyMayUseExternalProcessing(tx, 'ws-1', 'co-1')).resolves.toBe(false);
+    await expect(companyMayUseExternalProcessing(tx, WS, 'co-1')).resolves.toBe(false);
   });
 
   it('fails closed for missing or already-suppressed companies and permits an unmatched active company', async () => {
     const missing = fakeTx({ company: null });
-    await expect(companyMayUseExternalProcessing(missing.tx, 'ws-1', 'missing')).resolves.toBe(false);
+    await expect(companyMayUseExternalProcessing(missing.tx, WS, 'missing')).resolves.toBe(false);
 
     const suppressed = fakeTx({ company: { id: 'co-1', name: 'Acme', domain: 'acme.de', status: 'SUPPRESSED' } });
-    await expect(companyMayUseExternalProcessing(suppressed.tx, 'ws-1', 'co-1')).resolves.toBe(false);
+    await expect(companyMayUseExternalProcessing(suppressed.tx, WS, 'co-1')).resolves.toBe(false);
 
     const active = fakeTx({ company: { id: 'co-1', name: 'Acme', domain: 'acme.de', status: 'NEW' } });
-    await expect(companyMayUseExternalProcessing(active.tx, 'ws-1', 'co-1')).resolves.toBe(true);
+    await expect(companyMayUseExternalProcessing(active.tx, WS, 'co-1')).resolves.toBe(true);
     expect(active.updateMany).not.toHaveBeenCalled();
   });
 });
@@ -253,18 +255,21 @@ describe('contact external-processing authorization', () => {
 
   it('takes the policy lock before reading contact/suppression state', async () => {
     const { tx, order } = contactTx([]);
-    await expect(contactMayUseExternalProcessing(tx, { workspaceId: 'ws-1', contactId: 'ct-1' })).resolves.toBe(true);
+    await expect(contactMayUseExternalProcessing(tx, { workspaceId: WS, contactId: 'ct-1' })).resolves.toBe(true);
     expect(order).toEqual(['lock', 'contact', 'suppression']);
   });
 
   it('blocks blind contact_key and alternate suppressed email domains', async () => {
-    const key = blindContactKey(contactSuppressionKeys('Hans Herold', 'd:acme.de')[0]);
+    const key = blindContactKey(contactSuppressionKeys('Hans Herold', 'd:acme.de')[0], {
+      workspaceId: WS,
+      purpose: PII_PURPOSE.CONTACT_DEDUPE_KEY,
+    });
     const frozen = contactTx([{ type: 'contact_key', value: key }]);
-    await expect(contactMayUseExternalProcessing(frozen.tx, { workspaceId: 'ws-1', contactId: 'ct-1' })).resolves.toBe(false);
+    await expect(contactMayUseExternalProcessing(frozen.tx, { workspaceId: WS, contactId: 'ct-1' })).resolves.toBe(false);
 
     const domain = contactTx([{ type: 'domain', value: 'agency.example' }]);
     await expect(contactMayUseExternalProcessing(domain.tx, {
-      workspaceId: 'ws-1', contactId: 'ct-1', email: 'buyer@agency.example',
+      workspaceId: WS, contactId: 'ct-1', email: 'buyer@agency.example',
     })).resolves.toBe(false);
   });
 });

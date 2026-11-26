@@ -2,8 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Prisma } from '@prisma/client';
 import { persistDiscoveredContacts } from './contact-persist';
 import { contactIdentity, contactSuppressionKeys, declinedContactIdentity } from './identity';
-import { blindContactKey } from '../compliance/pii-crypto';
+import { PII_PURPOSE, blindContactKey } from '../compliance/pii-crypto';
 import type { ProviderContactRecord } from './provider-contract';
+
+const WS = '00000000-0000-4000-8000-0000000000aa';
 
 type FakeCandidate = { id: string; fullName: string; contactPoints: { type: string; value: string; status?: string }[] };
 
@@ -97,7 +99,7 @@ describe('contact-persist · externalIds → external_id 点 + license 署名', 
 
     await expect(
       persistDiscoveredContacts(tx, {
-        workspaceId: 'ws-1',
+        workspaceId: WS,
         company,
         adapterKey: 'sandbox',
         contacts: [{ ...chDirector, license: 'sandbox' }],
@@ -112,7 +114,7 @@ describe('contact-persist · externalIds → external_id 点 + license 署名', 
   it('新人：createContact + 写 external_id 点（value=`scheme:value`）+ OGL license 证据', async () => {
     const { tx, contactPointUpsert, fieldEvidenceCreate, canonicalUpsert } = fakeTx([]); // 无候选 → 新建
     const res = await persistDiscoveredContacts(tx, {
-      workspaceId: 'ws-1',
+      workspaceId: WS,
       company,
       adapterKey: 'companies_house',
       contacts: [chDirector],
@@ -141,7 +143,7 @@ describe('contact-persist · externalIds → external_id 点 + license 署名', 
       { id: 'c-existing', fullName: 'J. Smith', contactPoints: [{ type: 'external_id', value: 'uk-ch-officer:oid1' }] },
     ]);
     const res = await persistDiscoveredContacts(tx, {
-      workspaceId: 'ws-1',
+      workspaceId: WS,
       company,
       adapterKey: 'companies_house',
       contacts: [chDirector],
@@ -165,7 +167,7 @@ describe('contact-persist · externalIds → external_id 点 + license 署名', 
     ]);
     const directorOid2: ProviderContactRecord = { ...chDirector, externalId: 'x', externalIds: [{ scheme: 'uk-ch-officer', value: 'OID2' }] };
     const res = await persistDiscoveredContacts(tx, {
-      workspaceId: 'ws-1',
+      workspaceId: WS,
       company,
       adapterKey: 'companies_house',
       contacts: [directorOid2],
@@ -181,7 +183,7 @@ describe('contact-persist · externalIds → external_id 点 + license 署名', 
   it('无 license 的 adapter（decision_maker）→ 回退 licensed（不破坏既有语义）', async () => {
     const { tx, fieldEvidenceCreate } = fakeTx([]);
     await persistDiscoveredContacts(tx, {
-      workspaceId: 'ws-1',
+      workspaceId: WS,
       company,
       adapterKey: 'decision_maker',
       contacts: [{ externalId: 'x', fullName: 'Anna Weber', email: 'anna@x.test', personalData: true }],
@@ -209,7 +211,7 @@ describe('contact-persist · externalIds → external_id 点 + license 署名', 
       // 无 email/phone/linkedin/externalIds —— 归一名合并源不发联系点
     };
     const res = await persistDiscoveredContacts(tx, {
-      workspaceId: 'ws-1',
+      workspaceId: WS,
       company,
       adapterKey: 'inpi_rne',
       contacts: [dirigeant],
@@ -228,7 +230,7 @@ describe('contact-persist · externalIds → external_id 点 + license 署名', 
   it('无 license 的 adapter（decision_maker）→ person.profile 证据回退 public（保留既有默认）', async () => {
     const { tx, fieldEvidenceCreate } = fakeTx([]);
     await persistDiscoveredContacts(tx, {
-      workspaceId: 'ws-1',
+      workspaceId: WS,
       company,
       adapterKey: 'decision_maker',
       contacts: [{ externalId: 'x', fullName: 'Anna Weber', email: 'anna@x.test', personalData: true }],
@@ -243,7 +245,7 @@ describe('contact-persist · externalIds → external_id 点 + license 署名', 
   it('🔴 收口⑥ PR #60：新建的 dedupe_key 已盲化（bi:v1:），where 与 create 同键，不含明文 email', async () => {
     const { tx, canonicalUpsert } = fakeTx([]); // 无候选 → 新建
     await persistDiscoveredContacts(tx, {
-      workspaceId: 'ws-1',
+      workspaceId: WS,
       company,
       adapterKey: 'decision_maker',
       contacts: [{ externalId: 'x', fullName: 'Anna Weber', email: 'anna@x.test', personalData: true }],
@@ -256,7 +258,7 @@ describe('contact-persist · externalIds → external_id 点 + license 署名', 
     };
     const createdKey = call.create.dedupeKey;
     const whereKey = call.where.workspaceId_dedupeKey.dedupeKey;
-    expect(createdKey.startsWith('bi:v1:')).toBe(true); // 盲化前缀
+    expect(createdKey.startsWith('bi:v2:k1:')).toBe(true); // 盲化前缀
     expect(whereKey).toBe(createdKey); // where 与 create 同盲值 → upsert 幂等成立
     expect(createdKey).not.toContain('anna'); // 明文 email 不泄进去重键
     expect(createdKey).not.toContain('e:'); // 非 legacy 明文键形
@@ -269,7 +271,7 @@ describe('contact-persist · 🔴 Art.17 删除禁联消费（Codex P1 on PR #63
   it('公司已 SUPPRESSED（FOR SHARE 复检命中）→ 整批不入库（防完成删除后的漏网写入）', async () => {
     const { tx, canonicalUpsert, queryRaw } = fakeTx([], { companyStatus: 'SUPPRESSED' });
     const res = await persistDiscoveredContacts(tx, {
-      workspaceId: 'ws-1',
+      workspaceId: WS,
       company,
       adapterKey: 'decision_maker',
       contacts: [
@@ -292,7 +294,7 @@ describe('contact-persist · 🔴 Art.17 删除禁联消费（Codex P1 on PR #63
       suppressedCompanyNames: ['astrazeneca gmbh'],
     });
     const res = await persistDiscoveredContacts(tx, {
-      workspaceId: 'ws-1',
+      workspaceId: WS,
       company,
       adapterKey: 'decision_maker',
       contacts: [{ externalId: 'late', fullName: 'Late Person', personalData: true }],
@@ -307,7 +309,7 @@ describe('contact-persist · 🔴 Art.17 删除禁联消费（Codex P1 on PR #63
       suppressedEmails: ['sales@example.com'],
     });
     const res = await persistDiscoveredContacts(tx, {
-      workspaceId: 'ws-1',
+      workspaceId: WS,
       company,
       adapterKey: 'decision_maker',
       contacts: [{ externalId: 'late', fullName: 'Sales Team', email: ' Sales@EXAMPLE.COM ', personalData: false }],
@@ -321,7 +323,7 @@ describe('contact-persist · 🔴 Art.17 删除禁联消费（Codex P1 on PR #63
   it('provider 返回非法 email 时 fail-closed，不把具名人或 PII 候选落库', async () => {
     const { tx, canonicalUpsert, contactPointUpsert } = fakeTx([]);
     const res = await persistDiscoveredContacts(tx, {
-      workspaceId: 'ws-1',
+      workspaceId: WS,
       company,
       adapterKey: 'decision_maker',
       contacts: [{ externalId: 'invalid', fullName: 'Invalid Mail', email: 'not-an-email', personalData: true }],
@@ -337,7 +339,7 @@ describe('contact-persist · 🔴 Art.17 删除禁联消费（Codex P1 on PR #63
       suppressedDomains: ['agency.example'],
     });
     const res = await persistDiscoveredContacts(tx, {
-      workspaceId: 'ws-1',
+      workspaceId: WS,
       company,
       adapterKey: 'decision_maker',
       contacts: [{ externalId: 'agency', fullName: 'Agency Buyer', email: 'buyer@agency.example', personalData: true }],
@@ -350,10 +352,12 @@ describe('contact-persist · 🔴 Art.17 删除禁联消费（Codex P1 on PR #63
 
   it('person-level 禁联键命中 → 同一人换新邮箱再现也跳过（不重建被 Art.17 擦除的具名人）', async () => {
     // 该人此前被删，冻结时写了 person-level 禁联键**集**（email-独立）。现以**不同邮箱**被重新发现。
-    const personKeys = contactSuppressionKeys('Klaus Löschmann', companyKey).map((k) => blindContactKey(k).toLowerCase());
+    const personKeys = contactSuppressionKeys('Klaus Löschmann', companyKey).map((k) =>
+      blindContactKey(k, { workspaceId: WS, purpose: PII_PURPOSE.CONTACT_DEDUPE_KEY }).toLowerCase(),
+    );
     const { tx, canonicalUpsert } = fakeTx([], { suppressedContactKeys: personKeys });
     const res = await persistDiscoveredContacts(tx, {
-      workspaceId: 'ws-1',
+      workspaceId: WS,
       company,
       adapterKey: 'decision_maker',
       contacts: [{ externalId: 'x', fullName: 'Klaus Löschmann', email: 'klaus.NEW@other.test', personalData: true }],
@@ -366,10 +370,12 @@ describe('contact-persist · 🔴 Art.17 删除禁联消费（Codex P1 on PR #63
 
   it('🔴 本 PR 核心：换**拼写变体**（变音丢弃 Wiedergänger→Wiederganger）再现也被 person-level 键拦下', async () => {
     // 冻结按被擦除人 'Petra Wiedergänger' 写了变体禁联集；此人从另一源以去变音 'Petra Wiederganger' 重现。
-    const seeded = contactSuppressionKeys('Petra Wiedergänger', companyKey).map((k) => blindContactKey(k).toLowerCase());
+    const seeded = contactSuppressionKeys('Petra Wiedergänger', companyKey).map((k) =>
+      blindContactKey(k, { workspaceId: WS, purpose: PII_PURPOSE.CONTACT_DEDUPE_KEY }).toLowerCase(),
+    );
     const { tx, canonicalUpsert } = fakeTx([], { suppressedContactKeys: seeded });
     const res = await persistDiscoveredContacts(tx, {
-      workspaceId: 'ws-1',
+      workspaceId: WS,
       company,
       adapterKey: 'public_web',
       contacts: [{ externalId: 'y', fullName: 'Petra Wiederganger', email: 'p.new@other.test', personalData: true }],
@@ -381,10 +387,12 @@ describe('contact-persist · 🔴 Art.17 删除禁联消费（Codex P1 on PR #63
   });
 
   it('person-level 禁联键未命中 → 正常新建（正向路径不被破坏）', async () => {
-    const otherKeys = contactSuppressionKeys('Someone Else', companyKey).map((k) => blindContactKey(k).toLowerCase());
+    const otherKeys = contactSuppressionKeys('Someone Else', companyKey).map((k) =>
+      blindContactKey(k, { workspaceId: WS, purpose: PII_PURPOSE.CONTACT_DEDUPE_KEY }).toLowerCase(),
+    );
     const { tx, canonicalUpsert } = fakeTx([], { suppressedContactKeys: otherKeys });
     const res = await persistDiscoveredContacts(tx, {
-      workspaceId: 'ws-1',
+      workspaceId: WS,
       company,
       adapterKey: 'decision_maker',
       contacts: [{ externalId: 'x', fullName: 'Fresh Person', email: 'fresh@x.test', personalData: true }],
@@ -400,14 +408,17 @@ describe('contact-persist · 🔴 待办2 create 层收尾：createContact 尊�
 
   it('#54-E RISKY：不同名记录撞既有 RISKY catch-all 邮箱 → resolve 拒并 → 新建独立行（按名 dx 键，不并回邮箱行）', async () => {
     // 既有 Anna 的邮箱点后被标 RISKY；来的 Bob Jones 撞同一 catch-all 地址
-    const annaEmailKey = blindContactKey(contactIdentity({ fullName: 'Anna Weber', email: 'a.weber@catchall.test' }, companyKey));
+    const annaEmailKey = blindContactKey(contactIdentity({ fullName: 'Anna Weber', email: 'a.weber@catchall.test' }, companyKey), {
+      workspaceId: WS,
+      purpose: PII_PURPOSE.CONTACT_DEDUPE_KEY,
+    });
     const { tx, canonicalUpsert } = fakeTx(
       [{ id: 'anna', fullName: 'Anna Weber', contactPoints: [{ type: 'email', value: 'a.weber@catchall.test', status: 'RISKY' }] }],
       { existingBlindedKeys: [annaEmailKey] },
     );
     const bob: ProviderContactRecord = { externalId: 'x', fullName: 'Bob Jones', email: 'a.weber@catchall.test', personalData: true };
     const res = await persistDiscoveredContacts(tx, {
-      workspaceId: 'ws-1',
+      workspaceId: WS,
       company,
       adapterKey: 'decision_maker',
       contacts: [bob],
@@ -416,13 +427,13 @@ describe('contact-persist · 🔴 待办2 create 层收尾：createContact 尊�
     expect(res.created).toBe(1);
     expect(res.merged).toBe(0);
     const key = upsertDedupeKey(canonicalUpsert);
-    expect(key).toBe(blindContactKey(declinedContactIdentity({ fullName: 'Bob Jones' }, companyKey))); // dx:c 按名
+    expect(key).toBe(blindContactKey(declinedContactIdentity({ fullName: 'Bob Jones' }, companyKey), { workspaceId: WS, purpose: PII_PURPOSE.CONTACT_DEDUPE_KEY })); // dx:c 按名
     expect(key).not.toBe(annaEmailKey); // 🔴 绝不并回 Anna 的邮箱行（catch-all 误并被根治）
   });
 
   it('#54-D 同名歧义：≥2 同归一名候选 → resolve 拒并 → 新建独立行（dx 键，不并回既有 Anna 行）', async () => {
     // 既有 Anna Weber 与 Dr. Anna Weber 共存（归一同名、原名键不同）；来的 Anna Weber 无邮箱/externalId
-    const annaNameKey = blindContactKey(contactIdentity({ fullName: 'Anna Weber' }, companyKey));
+    const annaNameKey = blindContactKey(contactIdentity({ fullName: 'Anna Weber' }, companyKey), { workspaceId: WS, purpose: PII_PURPOSE.CONTACT_DEDUPE_KEY });
     const { tx, canonicalUpsert } = fakeTx(
       [
         { id: 'anna', fullName: 'Anna Weber', contactPoints: [] },
@@ -432,7 +443,7 @@ describe('contact-persist · 🔴 待办2 create 层收尾：createContact 尊�
     );
     const incoming: ProviderContactRecord = { externalId: 'x', fullName: 'Anna Weber', personalData: true };
     const res = await persistDiscoveredContacts(tx, {
-      workspaceId: 'ws-1',
+      workspaceId: WS,
       company,
       adapterKey: 'patent_inventor',
       contacts: [incoming],
@@ -440,12 +451,12 @@ describe('contact-persist · 🔴 待办2 create 层收尾：createContact 尊�
     });
     expect(res.created).toBe(1);
     const key = upsertDedupeKey(canonicalUpsert);
-    expect(key).toBe(blindContactKey(declinedContactIdentity({ fullName: 'Anna Weber' }, companyKey)));
+    expect(key).toBe(blindContactKey(declinedContactIdentity({ fullName: 'Anna Weber' }, companyKey), { workspaceId: WS, purpose: PII_PURPOSE.CONTACT_DEDUPE_KEY }));
     expect(key).not.toBe(annaNameKey); // 🔴 歧义守卫不再被 create 层旁路
   });
 
   it('🔴 同源再跑幂等：declined 记录二次 persist → 同一 dx 键（确定性 → 真库 upsert-by-key 落回同行，不产生第三行）', async () => {
-    const annaNameKey = blindContactKey(contactIdentity({ fullName: 'Anna Weber' }, companyKey));
+    const annaNameKey = blindContactKey(contactIdentity({ fullName: 'Anna Weber' }, companyKey), { workspaceId: WS, purpose: PII_PURPOSE.CONTACT_DEDUPE_KEY });
     const incoming: ProviderContactRecord = { externalId: 'x', fullName: 'Anna Weber', personalData: true };
     const runOnce = async (): Promise<string> => {
       const { tx, canonicalUpsert } = fakeTx(
@@ -456,7 +467,7 @@ describe('contact-persist · 🔴 待办2 create 层收尾：createContact 尊�
         { existingBlindedKeys: [annaNameKey] },
       );
       await persistDiscoveredContacts(tx, {
-        workspaceId: 'ws-1',
+        workspaceId: WS,
         company,
         adapterKey: 'patent_inventor',
         contacts: [incoming],
@@ -467,7 +478,7 @@ describe('contact-persist · 🔴 待办2 create 层收尾：createContact 尊�
     const keyRun1 = await runOnce();
     const keyRun2 = await runOnce();
     expect(keyRun1).toBe(keyRun2); // 确定性
-    expect(keyRun1).toBe(blindContactKey(declinedContactIdentity({ fullName: 'Anna Weber' }, companyKey)));
+    expect(keyRun1).toBe(blindContactKey(declinedContactIdentity({ fullName: 'Anna Weber' }, companyKey), { workspaceId: WS, purpose: PII_PURPOSE.CONTACT_DEDUPE_KEY }));
   });
 
   it('🔴 歧义幂等硬化：歧义候选不占用来件明文键（两条邮箱行）→ 仍走 dx 键（不新建明文键行，杜绝再跑翻键生重复）', async () => {
@@ -483,7 +494,7 @@ describe('contact-persist · 🔴 待办2 create 层收尾：createContact 尊�
     );
     const incoming: ProviderContactRecord = { externalId: 'x', fullName: 'Anna Weber', personalData: true };
     const res = await persistDiscoveredContacts(tx, {
-      workspaceId: 'ws-1',
+      workspaceId: WS,
       company,
       adapterKey: 'patent_inventor',
       contacts: [incoming],
@@ -491,8 +502,8 @@ describe('contact-persist · 🔴 待办2 create 层收尾：createContact 尊�
     });
     expect(res.created).toBe(1);
     const key = upsertDedupeKey(canonicalUpsert);
-    expect(key).toBe(blindContactKey(declinedContactIdentity({ fullName: 'Anna Weber' }, companyKey))); // dx 键
-    expect(key).not.toBe(blindContactKey(contactIdentity({ fullName: 'Anna Weber' }, companyKey))); // 🔴 绝不用明文名键
+    expect(key).toBe(blindContactKey(declinedContactIdentity({ fullName: 'Anna Weber' }, companyKey), { workspaceId: WS, purpose: PII_PURPOSE.CONTACT_DEDUPE_KEY })); // dx 键
+    expect(key).not.toBe(blindContactKey(contactIdentity({ fullName: 'Anna Weber' }, companyKey), { workspaceId: WS, purpose: PII_PURPOSE.CONTACT_DEDUPE_KEY })); // 🔴 绝不用明文名键
   });
 
   it('🔴 误并回归：同名歧义但各带**不同 VALID 邮箱** → 各自成键（不因同名塌成一行）', async () => {
@@ -505,7 +516,7 @@ describe('contact-persist · 🔴 待办2 create 层收尾：createContact 尊�
     const keyFor = async (email: string): Promise<string> => {
       const { tx, canonicalUpsert } = fakeTx(twoNoEmailJohns, { existingBlindedKeys: [] }); // 来件邮箱各自 free
       await persistDiscoveredContacts(tx, {
-        workspaceId: 'ws-1',
+        workspaceId: WS,
         company,
         adapterKey: 'decision_maker',
         contacts: [{ externalId: 'x', fullName: 'John Smith', email, personalData: true }],
@@ -516,14 +527,14 @@ describe('contact-persist · 🔴 待办2 create 层收尾：createContact 尊�
     const kAlice = await keyFor('alice@acme.com');
     const kBob = await keyFor('bob@gmail.com');
     expect(kAlice).not.toBe(kBob); // 🔴 不同人不同键（含 VALID 邮箱判别符），绝不塌成一行
-    expect(kAlice).toBe(blindContactKey(declinedContactIdentity({ fullName: 'John Smith', email: 'alice@acme.com' }, companyKey)));
+    expect(kAlice).toBe(blindContactKey(declinedContactIdentity({ fullName: 'John Smith', email: 'alice@acme.com' }, companyKey), { workspaceId: WS, purpose: PII_PURPOSE.CONTACT_DEDUPE_KEY }));
   });
 
   it('无碰撞的真新人 → 仍用明文键盲值（不误入 dx 命名空间，正向路径不被破坏）', async () => {
     const { tx, canonicalUpsert } = fakeTx([]); // 无候选、无既有键 → 碰撞探测返 null
     const zoe: ProviderContactRecord = { externalId: 'x', fullName: 'Zoe New', email: 'zoe@new.test', personalData: true };
     const res = await persistDiscoveredContacts(tx, {
-      workspaceId: 'ws-1',
+      workspaceId: WS,
       company,
       adapterKey: 'decision_maker',
       contacts: [zoe],
@@ -531,8 +542,8 @@ describe('contact-persist · 🔴 待办2 create 层收尾：createContact 尊�
     });
     expect(res.created).toBe(1);
     const key = upsertDedupeKey(canonicalUpsert);
-    expect(key).toBe(blindContactKey(contactIdentity({ fullName: 'Zoe New', email: 'zoe@new.test' }, companyKey))); // 明文 e: 键盲值
-    expect(key).not.toBe(blindContactKey(declinedContactIdentity({ fullName: 'Zoe New' }, companyKey))); // 非 dx
+    expect(key).toBe(blindContactKey(contactIdentity({ fullName: 'Zoe New', email: 'zoe@new.test' }, companyKey), { workspaceId: WS, purpose: PII_PURPOSE.CONTACT_DEDUPE_KEY })); // 明文 e: 键盲值
+    expect(key).not.toBe(blindContactKey(declinedContactIdentity({ fullName: 'Zoe New' }, companyKey), { workspaceId: WS, purpose: PII_PURPOSE.CONTACT_DEDUPE_KEY })); // 非 dx
   });
 });
 
@@ -545,7 +556,7 @@ describe('A4：contact_point.source_url 形状防护（DB CHECK 同源）', () =
   it('非 https 来源页降级为 NULL——一条坏 URL 不得打挂整家公司联系人事务', async () => {
     const { tx, contactPointUpsert } = fakeTx([]);
     await persistDiscoveredContacts(tx, {
-      workspaceId: 'ws-1',
+      workspaceId: WS,
       company,
       adapterKey: 'decision_maker',
       contacts: [{
@@ -560,7 +571,7 @@ describe('A4：contact_point.source_url 形状防护（DB CHECK 同源）', () =
   it('合规 https 来源页照常落 sourceUrl', async () => {
     const { tx, contactPointUpsert } = fakeTx([]);
     await persistDiscoveredContacts(tx, {
-      workspaceId: 'ws-1',
+      workspaceId: WS,
       company,
       adapterKey: 'decision_maker',
       contacts: [{

@@ -1,5 +1,5 @@
 import type { Prisma } from '@prisma/client';
-import { blindContactKey } from '../compliance/pii-crypto';
+import { blindContactKeyCandidates, PII_PURPOSE } from '../compliance/pii-crypto';
 import { contactSuppressionKeys } from './identity';
 import {
   canonicalizeSuppressionValue,
@@ -342,9 +342,14 @@ export async function contactMayUseExternalProcessing(
   const suppressedContactKeys = new Set(
     suppressions.filter((row) => row.type === 'contact_key').map((row) => row.value.toLowerCase()),
   );
-  const contactKeys = contactSuppressionKeys(contact.fullName, contact.company.dedupeKey).map((value) =>
-    blindContactKey(value).toLowerCase(),
-  );
+  const contactKeys = contactSuppressionKeys(contact.fullName, contact.company.dedupeKey)
+    .flatMap((value) =>
+      blindContactKeyCandidates(value, {
+        workspaceId: args.workspaceId,
+        purpose: PII_PURPOSE.CONTACT_DEDUPE_KEY,
+      }),
+    )
+    .map((value) => value.toLowerCase());
   if (contactKeys.some((value) => suppressedContactKeys.has(value))) return false;
 
   if (args.email) {

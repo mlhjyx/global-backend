@@ -1,6 +1,6 @@
 import { isCanonicalArtifactUuid } from "../../durable-results/artifact/artifact.types";
 import { EMAIL_VERIFICATION_STATES } from "../../discovery/contact-point-verification-state";
-import { blindContactKey } from "../../compliance/pii-crypto";
+import { blindPlatformKey, PII_PURPOSE } from "../../compliance/pii-crypto";
 import { normalizeEnrichedEmail } from "../finders/email-enrichment-provider";
 import {
   canonicalSafetyJson,
@@ -68,7 +68,16 @@ export interface VerificationPhysicalInput {
 }
 function physicalBlindDigest(material: unknown): string {
   // Reuse the existing keyed blind index, not a public email hash or a new crypto/key authority.
-  const blinded = blindContactKey(canonicalSafetyJson(material));
+  const blinded = blindPlatformKey(canonicalSafetyJson(material), {
+    scope: "enrichment_fingerprint",
+    purpose: PII_PURPOSE.PHYSICAL_FINGERPRINT,
+  });
+  if (blinded.startsWith("bi:v2:")) {
+    const parts = blinded.split(":");
+    const hex = parts.length === 4 ? parts[3] : "";
+    if (!/^[0-9a-f]{64}$/u.test(hex ?? "")) return invalidPlan();
+    return safetyDigest(hex);
+  }
   if (!blinded.startsWith("bi:v1:")) return invalidPlan();
   return safetyDigest(blinded.slice("bi:v1:".length));
 }

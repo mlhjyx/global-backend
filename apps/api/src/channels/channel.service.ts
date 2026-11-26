@@ -3,10 +3,11 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  Optional,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { ServiceUnavailableException } from '@nestjs/common';
-import { Optional } from '@nestjs/common';
+import { formatChannelRecordListItem } from './channel-records';
 // 必须是值导入：构造函数参数的类型元数据（design:paramtypes）据此生成 Nest 注入令牌；
 // `import type` 会在编译期被擦除，参数类型退化为 Function，@Optional() 将永远注入 undefined，
 // requestCrawl 在真实进程里恒返回 PLATFORM_TEMPORAL_UNAVAILABLE（单测直接 new 时无法暴露）。
@@ -873,7 +874,7 @@ export class ChannelService {
    * worker mTLS 证书与 platform writer）；API 只负责发起并返回已受理的运行。
    * 引擎缺平台客户端或端点不可用时 fail-closed（503），不再返回占位 409。
    */
-  /** 渠道最近物化的抓取记录（ops:read）：选择器校验与联系使用；PII 按 OWNER-DECISION-2026-11-05 明文存储。 */
+  /** 渠道最近物化的抓取记录（ops:read）：选择器校验与联系使用；读时解密联系人 PII（兼容 enc:v2/enc:v1/遗留明文）。 */
   async listChannelRecords(
     ctx: RequestContext,
     channelId: string,
@@ -906,28 +907,7 @@ export class ChannelService {
       return {
         channelId,
         counts,
-        records: rows.map((row) => ({
-          id: row.id,
-          crawlRunId: row.crawlRunId,
-          name: row.name,
-          website: row.website,
-          country: row.country,
-          industry: row.industry,
-          products: row.products,
-          keywords: row.keywords,
-          contactName: row.contactName,
-          contactTitle: row.contactTitle,
-          email: row.email,
-          phone: row.phone,
-          sourceUrl: row.sourceUrl,
-          firstSeenAt: row.firstSeenAt.toISOString(),
-          lastSeenAt: row.lastSeenAt.toISOString(),
-          contentHash: row.contentHash,
-          reviewStatus: row.reviewStatus,
-          reviewedBy: row.reviewedBy,
-          reviewedAt: row.reviewedAt?.toISOString() ?? null,
-          materializedCompanyId: row.materializedCompanyId,
-        })),
+        records: rows.map(formatChannelRecordListItem),
       };
     });
   }

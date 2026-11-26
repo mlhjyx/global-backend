@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { Prisma } from '@prisma/client';
 import { assertCandidateTenantAccess } from '../runtime/development-candidate';
 import {
@@ -5,19 +6,22 @@ import {
   type DatabasePrincipalEvidence,
   type DatabaseReadiness,
 } from '../prisma/prisma.service';
-import { encryptPii, decryptPii, isEncryptedPii } from './pii-crypto';
+import {
+  encryptPii,
+  decryptPii,
+  isEncryptedPii,
+  PII_PURPOSE,
+} from './pii-crypto';
 
 /**
  * 收口⑥ PII 透明加解密（Prisma v6 **client extension**）。挂在 PrismaService 上 →
  * canonical_contact.full_name / contact_point.value 的写路径自动加密、读路径自动解密（含嵌套 include），
- * **零调用点改动**（免漏改读点致密文泄进身份匹配）。确定性加密使 contact_point 唯一键/where-by-value 仍成立。
- *
- * 注：v6 已移除 `$use` 中间件（runtime undefined），故用 `$extends`。extension 的 `client` 组件重挂
- * withWorkspace（否则 $extends 会剥掉 PrismaService 自定义方法）。
+ * 并在 MT-P2 经 `withWorkspace` 的 `AsyncLocalStorage` 传递 `workspaceId` 以派生每租户 HKDF DEK + AAD。
  */
 
 interface FieldSpec {
   field: string;
+  purpose: string;
   /** contact_point：value 仅当同记录 type ∈ piiTypes 时加密（external_id 非 PII 不加密）。 */
   typeField?: string;
   piiTypes?: ReadonlySet<string>;
@@ -26,17 +30,55 @@ interface FieldSpec {
 }
 
 const SPECS: Record<string, FieldSpec> = {
-  CanonicalContact: { field: 'fullName' },
+  CanonicalContact: {
+    field: 'fullName',
+    purpose: PII_PURPOSE.CANONICAL_CONTACT_FULL_NAME,
+  },
   ContactPoint: {
     field: 'value',
+    purpose: PII_PURPOSE.CONTACT_POINT_VALUE,
     typeField: 'type',
     piiTypes: new Set(['email', 'phone', 'linkedin']),
     compositeWhereKey: 'contactId_type_value',
   },
 };
 
+const workspacePiiStorage = new AsyncLocalStorage<string>();
+
+export function runWithWorkspacePiiContext<T>(workspaceId: string, fn: () => T): T {
+  return workspacePiiStorage.run(workspaceId, fn);
+}
+
+export function currentWorkspacePiiContext(): string | undefined {
+  return workspacePiiStorage.getStore();
+}
+
+function resolveWorkspaceId(
+  contextWorkspaceId: string | undefined,
+  explicitWorkspaceId: unknown,
+): string | undefined {
+  const ctxWs =
+    typeof contextWorkspaceId === 'string' && contextWorkspaceId.trim().length > 0
+      ? contextWorkspaceId.trim()
+      : undefined;
+  const expWs =
+    typeof explicitWorkspaceId === 'string' && explicitWorkspaceId.trim().length > 0
+      ? explicitWorkspaceId.trim()
+      : undefined;
+  if (ctxWs && expWs && ctxWs.toLowerCase() !== expWs.toLowerCase()) {
+    throw new Error(
+      'PII_WORKSPACE_CONTEXT_MISMATCH: record/where workspaceId conflicts with active workspace context',
+    );
+  }
+  return expWs ?? ctxWs;
+}
+
 /** 记录对象（data/create/update/where 复合键）内目标字段加密（就地）。 */
-function encryptRecord(rec: unknown, spec: FieldSpec): void {
+function encryptRecord(
+  rec: unknown,
+  spec: FieldSpec,
+  fallbackWorkspaceId?: string,
+): void {
   if (!rec || typeof rec !== 'object') return;
   const r = rec as Record<string, unknown>;
   const v = r[spec.field];
@@ -45,43 +87,80 @@ function encryptRecord(rec: unknown, spec: FieldSpec): void {
     const t = r[spec.typeField as string];
     if (typeof t !== 'string' || !spec.piiTypes.has(t)) return; // 无 type 上下文 / 非 PII → 不加密
   }
-  r[spec.field] = encryptPii(v);
+  const workspaceId = resolveWorkspaceId(fallbackWorkspaceId, r.workspaceId);
+  if (!workspaceId) {
+    throw new Error('PII_WORKSPACE_REQUIRED: workspaceId is required for PII encryption');
+  }
+  r[spec.field] = encryptPii(v, { workspaceId, purpose: spec.purpose });
 }
 
-function encryptWhere(where: unknown, spec: FieldSpec): void {
+function encryptWhere(
+  where: unknown,
+  spec: FieldSpec,
+  fallbackWorkspaceId?: string,
+): void {
   if (!where || typeof where !== 'object') return;
   const w = where as Record<string, unknown>;
-  if (spec.compositeWhereKey && w[spec.compositeWhereKey]) encryptRecord(w[spec.compositeWhereKey], spec);
+  const compositeKeyWs =
+    w.workspaceId_dedupeKey && typeof w.workspaceId_dedupeKey === 'object'
+      ? (w.workspaceId_dedupeKey as Record<string, unknown>).workspaceId
+      : undefined;
+  const whereWs = resolveWorkspaceId(fallbackWorkspaceId, w.workspaceId ?? compositeKeyWs);
+  if (spec.compositeWhereKey && w[spec.compositeWhereKey]) {
+    encryptRecord(w[spec.compositeWhereKey], spec, whereWs);
+  }
   if (typeof w[spec.field] === 'string') {
     if (spec.piiTypes) {
       const t = w[spec.typeField as string];
       if (typeof t !== 'string' || !spec.piiTypes.has(t)) return;
     }
-    w[spec.field] = encryptPii(w[spec.field] as string);
+    if (!whereWs) {
+      throw new Error('PII_WORKSPACE_REQUIRED: workspaceId is required for PII lookup');
+    }
+    w[spec.field] = encryptPii(w[spec.field] as string, {
+      workspaceId: whereWs,
+      purpose: spec.purpose,
+    });
   }
 }
 
 /** 依 operation 就地加密入参（导出供单测）。 */
-export function encryptArgs(operation: string, args: Record<string, unknown> | undefined, spec: FieldSpec): void {
+export function encryptArgs(
+  operation: string,
+  args: Record<string, unknown> | undefined,
+  spec: FieldSpec,
+  workspaceId = currentWorkspacePiiContext(),
+): void {
   if (!args) return;
+  const createWs =
+    args.create && typeof args.create === 'object'
+      ? resolveWorkspaceId(workspaceId, (args.create as Record<string, unknown>).workspaceId)
+      : workspaceId;
+  const dataWs =
+    args.data && typeof args.data === 'object' && !Array.isArray(args.data)
+      ? resolveWorkspaceId(workspaceId, (args.data as Record<string, unknown>).workspaceId)
+      : workspaceId;
   switch (operation) {
     case 'create':
-      encryptRecord(args.data, spec);
+      encryptRecord(args.data, spec, workspaceId);
       break;
     case 'createMany':
     case 'createManyAndReturn':
-      if (Array.isArray(args.data)) args.data.forEach((d) => encryptRecord(d, spec));
-      else encryptRecord(args.data, spec);
+      if (Array.isArray(args.data)) {
+        args.data.forEach((d) => encryptRecord(d, spec, workspaceId));
+      } else {
+        encryptRecord(args.data, spec, workspaceId);
+      }
       break;
     case 'update':
     case 'updateMany':
-      encryptRecord(args.data, spec);
-      encryptWhere(args.where, spec);
+      encryptRecord(args.data, spec, dataWs);
+      encryptWhere(args.where, spec, dataWs);
       break;
     case 'upsert':
-      encryptRecord(args.create, spec);
-      encryptRecord(args.update, spec);
-      encryptWhere(args.where, spec);
+      encryptRecord(args.create, spec, createWs);
+      encryptRecord(args.update, spec, createWs);
+      encryptWhere(args.where, spec, createWs);
       break;
     case 'findUnique':
     case 'findUniqueOrThrow':
@@ -91,27 +170,48 @@ export function encryptArgs(operation: string, args: Record<string, unknown> | u
     case 'count':
     case 'delete':
     case 'deleteMany':
-      encryptWhere(args.where, spec);
+      encryptWhere(args.where, spec, workspaceId);
       break;
     default:
       break;
   }
 }
 
-function decryptRecord(rec: unknown, spec: FieldSpec): void {
+function decryptRecord(
+  rec: unknown,
+  spec: FieldSpec,
+  fallbackWorkspaceId?: string,
+): void {
   if (!rec || typeof rec !== 'object') return;
   const r = rec as Record<string, unknown>;
   const v = r[spec.field];
-  if (typeof v === 'string' && isEncryptedPii(v)) r[spec.field] = decryptPii(v);
+  if (typeof v !== 'string') return;
+  if (spec.piiTypes) {
+    const t = r[spec.typeField as string];
+    if (typeof t === 'string') {
+      if (!spec.piiTypes.has(t)) return; // external_id 等非 PII 类型不解密
+    } else if (!isEncryptedPii(v)) {
+      return; // 未 select type 列且非密文时无法判定是否为 external_id，不误判
+    }
+  }
+  const workspaceId = resolveWorkspaceId(fallbackWorkspaceId, r.workspaceId);
+  if (!workspaceId) {
+    throw new Error('PII_WORKSPACE_REQUIRED: workspaceId is required for PII decryption');
+  }
+  r[spec.field] = decryptPii(v, { workspaceId, purpose: spec.purpose });
 }
 
-/** 结果（对象或数组）内目标字段解密（导出供单测）。安全：只作用于 enc: 前缀，legacy 明文不动。 */
-export function decryptResult<T>(result: T, spec: FieldSpec): T {
+/** 结果（对象或数组）内目标字段解密（导出供单测）；默认拒绝明文回退，非 PII 类型不触碰。 */
+export function decryptResult<T>(
+  result: T,
+  spec: FieldSpec,
+  workspaceId = currentWorkspacePiiContext(),
+): T {
   if (Array.isArray(result)) {
-    result.forEach((r) => decryptRecord(r, spec));
+    result.forEach((r) => decryptRecord(r, spec, workspaceId));
     return result;
   }
-  decryptRecord(result, spec);
+  decryptRecord(result, spec, workspaceId);
   return result;
 }
 
@@ -205,18 +305,29 @@ async function reconnectDatabase(value: object): Promise<DatabaseReadiness> {
   return result;
 }
 
-/** 解密嵌套 include 里的 contact/contactPoint（company/lead 查询把它们嵌在结果里）。只作用于 enc: 前缀，安全。 */
-function decryptNested(node: unknown): void {
+/** 解密嵌套 include 里的 contacts/contact/contactPoints（仅作用于对应关系子节点，避免误伤其他带 value 列的非 PII 模型）。 */
+function decryptNested(
+  node: unknown,
+  inheritedWorkspaceId = currentWorkspacePiiContext(),
+): void {
   if (!node || typeof node !== 'object') return;
   if (Array.isArray(node)) {
-    node.forEach(decryptNested);
+    node.forEach((item) => decryptNested(item, inheritedWorkspaceId));
     return;
   }
   const o = node as Record<string, unknown>;
-  decryptRecord(o, CONTACT_SPEC);
-  decryptRecord(o, POINT_SPEC);
-  for (const key of ['contacts', 'contact', 'contactPoints']) {
-    if (key in o) decryptNested(o[key]);
+  const nodeWorkspaceId = resolveWorkspaceId(inheritedWorkspaceId, o.workspaceId);
+  if ('contacts' in o) {
+    decryptResult(o.contacts, CONTACT_SPEC, nodeWorkspaceId);
+    decryptNested(o.contacts, nodeWorkspaceId);
+  }
+  if ('contact' in o) {
+    decryptResult(o.contact, CONTACT_SPEC, nodeWorkspaceId);
+    decryptNested(o.contact, nodeWorkspaceId);
+  }
+  if ('contactPoints' in o) {
+    decryptResult(o.contactPoints, POINT_SPEC, nodeWorkspaceId);
+    decryptNested(o.contactPoints, nodeWorkspaceId);
   }
 }
 
@@ -229,17 +340,18 @@ export const piiExtension = Prisma.defineExtension({
   query: {
     $allModels: {
       async $allOperations({ model, operation, args, query }) {
+        const workspaceId = currentWorkspacePiiContext();
         const spec = piiSpecFor(model);
-        if (spec) encryptArgs(operation, args as Record<string, unknown>, spec);
+        if (spec) encryptArgs(operation, args as Record<string, unknown>, spec, workspaceId);
         const result = await query(args);
-        if (spec) decryptResult(result, spec);
-        decryptNested(result);
+        if (spec) decryptResult(result, spec, workspaceId);
+        decryptNested(result, workspaceId);
         return result;
       },
     },
   },
   client: {
-    /** 重挂 withWorkspace（$extends 剥掉自定义方法）：设租户 RLS 上下文的事务包装。 */
+    /** 重挂 withWorkspace（$extends 剥掉自定义方法）：设租户 RLS 上下文与 PII ALS 上下文的事务包装。 */
     async withWorkspace<T>(
       workspaceId: string,
       fn: (tx: Prisma.TransactionClient) => Promise<T>,
@@ -254,7 +366,7 @@ export const piiExtension = Prisma.defineExtension({
       };
       return ctx.$transaction(async (tx) => {
         await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${workspaceId}, true)`;
-        return fn(tx);
+        return runWithWorkspacePiiContext(workspaceId, () => fn(tx));
       }, options);
     },
     /** NestJS 生命周期（$extends 会剥掉，故在 client 组件重挂，保持既有连接行为）。 */

@@ -1,12 +1,18 @@
 /**
- * 渠道抓取记录物化（2026-11-05 设计；OWNER-DECISION-2026-11-05）。
+ * 渠道抓取记录物化（2026-11-05 设计；MT-P2 加固联系人列级加密）：
  *
- * - 平台级 source_channel_record：(channelId, dedupeKey) 跨轮 upsert，last_seen 前移、content_hash 记录字段快照；
- * - 联系人字段 PII_PENDING_ENCRYPTION 明文存储（列级加密/Q25 审计/保留期由 OWNER-DECISION-2026-11-05 延后）；
+ * - 平台级 source_channel_record：(channelId, dedupeKey) 跨轮 upsert，last_seen 前移、content_hash 基于明文快照；
+ * - 联系人字段（contactName/contactTitle/email/phone）经 platform:source_channel_record 作用域
+ *   `enc:v2:<keyId>:` 随机 IV 密文存储（写路径 fail-closed；读路径默认拒绝明文回退，仅显式迁移窗口兼容明文）；
  * - 幂等：同一批记录重复写入无害（唯一键 + upsert），活动重试不产生重复行；
  * - 同轮内同名折叠（首条为准），返回写入条数（recordsMaterialized 的口径）。
  */
 import { createHash } from 'node:crypto';
+import {
+  decryptPlatformPii,
+  encryptPlatformPii,
+  PII_PURPOSE,
+} from '../compliance/pii-crypto';
 import { companyIdentity } from '../discovery/identity';
 import type { CrawledRecord } from './channel-crawler';
 
@@ -32,7 +38,99 @@ export interface ChannelRecordWriter {
   upsertByChannelAndDedupe(row: ChannelRecordRow, seenAt: Date): Promise<void>;
 }
 
-function recordContentHash(row: ChannelRecordRow): string {
+const CHANNEL_RECORD_PII_FIELDS = [
+  ['contactName', PII_PURPOSE.SOURCE_CHANNEL_CONTACT_NAME],
+  ['contactTitle', PII_PURPOSE.SOURCE_CHANNEL_CONTACT_TITLE],
+  ['email', PII_PURPOSE.SOURCE_CHANNEL_EMAIL],
+  ['phone', PII_PURPOSE.SOURCE_CHANNEL_PHONE],
+] as const;
+
+export function encryptChannelRecordPii(row: ChannelRecordRow): ChannelRecordRow {
+  const encrypted: ChannelRecordRow = { ...row };
+  for (const [field, purpose] of CHANNEL_RECORD_PII_FIELDS) {
+    const value = encrypted[field];
+    if (typeof value === 'string') {
+      encrypted[field] = encryptPlatformPii(value, {
+        scope: 'source_channel_record',
+        purpose,
+        deterministic: false,
+      });
+    }
+  }
+  return encrypted;
+}
+
+export function decryptChannelRecordPii<
+  T extends {
+    contactName: string | null;
+    contactTitle: string | null;
+    email: string | null;
+    phone: string | null;
+  },
+>(row: T): T {
+  const decrypted: T = { ...row };
+  for (const [field, purpose] of CHANNEL_RECORD_PII_FIELDS) {
+    const value = decrypted[field];
+    if (typeof value === 'string') {
+      decrypted[field] = decryptPlatformPii(value, {
+        scope: 'source_channel_record',
+        purpose,
+      }) as T[typeof field];
+    }
+  }
+  return decrypted;
+}
+
+export interface ChannelRecordListRow {
+  id: string;
+  crawlRunId: string;
+  name: string;
+  website: string | null;
+  country: string | null;
+  industry: string | null;
+  products: unknown;
+  keywords: unknown;
+  contactName: string | null;
+  contactTitle: string | null;
+  email: string | null;
+  phone: string | null;
+  sourceUrl: string;
+  firstSeenAt: Date;
+  lastSeenAt: Date;
+  contentHash: string | null;
+  reviewStatus: string;
+  reviewedBy: string | null;
+  reviewedAt: Date | null;
+  materializedCompanyId: string | null;
+}
+
+export function formatChannelRecordListItem<T extends ChannelRecordListRow>(row: T) {
+  const pii = decryptChannelRecordPii(row);
+  return {
+    id: row.id,
+    crawlRunId: row.crawlRunId,
+    name: row.name,
+    website: row.website,
+    country: row.country,
+    industry: row.industry,
+    products: row.products as T['products'],
+    keywords: row.keywords as T['keywords'],
+    contactName: pii.contactName,
+    contactTitle: pii.contactTitle,
+    email: pii.email,
+    phone: pii.phone,
+    sourceUrl: row.sourceUrl,
+    firstSeenAt: row.firstSeenAt.toISOString(),
+    lastSeenAt: row.lastSeenAt.toISOString(),
+    contentHash: row.contentHash,
+    reviewStatus: row.reviewStatus,
+    reviewedBy: row.reviewedBy,
+    reviewedAt: row.reviewedAt?.toISOString() ?? null,
+    materializedCompanyId: row.materializedCompanyId,
+  };
+}
+
+export function recordContentHash(row: ChannelRecordRow): string {
   const fields = [
     row.name,
     row.website,

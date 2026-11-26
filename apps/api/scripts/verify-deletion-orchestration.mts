@@ -11,7 +11,7 @@ import { PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { DeletionService } from '../src/compliance/deletion.service';
 import { createDeletionActivities } from '../src/temporal/deletion.activities';
-import { encryptPii } from '../src/compliance/pii-crypto';
+import { PII_PURPOSE, assertPiiKeyConfigured, encryptPii } from '../src/compliance/pii-crypto';
 import type { DeletionWorkflowInput } from '../src/compliance/deletion.types';
 
 const WS = '00000000-0000-0000-0000-0000000000de';
@@ -37,7 +37,7 @@ async function cleanup(owner: PrismaClient, ws: string): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  if (!process.env.PII_ENCRYPTION_KEY) throw new Error('PII_ENCRYPTION_KEY 未配置');
+  assertPiiKeyConfigured();
   const prisma = new PrismaService();
   const owner = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
 
@@ -80,7 +80,7 @@ async function main(): Promise<void> {
   await owner.fieldEvidence.createMany({
     data: [
       { workspaceId: WS, entityType: 'contact', entityId: contactId, field: 'person.profile', value: { personal_data: true, buying_role: 'procurement' }, providerKey: 'decision_maker', license: 'public', dataClass: 'red' },
-      { workspaceId: WS, entityType: 'contact', entityId: contactId, field: 'email', value: encryptPii(EMAIL), providerKey: 'decision_maker', license: 'public', dataClass: 'red' },
+      { workspaceId: WS, entityType: 'contact', entityId: contactId, field: 'email', value: encryptPii(EMAIL, { workspaceId: WS, purpose: PII_PURPOSE.FIELD_EVIDENCE_VALUE }), providerKey: 'decision_maker', license: 'public', dataClass: 'red' },
     ],
   });
 

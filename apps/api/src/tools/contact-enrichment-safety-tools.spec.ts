@@ -535,7 +535,9 @@ describe("four original-parser controlled HTTP Tools; fake resolver/transport on
   });
   it("requires the existing encryption key before a Hunter wire", async () => {
     const x = world("hunter");
+    const keyring = process.env.PII_KEYRING_JSON;
     const key = process.env.PII_ENCRYPTION_KEY;
+    delete process.env.PII_KEYRING_JSON;
     delete process.env.PII_ENCRYPTION_KEY;
     try {
       await expect(
@@ -543,6 +545,8 @@ describe("four original-parser controlled HTTP Tools; fake resolver/transport on
       ).rejects.toThrow();
       expect(x.executePinned).not.toHaveBeenCalled();
     } finally {
+      if (keyring === undefined) delete process.env.PII_KEYRING_JSON;
+      else process.env.PII_KEYRING_JSON = keyring;
       if (key === undefined) delete process.env.PII_ENCRYPTION_KEY;
       else process.env.PII_ENCRYPTION_KEY = key;
     }

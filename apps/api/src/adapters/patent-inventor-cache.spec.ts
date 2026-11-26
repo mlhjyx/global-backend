@@ -12,17 +12,22 @@ import {
   type PatentRefreshDb,
 } from './patent-inventor-cache';
 import { MAX_INVENTORS_PER_ASSIGNEE, type RefreshScanResult } from './bigquery-patents';
-import { encryptPii, decryptPii, blindContactKey } from '../compliance/pii-crypto';
+import {
+  PII_PURPOSE,
+  blindPlatformKey,
+  decryptPlatformPii,
+  encryptPlatformPii,
+} from '../compliance/pii-crypto';
 import { legacyFoldedPersonNameKey } from '../discovery/person-name';
 import { toReadableName } from '../discovery/providers/bigquery-patents.provider';
 
-// vitest.config.ts 注入固定 PII_ENCRYPTION_KEY，故 encryptPii/decryptPii 直接可用。
+const PATENT_SCOPE = 'patent_inventor_cache';
 
 const row = (raw: string, norm: string, country: string, inventorPlain: string): CacheInventorRow => ({
   assigneeNameRaw: raw,
   assigneeNorm: norm,
   assigneeCountry: country,
-  inventorName: encryptPii(inventorPlain),
+  inventorName: encryptPlatformPii(inventorPlain, { scope: PATENT_SCOPE, purpose: PII_PURPOSE.PATENT_INVENTOR_NAME }),
 });
 
 describe('buildSyntheticRecords（双键分组 · 护栏③/T1）', () => {
@@ -56,7 +61,12 @@ describe('buildSyntheticRecords（双键分组 · 护栏③/T1）', () => {
   it('无发明人的组被丢弃（不产空记录）', () => {
     // 手造一行密文解密为空（'' 加密）→ 该组无发明人
     const rows: CacheInventorRow[] = [
-      { assigneeNameRaw: 'Ghost', assigneeNorm: 'ghost', assigneeCountry: 'de', inventorName: encryptPii('') },
+      {
+        assigneeNameRaw: 'Ghost',
+        assigneeNorm: 'ghost',
+        assigneeCountry: 'de',
+        inventorName: encryptPlatformPii('', { scope: PATENT_SCOPE, purpose: PII_PURPOSE.PATENT_INVENTOR_NAME }),
+      },
     ];
     expect(buildSyntheticRecords(rows)).toEqual([]);
   });
@@ -96,7 +106,7 @@ describe('inventorBlindKey / inventorErasureKeys（Art.17 擦除不变式）', (
   it('擦除键集（按可读名）恒含存储盲键（按原始 "Surname, Given" 名）——跨名格式收敛', () => {
     const raw = 'SCHMIDT, HANS';
     const stored = inventorBlindKey(raw);
-    expect(stored).toMatch(/^bi:v1:/); // 不可逆盲索引
+    expect(stored).toMatch(/^bi:v2:k1:[0-9a-f]{64}$/); // 不可逆盲索引
     const readable = toReadableName(raw); // "Hans Schmidt"
     expect(readable).toBe('Hans Schmidt');
     expect(inventorErasureKeys(readable)).toContain(stored);
@@ -117,7 +127,10 @@ describe('inventorBlindKey / inventorErasureKeys（Art.17 擦除不变式）', (
   it('学位串名：同一原始名的擦除键集既含新剥离形，也含旧规则形（变体只增不减）', () => {
     // 本 PR 前 "Dipl.-Wirt.-Ing." 不剥，缓存/墓碑盲键按含称号的折叠形写入——按同名擦除时必须仍命中旧形。
     const raw = 'Dipl.-Wirt.-Ing. Hans Schmidt';
-    const legacyStored = blindContactKey(legacyFoldedPersonNameKey(raw));
+    const legacyStored = blindPlatformKey(legacyFoldedPersonNameKey(raw), {
+      scope: PATENT_SCOPE,
+      purpose: PII_PURPOSE.PATENT_INVENTOR_KEY,
+    });
     expect(inventorErasureKeys(raw)).toContain(legacyStored);
     expect(legacyInventorBlindKey(raw)).toBe(legacyStored);
     // 新剥离形也在键集里（同一原始名两种规则都覆盖）。
@@ -289,7 +302,10 @@ const q = (id: string, norm: string, country: string, anchor: string): FakeQueue
 describe('refreshPatentCache（Step 2c 编排）', () => {
   it('空队列 → SKIPPED_EMPTY，不扫 BQ，但保留期清理照跑', async () => {
     const expired: FakeCacheRow = {
-      assigneeNorm: 'old', assigneeCountry: 'de', inventorName: encryptPii('X'), inventorNameKey: 'k',
+      assigneeNorm: 'old',
+      assigneeCountry: 'de',
+      inventorName: encryptPlatformPii('X', { scope: PATENT_SCOPE, purpose: PII_PURPOSE.PATENT_INVENTOR_NAME }),
+      inventorNameKey: 'k',
       assigneeNameRaw: 'Old', windowFromYear: 2015, windowToYear: 2019, license: 'CC-BY-4.0',
       refreshedAt: new Date(NOW - 10 * 86400000), expiresAt: new Date(NOW - 86400000), // 已过期
     };
@@ -349,9 +365,9 @@ describe('refreshPatentCache（Step 2c 编排）', () => {
     expect(res.bytesScanned).toBe(99999);
     // 落库：inventorName 加密、盲键非空
     expect(db._cache).toHaveLength(1);
-    expect(db._cache[0].inventorName).toMatch(/^enc:v1:/);
-    expect(decryptPii(db._cache[0].inventorName)).toBe('SCHMIDT, HANS');
-    expect(db._cache[0].inventorNameKey).toMatch(/^bi:v1:/);
+    expect(db._cache[0].inventorName).toMatch(/^enc:v2:k1:/);
+    expect(decryptPlatformPii(db._cache[0].inventorName, { scope: PATENT_SCOPE, purpose: PII_PURPOSE.PATENT_INVENTOR_NAME })).toBe('SCHMIDT, HANS');
+    expect(db._cache[0].inventorNameKey).toMatch(/^bi:v2:k1:/);
     expect(db._cache[0].assigneeCountry).toBe('de');
     // 队列状态机
     expect(db._queue.find((x) => x.id === '1')?.status).toBe('CACHED');
@@ -403,7 +419,10 @@ describe('refreshPatentCache · Codex PR #93 复审加固', () => {
 
   it('P1-1 kill-switch：provider DISABLED → DISABLED，绝不扫 BQ，但保留期清理照跑、队列不动', async () => {
     const expired: FakeCacheRow = {
-      assigneeNorm: 'old', assigneeCountry: 'de', inventorName: encryptPii('X'), inventorNameKey: 'k',
+      assigneeNorm: 'old',
+      assigneeCountry: 'de',
+      inventorName: encryptPlatformPii('X', { scope: PATENT_SCOPE, purpose: PII_PURPOSE.PATENT_INVENTOR_NAME }),
+      inventorNameKey: 'k',
       assigneeNameRaw: 'Old', windowFromYear: 2015, windowToYear: 2019, license: 'CC-BY-4.0',
       refreshedAt: new Date(NOW - 10 * 86400000), expiresAt: new Date(NOW - 86400000), // 已过期
     };
@@ -430,7 +449,7 @@ describe('refreshPatentCache · Codex PR #93 复审加固', () => {
     expect(res.rowCount).toBe(1);
     expect(db._cache).toHaveLength(1);
     expect(db._cache[0].assigneeNorm).toBe('apple');
-    expect(decryptPii(db._cache[0].inventorName)).toBe('SMITH, JOHN');
+    expect(decryptPlatformPii(db._cache[0].inventorName, { scope: PATENT_SCOPE, purpose: PII_PURPOSE.PATENT_INVENTOR_NAME })).toBe('SMITH, JOHN');
   });
 
   it('P2-3：PATENT_CACHE_TTL_DAYS>180 → expiresAt 夹到 180d 硬顶（不超期保留 PII）', async () => {
@@ -463,7 +482,7 @@ describe('refreshPatentCache · Codex PR #93 复审加固', () => {
     expect(res.status).toBe('OK');
     expect(res.rowCount).toBe(1);
     expect(db._cache).toHaveLength(1);
-    expect(decryptPii(db._cache[0].inventorName)).toBe('SCHMIDT, HANS');
+    expect(decryptPlatformPii(db._cache[0].inventorName, { scope: PATENT_SCOPE, purpose: PII_PURPOSE.PATENT_INVENTOR_NAME })).toBe('SCHMIDT, HANS');
     expect(db._cache.some((r) => r.inventorNameKey === erasedKey)).toBe(false);
   });
 
@@ -478,7 +497,8 @@ describe('refreshPatentCache · Codex PR #93 复审加固', () => {
     expect(db._cache).toHaveLength(MAX_INVENTORS_PER_ASSIGNEE);
   });
 
-  it('P2-7 preflight：PII_ENCRYPTION_KEY 缺 → FAILED，扫描前拦下（绝不扫 BQ 烧配额）', async () => {
+  it('P2-7 preflight：PII_KEYRING_JSON 缺 → FAILED，扫描前拦下（绝不扫 BQ 烧配额）', async () => {
+    vi.stubEnv('PII_KEYRING_JSON', '');
     vi.stubEnv('PII_ENCRYPTION_KEY', '');
     const db = makeFakeRefreshDb({ queue: [q('1', 'acme', 'de', '%ACME%')] });
     let scanned = false;
@@ -522,12 +542,15 @@ describe('refreshPatentCache · Codex PR #93 复审加固', () => {
     expect(res.status).toBe('OK');
     expect(db._cache).toHaveLength(1);
     expect(db._cache[0].assigneeCountry).toBe('de');
-    expect(decryptPii(db._cache[0].inventorName)).toBe('SCHMIDT, HANS');
+    expect(decryptPlatformPii(db._cache[0].inventorName, { scope: PATENT_SCOPE, purpose: PII_PURPOSE.PATENT_INVENTOR_NAME })).toBe('SCHMIDT, HANS');
   });
 
   it('复审 Thread3（over-cap 清除）：刷新用当前 capped 集替换该组缓存，陈旧/超额行不驻留 TTL', async () => {
     const stale = (inv: string): FakeCacheRow => ({
-      assigneeNorm: 'acme', assigneeCountry: 'de', inventorName: encryptPii(inv), inventorNameKey: inventorBlindKey(inv),
+      assigneeNorm: 'acme',
+      assigneeCountry: 'de',
+      inventorName: encryptPlatformPii(inv, { scope: PATENT_SCOPE, purpose: PII_PURPOSE.PATENT_INVENTOR_NAME }),
+      inventorNameKey: inventorBlindKey(inv),
       assigneeNameRaw: 'Acme GmbH', windowFromYear: 2021, windowToYear: 2025, license: 'CC-BY-4.0',
       refreshedAt: new Date(NOW - 86400000), expiresAt: new Date(NOW + 90 * 86400000), // 未过期
     });
@@ -535,7 +558,7 @@ describe('refreshPatentCache · Codex PR #93 复审加固', () => {
     const bq = fakeScanner([{ assigneeName: 'Acme GmbH', assigneeCountry: 'de', inventorName: 'FRESH, ONLY' }]);
     const res = await refreshPatentCache({ db, bq, now: () => NOW });
     expect(res.status).toBe('OK');
-    const names = db._cache.filter((r) => r.assigneeNorm === 'acme').map((r) => decryptPii(r.inventorName)).sort();
+    const names = db._cache.filter((r) => r.assigneeNorm === 'acme').map((r) => decryptPlatformPii(r.inventorName, { scope: PATENT_SCOPE, purpose: PII_PURPOSE.PATENT_INVENTOR_NAME })).sort();
     expect(names).toEqual(['FRESH, ONLY']); // 🔴 旧两行被清，只余当前刷新集（cap 真正约束存量 PII）
   });
 });

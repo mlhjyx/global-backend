@@ -1,7 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { OutreachDncService } from './outreach-dnc.service';
 
 const WORKSPACE = '55555555-5555-4555-8555-555555555555';
+const PEPPER_1 = '1'.repeat(64);
+const PEPPER_2 = '2'.repeat(64);
 
 interface SuppressionRow {
   emailHash: string;
@@ -46,7 +49,15 @@ class FakePrisma {
   ];
 
   readonly outreachGlobalSuppression = {
-    findMany: async () => this.globalRows,
+    findMany: async ({
+      where,
+    }: {
+      where?: { emailHash?: { in?: string[] } };
+    } = {}) => {
+      const target = where?.emailHash?.in;
+      if (!target) return this.globalRows;
+      return this.globalRows.filter((row) => target.includes(row.emailHash));
+    },
     createMany: async ({
       data,
     }: {
@@ -67,14 +78,34 @@ class FakePrisma {
 }
 
 describe('OutreachDncService', () => {
-  it('canonicalizes addresses and hashes them without returning plaintext', async () => {
+  let prevPepper: string | undefined;
+  let prevRetired: string | undefined;
+
+  beforeEach(() => {
+    prevPepper = process.env.OUTREACH_DNC_HMAC_PEPPER;
+    prevRetired = process.env.OUTREACH_DNC_HMAC_RETIRED_PEPPERS;
+    process.env.OUTREACH_DNC_HMAC_PEPPER = PEPPER_1;
+    delete process.env.OUTREACH_DNC_HMAC_RETIRED_PEPPERS;
+  });
+
+  afterEach(() => {
+    if (prevPepper === undefined) delete process.env.OUTREACH_DNC_HMAC_PEPPER;
+    else process.env.OUTREACH_DNC_HMAC_PEPPER = prevPepper;
+    if (prevRetired === undefined) delete process.env.OUTREACH_DNC_HMAC_RETIRED_PEPPERS;
+    else process.env.OUTREACH_DNC_HMAC_RETIRED_PEPPERS = prevRetired;
+  });
+
+  it('canonicalizes addresses and preserves transient HTTP sha256 emailHash correlation key', async () => {
     const service = new OutreachDncService(new FakePrisma() as never);
     const [result] = await service.check(WORKSPACE, [' Alice@Example.COM ']);
-    expect(result.emailHash).toMatch(/^[0-9a-f]{64}$/);
+    const expectedSha256 = createHash('sha256').update('alice@example.com').digest('hex');
+    expect(result.emailHash).toBe(expectedSha256);
     expect(result.suppressed).toBe(false);
     expect(JSON.stringify(result)).not.toContain('alice@example.com');
     expect(service.canonicalEmail(' Alice@Example.COM ')).toBe('alice@example.com');
-    expect(service.emailHash('alice@example.com')).toBe(result.emailHash);
+    expect(service.emailHash('alice@example.com')).toBe(expectedSha256);
+    expect(service.storageEmailHash('alice@example.com')).not.toBe(expectedSha256);
+    expect(service.storageEmailHash('alice@example.com')).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it('suppresses on the tenant list and reports the reason', async () => {
@@ -86,7 +117,7 @@ describe('OutreachDncService', () => {
     expect(result.reasons).toEqual(['tenant:unsubscribe']);
   });
 
-  it('suppresses on the platform-wide hash list across tenants', async () => {
+  it('stores peppered HMAC (not unsalted SHA-256) and matches across tenants', async () => {
     const prisma = new FakePrisma();
     const service = new OutreachDncService(prisma as never, prisma as never);
     await service.suppressGlobal({
@@ -94,11 +125,61 @@ describe('OutreachDncService', () => {
       reason: 'complaint',
       source: 'outreach_unsubscribe',
     });
+    const unsalted = createHash('sha256').update('bob@example.com').digest('hex');
+    expect(prisma.globalRows).toHaveLength(1);
+    expect(prisma.globalRows[0]!.emailHash).not.toBe(unsalted);
+    expect(prisma.globalRows[0]!.emailHash).toBe(service.storageEmailHash('bob@example.com'));
+
     const [result] = await service.check(WORKSPACE, ['BOB@example.com']);
+    expect(result.emailHash).toBe(unsalted);
     expect(result.suppressed).toBe(true);
     expect(result.reasons).toEqual(['global:complaint']);
-    expect(prisma.globalRows).toHaveLength(1);
     expect(JSON.stringify(prisma.globalRows)).not.toContain('bob@example.com');
+  });
+
+  it('supports pepper rotation via OUTREACH_DNC_HMAC_RETIRED_PEPPERS on check()', async () => {
+    const prisma = new FakePrisma();
+    const service = new OutreachDncService(prisma as never, prisma as never);
+    await service.suppressGlobal({
+      email: 'rotated@example.com',
+      reason: 'unsubscribe',
+      source: 'outreach_unsubscribe',
+    });
+
+    process.env.OUTREACH_DNC_HMAC_PEPPER = PEPPER_2;
+    const [missedWithoutRetired] = await service.check(WORKSPACE, ['rotated@example.com']);
+    expect(missedWithoutRetired.suppressed).toBe(false);
+
+    process.env.OUTREACH_DNC_HMAC_RETIRED_PEPPERS = PEPPER_1;
+    const [hitWithRetired] = await service.check(WORKSPACE, ['rotated@example.com']);
+    expect(hitWithRetired.suppressed).toBe(true);
+    expect(hitWithRetired.reasons).toEqual(['global:unsubscribe']);
+  });
+
+  it('fails closed with OUTREACH_DNC_PEPPER_UNAVAILABLE when pepper is missing or invalid', async () => {
+    delete process.env.OUTREACH_DNC_HMAC_PEPPER;
+    const prisma = new FakePrisma();
+    const service = new OutreachDncService(prisma as never, prisma as never);
+    await expect(service.check(WORKSPACE, ['alice@example.com'])).rejects.toMatchObject({
+      status: 503,
+      response: { error: { code: 'OUTREACH_DNC_PEPPER_UNAVAILABLE' } },
+    });
+    await expect(
+      service.suppressGlobal({
+        email: 'alice@example.com',
+        reason: 'unsubscribe',
+        source: 'ops',
+      }),
+    ).rejects.toMatchObject({
+      status: 503,
+      response: { error: { code: 'OUTREACH_DNC_PEPPER_UNAVAILABLE' } },
+    });
+
+    process.env.OUTREACH_DNC_HMAC_PEPPER = 'not-a-valid-pepper';
+    await expect(service.check(WORKSPACE, ['alice@example.com'])).rejects.toMatchObject({
+      status: 503,
+      response: { error: { code: 'OUTREACH_DNC_PEPPER_UNAVAILABLE' } },
+    });
   });
 
   it('fails closed when global suppression runs without platformWriter', async () => {

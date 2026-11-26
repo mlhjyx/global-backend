@@ -182,10 +182,11 @@ function httpGetPayload(input: unknown, data: unknown): ArtifactPayload {
 function contactEmailFindPayload(
   _input: unknown,
   value: unknown,
+  workspaceId: string,
 ): ArtifactPayload {
   const data = parseContactEmailFindPayload(value);
   return {
-    body: serializeContactEmailFindPayload(data),
+    body: serializeContactEmailFindPayload(data, workspaceId),
     mediaType: "application/octet-stream",
     expectedFacts: undefined,
     data,
@@ -195,7 +196,7 @@ function contactEmailFindPayload(
 const PAYLOADS: Readonly<
   Record<
     WorkspaceArtifactSchema,
-    (input: unknown, data: unknown) => ArtifactPayload
+    (input: unknown, data: unknown, workspaceId: string) => ArtifactPayload
   >
 > = Object.freeze({
   "crawl4ai-fetch/v1": crawl4aiFetchPayload,
@@ -324,7 +325,11 @@ export class GenericOperationArtifactExecution implements ArtifactExecutionPort 
       costCents < 0
     )
       return invalid();
-    const payload = PAYLOADS[schema](input.input, input.result.data);
+    const payload = PAYLOADS[schema](
+      input.input,
+      input.result.data,
+      input.reservation.workspaceId,
+    );
     const expiresAt = new Date(
       this.now().getTime() + strategy.ttlSeconds * 1_000,
     );

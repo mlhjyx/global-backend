@@ -1,7 +1,14 @@
 import { Prisma } from '@prisma/client';
 import { GuessResult } from './email-guesser';
 import { LawfulBasis } from './provider-contract';
-import { blindContactKey, encryptPii } from '../compliance/pii-crypto';
+import {
+  blindContactKeyCandidates,
+  encryptPii,
+  encryptPiiCandidates,
+  PII_PURPOSE,
+  piiKeyConfigured,
+} from '../compliance/pii-crypto';
+import { currentWorkspacePiiContext } from '../compliance/pii-crypto.extension';
 import { companyMatchesSuppression, canonicalizeSuppressionValue, canonicalizeSuppressionValues,
 } from './suppression-value';
 import { lockWorkspaceSuppressionPolicy } from './suppression-policy-lock';
@@ -80,22 +87,53 @@ export interface PersistGuessOutcome {
 
 export async function readbackGuessedEmail(
   tx: Prisma.TransactionClient,
-  args: { contactId: string; result: GuessResult },
+  args: { workspaceId?: string; contactId: string; result: GuessResult },
 ): Promise<PersistGuessOutcome> {
   const plan = guessedEmailWritePlan(args.result);
   if (!plan) return { persisted: false, reason: args.result.reason };
   const email = canonicalizeSuppressionValue('email', plan.email);
   if (!email) return { persisted: false, reason: 'suppressed' };
-  const point = await tx.contactPoint.findUnique({
-    where: {
-      contactId_type_value: {
-        contactId: args.contactId,
-        type: 'email',
-        value: email,
+  const workspaceId = args.workspaceId ?? currentWorkspacePiiContext();
+  let point: { status: string } | null = null;
+  if (workspaceId && typeof tx.contactPoint.findFirst === 'function' && piiKeyConfigured()) {
+    const candidates = encryptPiiCandidates(email, {
+      workspaceId,
+      purpose: PII_PURPOSE.CONTACT_POINT_VALUE,
+    });
+    if (candidates.length > 1) {
+      point = await tx.contactPoint.findFirst({
+        where: {
+          contactId: args.contactId,
+          type: 'email',
+          value: { in: candidates },
+        },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        select: { status: true },
+      });
+    } else {
+      point = await tx.contactPoint.findUnique({
+        where: {
+          contactId_type_value: {
+            contactId: args.contactId,
+            type: 'email',
+            value: email,
+          },
+        },
+        select: { status: true },
+      });
+    }
+  } else {
+    point = await tx.contactPoint.findUnique({
+      where: {
+        contactId_type_value: {
+          contactId: args.contactId,
+          type: 'email',
+          value: email,
+        },
       },
-    },
-    select: { status: true },
-  });
+      select: { status: true },
+    });
+  }
   if (!point || (point.status !== 'VALID' && point.status !== 'RISKY')) {
     return { persisted: false, reason: 'authoritative_readback_missing' };
   }
@@ -159,9 +197,14 @@ export async function persistGuessedEmail(
   const suppressedContactKeys = new Set(
     currentSuppressions.filter((row) => row.type === 'contact_key').map((row) => row.value.toLowerCase()),
   );
-  const contactKeys = contactSuppressionKeys(contact.fullName, contact.company.dedupeKey).map((value) =>
-    blindContactKey(value).toLowerCase(),
-  );
+  const contactKeys = contactSuppressionKeys(contact.fullName, contact.company.dedupeKey)
+    .flatMap((value) =>
+      blindContactKeyCandidates(value, {
+        workspaceId: args.workspaceId,
+        purpose: PII_PURPOSE.CONTACT_DEDUPE_KEY,
+      }),
+    )
+    .map((value) => value.toLowerCase());
   const suppressedDomains = canonicalizeSuppressionValues(
     'domain',
     currentSuppressions.filter((row) => row.type === 'domain').map((row) => row.value),
@@ -255,7 +298,10 @@ export async function persistGuessedEmail(
       field: 'email.guess',
       value: {
         // 收口⑥：证据里的人名邮箱=第二份 PII → 加密落库（确定性，与 contact_point 密文一致）。
-        email: encryptPii(email),
+        email: encryptPii(email, {
+          workspaceId: args.workspaceId,
+          purpose: PII_PURPOSE.FIELD_EVIDENCE_VALUE,
+        }),
         pattern: plan.pattern,
         confidence: plan.confidence,
         status: plan.pointStatus,

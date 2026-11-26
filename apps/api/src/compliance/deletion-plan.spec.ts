@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { buildSuppressionEntries, selectReconcileStragglerIds } from './deletion-plan';
-import { blindContactKey } from './pii-crypto';
+import { PII_PURPOSE, blindContactKey } from './pii-crypto';
 import { contactSuppressionKeys } from '../discovery/identity';
+
+const WS = '00000000-0000-4000-8000-0000000000aa';
 
 describe('deletion-plan buildSuppressionEntries', () => {
   it('contact subject: only lowercased, deduped email entries — never freezes the whole company', () => {
     const e = buildSuppressionEntries({
+      workspaceId: WS,
       subjectType: 'contact',
       emails: ['A.Smith@Acme.com', 'a.smith@acme.com', ' '],
       domain: 'acme.com',
@@ -16,6 +19,7 @@ describe('deletion-plan buildSuppressionEntries', () => {
 
   it('company subject: emails + domain + company_name, all deduped/lowercased', () => {
     const e = buildSuppressionEntries({
+      workspaceId: WS,
       subjectType: 'company',
       emails: ['info@acme.com', 'INFO@acme.com'],
       domain: 'Acme.com',
@@ -30,12 +34,13 @@ describe('deletion-plan buildSuppressionEntries', () => {
 
   it('skips empty/whitespace values', () => {
     expect(
-      buildSuppressionEntries({ subjectType: 'company', emails: [''], domain: null, companyName: '  ' }),
+      buildSuppressionEntries({ workspaceId: WS, subjectType: 'company', emails: [''], domain: null, companyName: '  ' }),
     ).toEqual([]);
   });
 
   it('contact subject with person context: adds blinded, email-independent contact_key VARIANTS (Codex P1 + 变体集)', () => {
     const e = buildSuppressionEntries({
+      workspaceId: WS,
       subjectType: 'contact',
       emails: ['klaus@acme.com'],
       contactName: 'Klaus Löschmann',
@@ -43,11 +48,13 @@ describe('deletion-plan buildSuppressionEntries', () => {
     });
     expect(e).toContainEqual({ type: 'email', value: 'klaus@acme.com', reason: 'legal', protectionClass: 'LEGAL' });
     // 变体集：德语音译(ö→oe) + 纯去音标(ö→o) 两键都写入，令跨源拼写变体重现都能命中禁联
-    const keys = contactSuppressionKeys('Klaus Löschmann', 'd:acme.com').map((k) => blindContactKey(k).toLowerCase());
+    const keys = contactSuppressionKeys('Klaus Löschmann', 'd:acme.com').map((k) =>
+      blindContactKey(k, { workspaceId: WS, purpose: PII_PURPOSE.CONTACT_DEDUPE_KEY }).toLowerCase(),
+    );
     expect(keys.length).toBeGreaterThanOrEqual(2); // 德语音译 + 纯去音标 (+ umlaut 折叠 + 旧单值形，去重后 ≥2)
     for (const k of keys) {
       expect(e).toContainEqual({ type: 'contact_key', value: k, reason: 'legal', protectionClass: 'LEGAL' });
-      expect(k.startsWith('bi:v1:')).toBe(true); // 🔴 盲化 HMAC
+      expect(k.startsWith('bi:v2:k1:')).toBe(true); // 🔴 盲化 HMAC
     }
     // 🔴 禁联表不存人名明文（含各拼写变体）
     const dump = JSON.stringify(e).toLowerCase();
@@ -57,13 +64,14 @@ describe('deletion-plan buildSuppressionEntries', () => {
   });
 
   it('contact subject without company context: no person key (backward compatible)', () => {
-    expect(buildSuppressionEntries({ subjectType: 'contact', emails: ['a@b.com'] })).toEqual([
+    expect(buildSuppressionEntries({ workspaceId: WS, subjectType: 'contact', emails: ['a@b.com'] })).toEqual([
       { type: 'email', value: 'a@b.com', reason: 'legal', protectionClass: 'LEGAL' },
     ]);
   });
 
   it('company subject: never emits a contact_key even if person context is passed', () => {
     const e = buildSuppressionEntries({
+      workspaceId: WS,
       subjectType: 'company',
       emails: [],
       domain: 'acme.com',
@@ -84,6 +92,7 @@ describe('deletion-plan selectReconcileStragglerIds (Art.17 contact-subject 对�
 
   it('🔴 选中「同 person-key + createdAt >= since」的重物化行（竞态窗口内新建）', () => {
     const ids = selectReconcileStragglerIds({
+      workspaceId: WS,
       erasedName,
       companyKey,
       since: freeze,
@@ -94,6 +103,7 @@ describe('deletion-plan selectReconcileStragglerIds (Art.17 contact-subject 对�
 
   it('🔴 绝不选「先于 since 就存在」的同名行（先存同名同事，避免数据丢失=与被驳回 sweep 的关键差异）', () => {
     const ids = selectReconcileStragglerIds({
+      workspaceId: WS,
       erasedName,
       companyKey,
       since: freeze,
@@ -104,6 +114,7 @@ describe('deletion-plan selectReconcileStragglerIds (Art.17 contact-subject 对�
 
   it('createdAt === since 视为窗口内（>= 含边界）', () => {
     const ids = selectReconcileStragglerIds({
+      workspaceId: WS,
       erasedName,
       companyKey,
       since: freeze,
@@ -114,6 +125,7 @@ describe('deletion-plan selectReconcileStragglerIds (Art.17 contact-subject 对�
 
   it('不同人名（person-key 不符）即便窗口内也不选', () => {
     const ids = selectReconcileStragglerIds({
+      workspaceId: WS,
       erasedName,
       companyKey,
       since: freeze,
@@ -124,6 +136,7 @@ describe('deletion-plan selectReconcileStragglerIds (Art.17 contact-subject 对�
 
   it('归一化对齐创建闸：大小写/空白差异的同名仍命中（与 contactSuppressionKeys 同构）', () => {
     const ids = selectReconcileStragglerIds({
+      workspaceId: WS,
       erasedName,
       companyKey,
       since: freeze,
@@ -134,6 +147,7 @@ describe('deletion-plan selectReconcileStragglerIds (Art.17 contact-subject 对�
 
   it('🔴 本 PR 核心：拼写变体重物化行也被对账捕获（变音丢弃 / "Surname,Given" 语序 / 分解 Unicode）', () => {
     const dropAccent = selectReconcileStragglerIds({
+      workspaceId: WS,
       erasedName, // 'Petra Wiedergänger'（ä）
       companyKey,
       since: freeze,
@@ -142,6 +156,7 @@ describe('deletion-plan selectReconcileStragglerIds (Art.17 contact-subject 对�
     expect(dropAccent).toEqual(['drop-accent']);
 
     const comma = selectReconcileStragglerIds({
+      workspaceId: WS,
       erasedName,
       companyKey,
       since: freeze,
@@ -150,6 +165,7 @@ describe('deletion-plan selectReconcileStragglerIds (Art.17 contact-subject 对�
     expect(comma).toEqual(['comma-order']);
 
     const decomposed = selectReconcileStragglerIds({
+      workspaceId: WS,
       erasedName,
       companyKey,
       since: freeze,
@@ -160,6 +176,7 @@ describe('deletion-plan selectReconcileStragglerIds (Art.17 contact-subject 对�
 
   it('🔴 德语 ASCII 拼写变体（Müller→Mueller）跨源重物化被对账捕获', () => {
     const ids = selectReconcileStragglerIds({
+      workspaceId: WS,
       erasedName: 'Hans Müller',
       companyKey,
       since: freeze,
@@ -170,7 +187,7 @@ describe('deletion-plan selectReconcileStragglerIds (Art.17 contact-subject 对�
 
   it('空候选集 → 空结果', () => {
     expect(
-      selectReconcileStragglerIds({ erasedName, companyKey, since: freeze, candidates: [] }),
+      selectReconcileStragglerIds({ workspaceId: WS, erasedName, companyKey, since: freeze, candidates: [] }),
     ).toEqual([]);
   });
 
@@ -179,6 +196,7 @@ describe('deletion-plan selectReconcileStragglerIds (Art.17 contact-subject 对�
   // 显式编码此 by-design 行为，令取舍进入测试而非隐含。
   it('by-design 有界代价：窗口内（createdAt >= since）新建的同名另一真人也被选中（与创建闸拒建等价）', () => {
     const ids = selectReconcileStragglerIds({
+      workspaceId: WS,
       erasedName,
       companyKey,
       since: freeze,

@@ -624,6 +624,7 @@ export class DiscoveryService {
             now,
           }),
           readback: (transaction) => readbackGuessedEmail(transaction, {
+            workspaceId: ctx.workspaceId,
             contactId: r.contactId,
             result: r.result,
           }),

@@ -1929,8 +1929,8 @@ model SourceChannelRun {
 }
 
 /// 渠道抓取记录池（平台级，无 RLS）：(channel_id, dedupe_key) 跨轮 upsert，crawl_run_id 归轮次。
-/// PII_PENDING_ENCRYPTION：联系人字段当前明文存储——列级加密、Q25 访问审计与保留期按
-/// OWNER-DECISION-2026-11-05 延后到后续任务（届时补加密列改造，不改本表语义）。
+/// 联系人字段（contact_name/contact_title/email/phone）以 platform:source_channel_record
+/// 作用域 enc:v2 密文落库（随机 IV），由读路径按权限解密（兼容遗留明文与 enc:v1）。
 model SourceChannelRecord {
   id                    String    @id @default(uuid()) @db.Uuid
   channelId             String    @map("channel_id") @db.Uuid
@@ -1942,14 +1942,14 @@ model SourceChannelRecord {
   industry              String?   @db.VarChar(200)
   products              Json?
   keywords              Json?
-  /// PII_PENDING_ENCRYPTION（OWNER-DECISION-2026-11-05 延后加密与审计）。
-  contactName           String?   @map("contact_name") @db.VarChar(200)
-  /// PII_PENDING_ENCRYPTION
-  contactTitle          String?   @map("contact_title") @db.VarChar(200)
-  /// PII_PENDING_ENCRYPTION
-  email                 String?   @db.VarChar(320)
-  /// PII_PENDING_ENCRYPTION
-  phone                 String?   @db.VarChar(64)
+  /// enc:v2 平台密文（platform:source_channel_record / SourceChannelRecord.contactName）。
+  contactName           String?   @map("contact_name")
+  /// enc:v2 平台密文（platform:source_channel_record / SourceChannelRecord.contactTitle）。
+  contactTitle          String?   @map("contact_title")
+  /// enc:v2 平台密文（platform:source_channel_record / SourceChannelRecord.email）。
+  email                 String?
+  /// enc:v2 平台密文（platform:source_channel_record / SourceChannelRecord.phone）。
+  phone                 String?
   sourceUrl             String    @map("source_url") @db.VarChar(2048)
   firstSeenAt           DateTime  @default(now()) @map("first_seen_at") @db.Timestamptz(3)
   lastSeenAt            DateTime  @default(now()) @map("last_seen_at") @db.Timestamptz(3)
@@ -2536,7 +2536,7 @@ model ContactPoint {
   catchAllClass           String?   @map("catch_all_class") // true_catch_all | unprobeable_provider | inconclusive | not_catch_all | unknown
   verificationProvider    String?   @map("verification_provider") // smtp_self | millionverifier | … | operator | legacy_unclassified
   confidence              Int?      @db.SmallInt
-  domainBlindKey          String?   @map("domain_blind_key") // bi:v1:<hmac>；按域聚合，不落明文域
+  domainBlindKey          String?   @map("domain_blind_key") // bi:v1:<hmac> | bi:v2:<keyId>:<hmac>；按域聚合，不落明文域
   lastSeenAt              DateTime  @default(now()) @map("last_seen_at")
   nextReverifyAt          DateTime? @map("next_reverify_at")
   validSince              DateTime? @map("valid_since")

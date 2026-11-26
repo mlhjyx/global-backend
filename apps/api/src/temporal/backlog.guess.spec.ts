@@ -29,7 +29,7 @@ vi.mock('../durable-results/domain-ack-consumer-bindings', () => ({
  * （不触真 SMTP），落库走真实 persistGuessedEmail（复用纯件，验证 RISKY 落库形态）。
  */
 
-const WS = 'ws-1';
+const WS = '00000000-0000-4000-8000-0000000000aa';
 const ICP = 'icp-1';
 const GLOBAL_LIA = { basis: 'legitimate_interest', ref: 'GLOBAL-LIA-interim' };
 const SMTP_RECEIPT = Object.freeze({

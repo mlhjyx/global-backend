@@ -11,7 +11,9 @@ import {
 } from "../artifact-expected-facts";
 import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
-import { encryptPii, decryptPii } from "../../../compliance/pii-crypto";
+import { PII_PURPOSE, encryptPii, decryptPii } from "../../../compliance/pii-crypto";
+
+const TEST_WS = "00000000-0000-4000-8000-000000000002";
 import { contentAddressedObjectKey } from "../artifact-key";
 import type { GenericOperationArtifactManifest } from "../artifact.types";
 import {
@@ -77,16 +79,28 @@ describe("closed encrypted Hunter payload, explicit test key and fake bounded-re
     },
   );
   it("encrypts via existing PII crypto and decodes only the explicit ciphertext path", () => {
-    const body = serializeContactEmailFindPayload(hit());
-    expect(body.startsWith("enc:v1:")).toBe(true);
+    const body = serializeContactEmailFindPayload(hit(), TEST_WS);
+    expect(body.startsWith("enc:v2:k1:")).toBe(true);
     expect(body).not.toContain("person@");
     expect(Buffer.byteLength(body)).toBeLessThanOrEqual(16384);
-    expect(JSON.parse(decryptPii(body))).toEqual(hit());
-    expect(decodeContactEmailFindBody(body)).toEqual(hit());
+    expect(JSON.parse(decryptPii(body, { workspaceId: TEST_WS, purpose: PII_PURPOSE.CONTACT_EMAIL_FIND_PAYLOAD }))).toEqual(hit());
+    expect(decodeContactEmailFindBody(body, TEST_WS)).toEqual(hit());
   });
-  it("refuses the original crypto legacy plaintext passthrough", () => {
-    expect(decryptPii(JSON.stringify(hit()))).toBe(JSON.stringify(hit()));
-    expect(() => decodeContactEmailFindBody(JSON.stringify(hit()))).toThrow();
+  it("refuses plaintext passthrough both in default crypto and even when migration plaintext read is enabled", () => {
+    expect(() =>
+      decryptPii(JSON.stringify(hit()), { workspaceId: TEST_WS, purpose: PII_PURPOSE.CONTACT_EMAIL_FIND_PAYLOAD }),
+    ).toThrow(/PII_PLAINTEXT_FALLBACK_FORBIDDEN/);
+    const prevAllow = process.env.PII_ALLOW_LEGACY_PLAINTEXT_READ;
+    try {
+      process.env.PII_ALLOW_LEGACY_PLAINTEXT_READ = "true";
+      expect(
+        decryptPii(JSON.stringify(hit()), { workspaceId: TEST_WS, purpose: PII_PURPOSE.CONTACT_EMAIL_FIND_PAYLOAD }),
+      ).toBe(JSON.stringify(hit()));
+      expect(() => decodeContactEmailFindBody(JSON.stringify(hit()), TEST_WS)).toThrow();
+    } finally {
+      if (prevAllow === undefined) delete process.env.PII_ALLOW_LEGACY_PLAINTEXT_READ;
+      else process.env.PII_ALLOW_LEGACY_PLAINTEXT_READ = prevAllow;
+    }
   });
   it.each([
     { ...hit(), status: "error" },
@@ -114,26 +128,35 @@ describe("closed encrypted Hunter payload, explicit test key and fake bounded-re
     expect(calls).toBe(0);
   });
   it("holds missing/wrong key and ciphertext tamper rather than returning plaintext", () => {
-    const body = encryptPii(JSON.stringify(hit()));
+    const body = encryptPii(JSON.stringify(hit()), { workspaceId: TEST_WS, purpose: PII_PURPOSE.CONTACT_EMAIL_FIND_PAYLOAD });
+    const keyring = process.env.PII_KEYRING_JSON;
     const key = process.env.PII_ENCRYPTION_KEY;
+    delete process.env.PII_KEYRING_JSON;
     delete process.env.PII_ENCRYPTION_KEY;
     try {
-      expect(() => decodeContactEmailFindBody(body)).toThrow();
-      expect(() => serializeContactEmailFindPayload(hit())).toThrow();
-      process.env.PII_ENCRYPTION_KEY = "1".repeat(64);
-      expect(() => decodeContactEmailFindBody(body)).toThrow();
+      expect(() => decodeContactEmailFindBody(body, TEST_WS)).toThrow();
+      expect(() => serializeContactEmailFindPayload(hit(), TEST_WS)).toThrow();
+      process.env.PII_KEYRING_JSON = JSON.stringify({ activeKeyId: "k1", keys: { k1: "1".repeat(64) } });
+      expect(() => decodeContactEmailFindBody(body, TEST_WS)).toThrow();
     } finally {
+      if (keyring === undefined) delete process.env.PII_KEYRING_JSON;
+      else process.env.PII_KEYRING_JSON = keyring;
       if (key === undefined) delete process.env.PII_ENCRYPTION_KEY;
       else process.env.PII_ENCRYPTION_KEY = key;
     }
-    const raw = Buffer.from(body.slice("enc:v1:".length), "base64");
+    const parts = body.split(":");
+    const raw = Buffer.from(parts[5]!, "base64");
     raw[raw.length - 1] ^= 1;
+    parts[5] = raw.toString("base64");
     expect(() =>
-      decodeContactEmailFindBody("enc:v1:" + raw.toString("base64")),
+      decodeContactEmailFindBody(parts.join(":"), TEST_WS),
+    ).toThrow();
+    expect(() =>
+      decodeContactEmailFindBody(body, "00000000-0000-4000-8000-000000000099"),
     ).toThrow();
   });
   it("materializes only ciphertext after the bounded-reader port, not a real S3/SQL/hash proof", async () => {
-    const body = encryptPii(JSON.stringify(hit()));
+    const body = encryptPii(JSON.stringify(hit()), { workspaceId: TEST_WS, purpose: PII_PURPOSE.CONTACT_EMAIL_FIND_PAYLOAD });
     const readBounded = vi.fn(async (input: AsyncIterable<Uint8Array>) => {
       const chunks: Uint8Array[] = [];
       for await (const c of input) chunks.push(c);
@@ -159,7 +182,7 @@ describe("closed encrypted Hunter payload, explicit test key and fake bounded-re
   ])(
     "holds wrong scope/schema/media/retention/size before decrypt %#",
     async (changes) => {
-      const body = encryptPii(JSON.stringify(hit()));
+      const body = encryptPii(JSON.stringify(hit()), { workspaceId: TEST_WS, purpose: PII_PURPOSE.CONTACT_EMAIL_FIND_PAYLOAD });
       const readBounded = vi.fn(async () => body);
       const materializer = createContactEmailFindMaterializer({
         readBounded,
@@ -176,7 +199,7 @@ describe("closed encrypted Hunter payload, explicit test key and fake bounded-re
     },
   );
   it("does not accept invented HTTP facts for the encrypted finder schema", async () => {
-    const body = encryptPii(JSON.stringify(hit()));
+    const body = encryptPii(JSON.stringify(hit()), { workspaceId: TEST_WS, purpose: PII_PURPOSE.CONTACT_EMAIL_FIND_PAYLOAD });
     const readBounded = vi.fn(async () => body);
     const materializer = createContactEmailFindMaterializer({
       readBounded,
@@ -388,7 +411,7 @@ describe("actual artifact execution class with explicit fake persistence/materia
     expect(saved.observedMicrousd).toBe(1780n);
     expect(saved.expectedFacts).toBeUndefined();
     expect(saved.source.mediaType).toBe("application/octet-stream");
-    expect(saved.bytes.toString("utf8").startsWith("enc:v1:")).toBe(true);
+    expect(saved.bytes.toString("utf8").startsWith("enc:v2:k1:")).toBe(true);
     expect(saved.bytes.toString("utf8")).not.toContain("person@");
     expect(saved.expiresAt).toBe("2026-11-22T01:00:00.000Z");
     const originalReceipt = x.receipt(saved.manifest);

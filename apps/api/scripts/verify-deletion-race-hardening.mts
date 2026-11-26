@@ -14,6 +14,7 @@ import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { DeletionService } from '../src/compliance/deletion.service';
+import { assertPiiKeyConfigured } from '../src/compliance/pii-crypto';
 import { createDeletionActivities } from '../src/temporal/deletion.activities';
 import { persistDiscoveredContacts } from '../src/discovery/contact-persist';
 import type { DeletionWorkflowInput } from '../src/compliance/deletion.types';
@@ -44,7 +45,7 @@ async function cleanup(owner: PrismaClient): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  if (!process.env.PII_ENCRYPTION_KEY) throw new Error('PII_ENCRYPTION_KEY 未配置');
+  assertPiiKeyConfigured();
   const prisma = new PrismaService();
   const owner = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
 

@@ -4,7 +4,10 @@ import type { RuntimeSettings } from "./runtime-environment";
 import { createRolesToScopesPolicy } from "../auth/scopes";
 import { validateJwksTokenVerifierConfiguration } from "../auth/jwks-token-verifier";
 import { resolveProcessorJurisdiction } from "../compliance/data-rights.context";
-import { assertPiiKeyConfiguration } from "../compliance/pii-crypto";
+import {
+  assertOutreachDncPepperConfiguration,
+  assertPiiKeyConfiguration,
+} from "../compliance/pii-crypto";
 import { isAbsolute } from "node:path";
 import {
   siteBuildProviderWireTargetsAppDatabase,
@@ -329,14 +332,29 @@ function inspectGateway(
 function inspectPii(
   settings: RuntimeSettings,
   env: NodeJS.ProcessEnv,
+  role: RuntimeAdmissionRole,
 ): AdmissionCheck {
   if (!managed(settings.mode)) return { status: "optional" };
   try {
-    assertPiiKeyConfiguration(env.PII_ENCRYPTION_KEY);
-    return { status: "ok" };
+    assertPiiKeyConfiguration(
+      env.PII_KEYRING_JSON,
+      env.PII_ENCRYPTION_KEY,
+      env.PII_ALLOW_LEGACY_PLAINTEXT_READ,
+    );
   } catch {
     return { status: "failed", code: "PII_ENCRYPTION_KEY_INVALID" };
   }
+  if (role === "API") {
+    try {
+      assertOutreachDncPepperConfiguration(
+        env.OUTREACH_DNC_HMAC_PEPPER,
+        env.OUTREACH_DNC_HMAC_RETIRED_PEPPERS,
+      );
+    } catch {
+      return { status: "failed", code: "OUTREACH_DNC_PEPPER_INVALID" };
+    }
+  }
+  return { status: "ok" };
 }
 
 export function inspectRuntimeAdmission(
@@ -356,7 +374,7 @@ export function inspectRuntimeAdmission(
     database: inspectDatabase(settings, env, role),
     auth: inspectAuth(settings, env),
     gateway: inspectGateway(settings, env, role),
-    pii: inspectPii(settings, env),
+    pii: inspectPii(settings, env, role),
   });
   return Object.freeze({
     mode: settings.mode,

@@ -3,6 +3,7 @@ import {
   encryptPii,
   decryptPii,
   isEncryptedPii,
+  PII_PURPOSE,
 } from "../../../compliance/pii-crypto";
 import {
   invalidGenericOperationArtifact,
@@ -141,14 +142,21 @@ export function parseContactEmailFindPayload(
     reason: "candidate_found",
   });
 }
-export function serializeContactEmailFindPayload(value: unknown): string {
+export function serializeContactEmailFindPayload(
+  value: unknown,
+  workspaceId: string,
+): string {
   const payload = parseContactEmailFindPayload(value);
-  const body = encryptPii(JSON.stringify(payload));
+  const body = encryptPii(JSON.stringify(payload), {
+    workspaceId,
+    purpose: PII_PURPOSE.CONTACT_EMAIL_FIND_PAYLOAD,
+  });
   if (Buffer.byteLength(body, "utf8") > MAX_BYTES) return invalid();
   return body;
 }
 export function decodeContactEmailFindBody(
   value: string,
+  workspaceId: string,
 ): ContactEmailFindPayload {
   try {
     if (
@@ -157,7 +165,14 @@ export function decodeContactEmailFindBody(
       Buffer.byteLength(value, "utf8") > MAX_BYTES
     )
       return invalid();
-    return parseContactEmailFindPayload(JSON.parse(decryptPii(value)));
+    return parseContactEmailFindPayload(
+      JSON.parse(
+        decryptPii(value, {
+          workspaceId,
+          purpose: PII_PURPOSE.CONTACT_EMAIL_FIND_PAYLOAD,
+        }),
+      ),
+    );
   } catch {
     return invalid();
   }
@@ -213,7 +228,7 @@ export function createContactEmailFindMaterializer(
       )
         return invalid();
       const body = await read(input, manifest);
-      return decodeContactEmailFindBody(body);
+      return decodeContactEmailFindBody(body, manifest.workspaceId);
     },
   });
 }

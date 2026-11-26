@@ -2,9 +2,10 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
 /**
- * 收口⑥：为单测注入固定 PII_ENCRYPTION_KEY（32 字节 hex）。持久化路径（contact-persist /
- * email-guess-persist）现加密 PII，无 key 会 fail-closed 抛错；测试用固定 dev key 使加密可跑。
- * pii-crypto.spec 内自设/删 key 测 fail-closed，覆盖本默认。
+ * 收口⑥ / MT-P2：为单测注入固定 PII_KEYRING_JSON（k1: 32 字节 hex）与 OUTREACH_DNC_HMAC_PEPPER。
+ * 持久化路径（contact-persist / email-guess-persist / channel-records / outreach-dnc）
+ * 现默认加密/HMAC，无密钥会 fail-closed 抛错；测试用固定 dev 密钥使单测可跑。
+ * pii-crypto.spec / outreach-dnc.service.spec 内自设/删密钥测 fail-closed，覆盖本默认。
  */
 export default defineConfig({
   resolve: {
@@ -20,7 +21,11 @@ export default defineConfig({
   test: {
     exclude: ["src/site-builder/eval/**", "node_modules/**", "dist/**"],
     env: {
-      PII_ENCRYPTION_KEY: "0".repeat(64),
+      PII_KEYRING_JSON: JSON.stringify({
+        activeKeyId: "k1",
+        keys: { k1: "0".repeat(64) },
+      }),
+      OUTREACH_DNC_HMAC_PEPPER: "1".repeat(64),
       DATA_PROCESSOR_JURISDICTION: "EU",
       RUN_BUDGET_CENTS: "2000",
       SWEEP_BUDGET_CENTS: "5000",

@@ -194,6 +194,11 @@ describe.runIf(Boolean(ownerUrl && appUrl))('contact_point four-state on Postgre
         insertPoint(tx, { domainBlindKey: `bi:v1:${'0'.repeat(64)}`, phoneType: 'mobile', type: 'phone', value: '+49 89 1234567' }),
       ),
     ).toBeNull();
+    expect(
+      await failure(workspaceA, (tx) =>
+        insertPoint(tx, { domainBlindKey: `bi:v2:k1:${'0'.repeat(64)}`, phoneType: 'mobile', type: 'phone', value: '+49 89 1234568' }),
+      ),
+    ).toBeNull();
   });
 
   it('source_type NOT NULL：迁移收紧后漏写即拒绝，legacy_unclassified 是合法回填值', async () => {

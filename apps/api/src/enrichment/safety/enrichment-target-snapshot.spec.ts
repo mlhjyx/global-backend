@@ -207,7 +207,9 @@ describe("physical input blind fingerprints, not candidate receipt or financial 
     ).toThrow();
   });
   it("fails closed without the existing PII blind-index key, never falls back to a public hash", () => {
-    const original = process.env.PII_ENCRYPTION_KEY;
+    const originalKeyring = process.env.PII_KEYRING_JSON;
+    const originalLegacy = process.env.PII_ENCRYPTION_KEY;
+    delete process.env.PII_KEYRING_JSON;
     delete process.env.PII_ENCRYPTION_KEY;
     try {
       expect(() =>
@@ -217,8 +219,10 @@ describe("physical input blind fingerprints, not candidate receipt or financial 
         verificationPhysicalInputFingerprint(fingerprintVerify()),
       ).toThrow();
     } finally {
-      if (original === undefined) delete process.env.PII_ENCRYPTION_KEY;
-      else process.env.PII_ENCRYPTION_KEY = original;
+      if (originalKeyring === undefined) delete process.env.PII_KEYRING_JSON;
+      else process.env.PII_KEYRING_JSON = originalKeyring;
+      if (originalLegacy === undefined) delete process.env.PII_ENCRYPTION_KEY;
+      else process.env.PII_ENCRYPTION_KEY = originalLegacy;
     }
   });
 });

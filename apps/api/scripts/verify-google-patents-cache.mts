@@ -32,7 +32,7 @@ import {
   PATENT_CACHE_WINDOW_YEARS,
   type PatentRefreshDb,
 } from '../src/adapters/patent-inventor-cache';
-import { encryptPii, decryptPii } from '../src/compliance/pii-crypto';
+import { PII_PURPOSE, decryptPlatformPii, encryptPlatformPii } from '../src/compliance/pii-crypto';
 import { buildToolBroker, sourcePolicyReaderFrom } from '../src/tools/tool-broker.factory';
 
 for (const line of readFileSync(new URL('../.env', import.meta.url), 'utf8').split('\n')) {
@@ -103,7 +103,9 @@ async function main() {
   ok(!/residence|nationality|country_code|address/i.test(serialized), '🔴 无 residence/国籍/country_code（数据最小化，只公司 country）');
   // 刷新扫描源 = 全部命中 '%SIEMENS%' 的落库行（不止 assigneeNorm='siemens'；含 Siemens Energy/Healthineers 等）
   const allSiemens = await ownerDb.patentInventorCache.findMany({ where: { assigneeNameRaw: { contains: 'Siemens', mode: 'insensitive' } }, select: { inventorName: true } });
-  const scanInventors = new Set(allSiemens.map((r) => decryptPii(r.inventorName)));
+  const scanInventors = new Set(
+    allSiemens.map((r) => decryptPlatformPii(r.inventorName, { scope: 'patent_inventor_cache', purpose: PII_PURPOSE.PATENT_INVENTOR_NAME })),
+  );
 
   // ══════════ B · cache 模式读 = 零 BQ 字节 ══════════
   console.log('\n══ B · cache 模式逐公司读=零 BQ 字节，且与刷新源一致 ══');
@@ -128,7 +130,7 @@ async function main() {
   await ownerDb.patentInventorCache.create({
     data: {
       assigneeNameRaw: 'Siemens Inc', assigneeNorm: NORM, assigneeCountry: 'us',
-      inventorName: encryptPii('US ONLY INVENTOR'), inventorNameKey: inventorBlindKey('US ONLY INVENTOR'),
+      inventorName: encryptPlatformPii('US ONLY INVENTOR', { scope: 'patent_inventor_cache', purpose: PII_PURPOSE.PATENT_INVENTOR_NAME }), inventorNameKey: inventorBlindKey('US ONLY INVENTOR'),
       windowFromYear: fromYear, windowToYear: toYear, license: 'CC-BY-4.0', expiresAt: new Date(Date.now() + 180 * 86400000),
     },
   });
@@ -154,7 +156,13 @@ async function main() {
   console.log('\n══ E · 幂等：确定性密文不产重复行 + 队列 CACHED → 二次刷新 SKIPPED_EMPTY ══');
   const beforeE = await ownerDb.patentInventorCache.count({ where: { assigneeNorm: NORM } });
   const anyRow = rowsA[0];
-  ok(encryptPii(decryptPii(anyRow.inventorName)) === anyRow.inventorName, 'E：确定性密文（re-encrypt 同明文 === 存储密文）→ 唯一键幂等');
+  ok(
+    encryptPlatformPii(
+      decryptPlatformPii(anyRow.inventorName, { scope: 'patent_inventor_cache', purpose: PII_PURPOSE.PATENT_INVENTOR_NAME }),
+      { scope: 'patent_inventor_cache', purpose: PII_PURPOSE.PATENT_INVENTOR_NAME },
+    ) === anyRow.inventorName,
+    'E：确定性密文（re-encrypt 同明文 === 存储密文）→ 唯一键幂等',
+  );
   await ownerDb.patentLookupRequest.updateMany({ where: { assigneeNorm: NORM }, data: { status: 'CACHED', nextRefreshAt: new Date(Date.now() + 180 * 86400000) } });
   const refreshE = await refreshPatentCache({ db: ownerDb as unknown as PatentRefreshDb, bq: bigqueryPatents });
   ok(refreshE.status === 'SKIPPED_EMPTY', `E：队列已 CACHED(未到期) → 二次刷新 SKIPPED_EMPTY（零再扫；status=${refreshE.status}）`);
