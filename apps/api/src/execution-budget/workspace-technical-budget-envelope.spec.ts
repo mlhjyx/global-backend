@@ -357,9 +357,11 @@ describe('workspace execution technical envelope catalog', () => {
       watchCompanies: 12,
     });
     // models: 396×2×5 + 924×2×3 + 1584×2×5 + 462×2×5 + 50×2×3 + 500×2×20 + 63×2×20 = 52_784 cents
-    // tools: crawl4ai.fetch 1734×1 + crawl4ai.render 74×1 + deepseek.search 660×1 +
-    // serper 1122×1 + brave 1122×1 + exa 858×1 + google_places 198×4 = 6_362 cents；合计 59_146 cents (<$600)。
-    expect(envelope.requiredCapMicrousd).toBe(59_146n * 10_000n);
+    // tools: 自托管 crawl4ai.fetch / crawl4ai.render 按 0¢ 计，仅外部付费工具计入：
+    // deepseek.search 660×1 + serper 1122×1 + brave 1122×1 + exa 858×1 + google_places 198×4 = 4_554 cents；合计 57_338 cents。
+    expect(envelope.policy.tools.find((t) => t.toolId === 'crawl4ai.fetch')?.estimatedCents).toBe(0);
+    expect(envelope.policy.tools.find((t) => t.toolId === 'crawl4ai.render')?.estimatedCents).toBe(0);
+    expect(envelope.requiredCapMicrousd).toBe(57_338n * 10_000n);
   });
 
   it('quotes company creation from the bounded understanding crawl and per-page extraction', () => {
@@ -376,9 +378,10 @@ describe('workspace execution technical envelope catalog', () => {
     expect(
       envelope.policy.tools.map((item) => [item.toolId, item.maxPhysicalInvocations]),
     ).toEqual([['crawl4ai.fetch', 7]]);
+    expect(envelope.policy.tools[0]?.estimatedCents).toBe(0);
     expect(envelope.policy.executionLimits).toEqual({ pages: 7, subpages: 6 });
-    // 7×2×20 + 7×2×20 + 1×2×10 + 7×1 = 587 cents
-    expect(envelope.requiredCapMicrousd).toBe(587n * 10_000n);
+    // 7×2×20 + 7×2×20 + 1×2×10 + 7×0 = 580 cents
+    expect(envelope.requiredCapMicrousd).toBe(580n * 10_000n);
   });
 
   it('quotes understanding retry with the same bounded envelope as creation', () => {
@@ -397,7 +400,7 @@ describe('workspace execution technical envelope catalog', () => {
       envelope.policy.tools.map((item) => [item.toolId, item.maxPhysicalInvocations]),
     ).toEqual([['crawl4ai.fetch', 7]]);
     expect(envelope.policy.executionLimits).toEqual({ pages: 7, subpages: 6 });
-    expect(envelope.requiredCapMicrousd).toBe(587n * 10_000n);
+    expect(envelope.requiredCapMicrousd).toBe(580n * 10_000n);
   });
 
   it('quotes one on-demand contact discovery from the per-company adapter ceilings', () => {
@@ -425,8 +428,8 @@ describe('workspace execution technical envelope catalog', () => {
       ['inpi_rne.search', 1],
       ['google_patents.search', 1],
     ]);
-    // 8×2×15 (model reservation) + 14×1 (crawl4ai.fetch) + 8×1 (crawl4ai.render) + 12×1 (social.fetch) = 274 cents.
-    expect(envelope.requiredCapMicrousd).toBe(274n * 10_000n);
+    // 8×2×15 (model reservation) + 自托管 crawl4ai.fetch/render/social.fetch 0¢ = 240 cents.
+    expect(envelope.requiredCapMicrousd).toBe(240n * 10_000n);
   });
 
   it.each([
@@ -498,8 +501,8 @@ describe('DISCOVERY_UNCAPPED=on —— 报价按防爆安全界（余额是唯�
       discoveryUncapped: 1,
     });
     // models: 396×2×5 + 924×2×3 + 1584×2×5 + 1650×2×5 + 50×2×3 + 792000×2×20 + 6250×2×20
-    //       = 31_972_144 cents；tools: 8_408 + serper 7062 + brave 7062 + exa 6798 + google_places 792 = 30_122 cents；合计 32_002_266 cents。
-    expect(envelope.requiredCapMicrousd).toBe(32_002_266n * 10_000n);
+    //       = 31_972_144 cents；tools: deepseek 6600 + serper 7062 + brave 7062 + exa 6798 + google_places 792 = 28_314 cents（自托管 crawl4ai 0¢）；合计 32_000_458 cents。
+    expect(envelope.requiredCapMicrousd).toBe(32_000_458n * 10_000n);
   });
 
   it('产品帽模式的报价保持稳定上界（开关 off 时不含 discoveryUncapped）', () => {
@@ -508,7 +511,7 @@ describe('DISCOVERY_UNCAPPED=on —— 报价按防爆安全界（余额是唯�
       planId: PLAN_ID,
     });
     expect(envelope.policy.executionLimits).not.toHaveProperty('discoveryUncapped');
-    expect(envelope.requiredCapMicrousd).toBe(59_146n * 10_000n);
+    expect(envelope.requiredCapMicrousd).toBe(57_338n * 10_000n);
   });
 });
 

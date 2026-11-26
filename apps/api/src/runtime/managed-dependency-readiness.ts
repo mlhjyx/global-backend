@@ -1,4 +1,8 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
+import {
+  resolveModelGatewayBaseUrl,
+  validateModelGatewayEndpoint,
+} from "../adapters/model-gateway-endpoint";
 import { settlementReadbackConfigured } from "./settlement-readback-config";
 import { S3Client } from "@aws-sdk/client-s3";
 import Redis from "ioredis";
@@ -410,30 +414,22 @@ export async function checkModelGatewayReadiness(
   env: NodeJS.ProcessEnv,
   fetcher: GatewayProbeFetch = fetch,
 ): Promise<RuntimeComponentStatus> {
-  const configured = env.MODEL_GATEWAY_URL?.trim();
+  const configured = resolveModelGatewayBaseUrl(env);
   if (!configured || !env.MODEL_GATEWAY_KEY?.trim()) {
     return { status: "failed", code: "MODEL_GATEWAY_CONFIG_REQUIRED" };
   }
-  let endpoint: URL;
-  try {
-    const base = new URL(configured);
-    if (
-      base.username ||
-      base.password ||
-      base.search ||
-      base.hash ||
-      (base.protocol !== "https:" &&
-        !(base.protocol === "http:" && loopback(base.hostname)))
-    ) {
-      return { status: "failed", code: "MODEL_GATEWAY_CONFIG_INVALID" };
-    }
-    endpoint = new URL(
-      `${base.pathname.replace(/\/$/, "")}/models`,
-      base.origin,
-    );
-  } catch {
+  const validated = validateModelGatewayEndpoint(configured, {
+    allowInternalServiceHttp: true,
+    env,
+  });
+  if (!validated.ok || !validated.url) {
     return { status: "failed", code: "MODEL_GATEWAY_CONFIG_INVALID" };
   }
+  const base = validated.url;
+  const endpoint = new URL(
+    `${base.pathname.replace(/\/$/, "")}/models`,
+    base.origin,
+  );
   // 10s, not 2s: the probe rides the same event loop as extraction payloads, and
   // a busy loop can hold its response past a 2s abort while the gateway keeps
   // answering in milliseconds (2026-11-04: three such ticks drained the customer

@@ -24,6 +24,8 @@ import {
   RuntimeProcessLeaseService,
 } from "./runtime-process-lease";
 import { ApiRuntimeProcessHeartbeat } from "./runtime-process-heartbeat";
+import { ConfigDriftDiagnosticsService } from "./config-drift-diagnostics";
+import { RuntimeLeaseMaintenanceService } from "./runtime-lease-maintenance";
 import { ManagedDependencyReadinessContributors } from "./managed-dependency-readiness";
 import { RuntimeReadinessService } from "../health/runtime-readiness.service";
 import {
@@ -120,6 +122,8 @@ function buildCompatibilityIdentity(
       ) => new RuntimeProcessLeaseService(store, { identity }),
     },
     ApiRuntimeProcessHeartbeat,
+    ConfigDriftDiagnosticsService,
+    RuntimeLeaseMaintenanceService,
     ManagedDependencyReadinessContributors,
     DEV_FAST_LANE_PROVIDER,
     RuntimeReadinessService,
@@ -132,6 +136,8 @@ function buildCompatibilityIdentity(
     RuntimeAdmissionService,
     RuntimeReadinessContributorRegistry,
     RuntimeProcessLeaseService,
+    ConfigDriftDiagnosticsService,
+    RuntimeLeaseMaintenanceService,
     RuntimeReadinessService,
   ],
 })

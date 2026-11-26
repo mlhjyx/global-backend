@@ -62,8 +62,8 @@ export interface TraceEntry {
  * tokens (measured: 110 of 958 error traces carried 469k tokens on xin).
  * Without this every usage_ledger row stayed NULL (10,769/10,769 measured) and
  * the workspace spend cap read zero forever.
- * ai_trace keeps the raw provider-reported value; only the ledger carries the
- * settled estimate, annotated with its source.
+ * Both `ai_trace.cost_usd` and `usage_ledger.cost_usd` record the same settled
+ * cost so cost dashboards and billing reconciliation agree across ledgers.
  */
 function settledCost(
   entry: TraceEntry,
@@ -132,6 +132,7 @@ export class AiTraceSink {
         : undefined;
     void this.prisma
       .withWorkspace(entry.workspaceId, async (tx) => {
+        const settled = settledCost(entry);
         const trace = await tx.aiTrace.create({
           data: {
             workspaceId: entry.workspaceId,
@@ -144,7 +145,7 @@ export class AiTraceSink {
             latencyMs: entry.latencyMs,
             inputTokens: entry.inputTokens ?? null,
             outputTokens: entry.outputTokens ?? null,
-            costUsd: entry.costUsd ?? null,
+            costUsd: settled.costUsd,
             correlationId: entry.correlationId ?? null,
             meta:
               entry.modelPolicy || identity || budget
@@ -159,7 +160,6 @@ export class AiTraceSink {
           },
         });
         const tokens = (entry.inputTokens ?? 0) + (entry.outputTokens ?? 0);
-        const settled = settledCost(entry);
         // Charged failed calls get a ledger row too (settled.costUsd set): without
         // it the run cost aggregation can never see their spend. Released
         // operations and token-less errors keep the original no-row behavior.

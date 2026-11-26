@@ -75,6 +75,37 @@ describe("crawl4ai.render timeout and non-HTML resilience (Batch 1.5-B)", () => 
     expect(isCrawl4aiHtmlBody(out.data.html)).toBe(true);
   });
 
+  it("charges 0 cents for workspace renders on self-hosted Crawl4AI while keeping platform scope at 1 cent", async () => {
+    vi.mocked(crawlHtml)
+      .mockResolvedValueOnce({
+        url: "https://solar-italy.it/",
+        html: "<!doctype html><html><body><h1>Solar Italy</h1></body></html>",
+        headers: { "content-type": "text/html" },
+      })
+      .mockResolvedValueOnce({
+        url: "https://solar-italy.it/",
+        html: "<!doctype html><html><body><h1>Solar Italy</h1></body></html>",
+        headers: { "content-type": "text/html" },
+      });
+
+    const workspaceOut = await crawl4aiRenderTool.execute(
+      { url: "https://solar-italy.it/" },
+      workspaceCtx,
+    );
+    expect(workspaceOut.costCents).toBe(0);
+    expect(workspaceOut.degraded).toBeUndefined();
+
+    const platformOut = await crawl4aiRenderTool.execute(
+      { url: "https://solar-italy.it/" },
+      {
+        ...workspaceCtx,
+        workspaceId: "platform",
+        dispatchPhysicalWire: async (_wireId, execute) => execute(),
+      },
+    );
+    expect(platformOut.costCents).toBe(1);
+  });
+
   it("never swallows control, suppression, egress, platformEgress, or HTTP 500 errors", async () => {
     for (const err of [
       new ExecutionControlError("BUDGET_AUTHORITY_NOT_READY"),

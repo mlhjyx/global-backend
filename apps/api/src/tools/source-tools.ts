@@ -204,7 +204,7 @@ export const crawl4aiRenderTool: Tool<{ url: string }, CrawlHtmlResult & { robot
     }
     return {
       data: r,
-      costCents: 1,
+      costCents: ctx.platformEgress || ctx.workspaceId === "platform" ? 1 : 0,
       provenance: { sourceUrl: input.url, fetchedAt: new Date().toISOString(), contentHash: hash(r.html), parserVersion: "crawl4ai/1" },
     };
   },

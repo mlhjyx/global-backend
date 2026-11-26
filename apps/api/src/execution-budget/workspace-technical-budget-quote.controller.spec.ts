@@ -50,7 +50,7 @@ describe('WorkspaceTechnicalBudgetQuoteController', () => {
         schemaVersion: 'execution-budget-technical-quote/v1',
         authorityKind: 'WORKSPACE_GRANT',
         purpose: 'understanding.run',
-        requiredCapMicrousd: '5870000',
+        requiredCapMicrousd: '5800000',
       }),
     });
   });
@@ -116,8 +116,8 @@ describe('WorkspaceTechnicalBudgetQuoteController', () => {
       data: expect.objectContaining({
         purpose: 'discovery.run',
         subjectType: 'discovery_run',
-        // Capped-mode fit ceiling aligned with Run 2 pool cap (500) + right-sized Flash task ceilings + Batch 1.4-B L0 search tools (Brave + multi-city Places).
-        requiredCapMicrousd: '591460000',
+        // Capped-mode fit ceiling aligned with Run 2 pool cap (500) + right-sized Flash task ceilings + Batch 1.4-B L0 search tools (self-hosted crawl4ai priced at 0c).
+        requiredCapMicrousd: '573380000',
       }),
     });
   });
@@ -132,7 +132,7 @@ describe('WorkspaceTechnicalBudgetQuoteController', () => {
       data: expect.objectContaining({
         purpose: 'understanding.run',
         subjectType: 'company',
-        requiredCapMicrousd: '5870000',
+        requiredCapMicrousd: '5800000',
       }),
     });
   });
@@ -148,7 +148,7 @@ describe('WorkspaceTechnicalBudgetQuoteController', () => {
         purpose: 'discovery.run',
         subjectType: 'company',
         subjectId: '30000000-0000-4000-8000-000000000003',
-        requiredCapMicrousd: '2740000',
+        requiredCapMicrousd: '2400000',
       }),
     });
   });
@@ -165,7 +165,7 @@ describe('WorkspaceTechnicalBudgetQuoteController', () => {
         purpose: 'discovery.run',
         subjectType: 'company',
         subjectId: '30000000-0000-4000-8000-000000000003',
-        requiredCapMicrousd: '2740000',
+        requiredCapMicrousd: '2400000',
         requestSha256:
           'dc8a43b2754f37639a57df618ab09e857364052abd7f1eca46b06da212ea18c6',
       }),
@@ -205,7 +205,8 @@ describe('manufacturer execution quote canonical boundary',()=>{
   it.each(['manufacturer-network/v1', 'manufacturer-network/v2'] as const)('quotes %s revision-only first execution and preserves legacy cap/hash',(revision)=>{
     const old=controller().quote(CTX,{operation:'POST /query-plans/:planId/execute',planId}).data;
     const next=controller().quote(CTX,{operation:'POST /query-plans/:planId/execute',planId,body:{manufacturerNetworkRevision:revision}}).data;
-    expect(BigInt(next.requiredCapMicrousd)-BigInt(old.requiredCapMicrousd)).toBe(500000n);
+    // Self-hosted searxng.search + crawl4ai.fetch carry 0c external cost; policyRevision and requestSha256 still change.
+    expect(BigInt(next.requiredCapMicrousd)-BigInt(old.requiredCapMicrousd)).toBe(0n);
     expect(next.requestSha256).not.toBe(old.requestSha256);expect(next.policyRevision).not.toBe(old.policyRevision);
   });
   it.each([{}, {manufacturerNetworkRevision:'manufacturer-network/v3'},{manufacturerNetworkRevision:null},{manufacturerNetworkRevision:'manufacturer-network/v1',unexpected:true}])('rejects invalid request body before quote resolution',body=>{

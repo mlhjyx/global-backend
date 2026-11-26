@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { parseCanonicalMicrousd } from "../../tools/microusd";
+import { isSupportedControlledEnrichmentSlot } from "./enrichment-safety-policy";
 import { buildTargetSnapshot } from "./enrichment-target-snapshot";
 import {
   canonicalSafetyJson,
@@ -178,20 +179,9 @@ export function buildFrozenEnrichmentPlan(
 export function assertSupportedEnrichmentSlot(
   slot: QuotedEnrichmentSlot,
 ): void {
-  const supported =
-    slot.phase === "FINDER"
-      ? (slot.provider === "hunter" &&
-          slot.toolId === "contact_email.find.hunter") ||
-        (slot.provider === "prospeo" &&
-          slot.toolId === "contact_email.find.prospeo")
-      : slot.phase === "SMTP"
-        ? slot.provider === "smtp_self" && slot.toolId === "smtp.rcpt_probe"
-        : slot.phase === "VERIFY" &&
-          ["millionverifier", "emailable", "zerobounce"].includes(
-            slot.provider,
-          ) &&
-          slot.toolId === "contact_email.verify." + slot.provider;
-  if (!supported) throw new EnrichmentSafetyError("GOVERNANCE_PENDING");
+  if (!isSupportedControlledEnrichmentSlot(slot)) {
+    throw new EnrichmentSafetyError("GOVERNANCE_PENDING");
+  }
   if (
     slot.phase === "SMTP" &&
     parseCanonicalMicrousd("SMTP quote", slot.quoteMicrousd) !== 0n

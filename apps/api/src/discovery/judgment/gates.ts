@@ -33,6 +33,8 @@
 
 import { createHash } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
+import { GATE_ENRICHMENT_TASK_WRITE_ENV, isGateEnrichmentTaskWriteEnabled } from './gate-enrichment-task-flag';
+export { GATE_ENRICHMENT_TASK_WRITE_ENV, isGateEnrichmentTaskWriteEnabled };
 
 import {
   evaluateRule,
@@ -999,15 +1001,11 @@ export async function evaluateGates(
       status: 'queued',
     }));
 
-  // INSERT … ON CONFLICT DO NOTHING：同 digest / 同 (company, icp, gate) 的重试不翻行。
-  const inserted = await tx.hardGateResult.createMany({
-    data: resultRows,
-    skipDuplicates: true,
-  });
-  const taskInserted = await tx.gateEnrichmentTask.createMany({
-    data: taskRows,
-    skipDuplicates: true,
-  });
+  // INSERT … ON CONFLICT DO NOTHING；死队列 gate_enrichment_task 默认不写（需显式开启开关）。
+  const inserted = await tx.hardGateResult.createMany({ data: resultRows, skipDuplicates: true });
+  const taskInserted = isGateEnrichmentTaskWriteEnabled() && taskRows.length > 0
+    ? await tx.gateEnrichmentTask.createMany({ data: taskRows, skipDuplicates: true })
+    : { count: 0 };
 
   const unknownGates = results.filter((decision) => decision.verdict === 'UNKNOWN');
   const verdict: GateChainVerdict = failedGate

@@ -23,6 +23,21 @@ import { loadCompanyContactEnrichmentTier, loadContactEnrichmentTargets, reachab
 import { enrichmentInputVersion, enrichmentRequestHash } from "../finders/email-enrichment-provider";
 import { contactMayUseExternalProcessing } from "../../discovery/company-suppression-gate";
 import { buildFrozenEnrichmentPlan } from "./enrichment-call-plan";
+import {
+  CONTROLLED_ENRICHMENT_PROVIDERS,
+  aggregateEnrichmentHeadStatus,
+  areOriginalStepFactsCoherent,
+  findCommittedContactDecision,
+  isClosedOriginalEnrichmentStep,
+  isControlledEnrichmentFinder,
+  isControlledEnrichmentProvider,
+  isControlledEnrichmentVerifier,
+  isControlledEnrichmentVerifierOrSmtp,
+  isControlledFinderResultSchema,
+  isReadyOriginalEnrichmentStep,
+  isTerminalEnrichmentDispatchPhase,
+  type EnrichmentHeadStepFact,
+} from "./enrichment-safety-policy";
 import { contactTargetBeforeDigest, type EnrichmentPointBeforeSnapshot } from "./enrichment-target-snapshot";
 import { canonicalSafetyJson, closedSafetyRecord, safetyInteger, EnrichmentSafetyError, type ContactTargetSnapshot, type QuotedEnrichmentSlot } from "./enrichment-safety.contract";
 import type { Prisma, PrismaClient } from "@prisma/client";
@@ -94,9 +109,9 @@ export function createContactEnrichmentSafetyPreparer(deps: ContactEnrichmentPre
     const finders = [];
     for (const finder of configured) if ((await checkProviderGates(deps.prisma, finder)).ok) finders.push(finder);
     if (finders.length === 0) return no("NO_ENABLED_FINDER", tier);
-    if (finders.some((finder) => finder.key !== "hunter" && finder.key !== "prospeo")) return no("GOVERNANCE_PENDING", tier);
+    if (finders.some((finder) => !isControlledEnrichmentFinder(finder.key))) return no("GOVERNANCE_PENDING", tier);
     const verifiers = await gateConfiguredVerificationProviders(deps.prisma, env, deps.broker);
-    if (verifiers.some((provider) => !["millionverifier", "emailable", "zerobounce", "smtp_self"].includes(provider.key))) return no("GOVERNANCE_PENDING", tier);
+    if (verifiers.some((provider) => !isControlledEnrichmentVerifierOrSmtp(provider.key))) return no("GOVERNANCE_PENDING", tier);
     try {
       assertPiiKeyConfigured();
       if (deps.artifactsConfigured ? !deps.artifactsConfigured() : !genericArtifactStorageConfig(env)) return no("ARTIFACT_UNAVAILABLE", tier);
@@ -341,11 +356,11 @@ export function createContactEnrichmentSafetyRuntime(deps: ContactEnrichmentSafe
   }
   throw new EnrichmentSafetyError('CONTROL_MISMATCH');
   };
-  const terminal = (row: import('./enrichment-safety.contract').EnrichmentStepContextRow) => row.dispatch_phase === 'SETTLED' || row.dispatch_phase === 'SETTLED_WAITING_APPLY';
+  const terminal = (row: import('./enrichment-safety.contract').EnrichmentStepContextRow) => isTerminalEnrichmentDispatchPhase(row.dispatch_phase);
   type RuntimeStep = import('./enrichment-safety.contract').EnrichmentRuntimeStepRow;
   const hasOriginalTicket = (step: RuntimeStep) => step.budget_original_id !== null || step.budget_operation_id !== null;
-  const closedOriginalStep = (step: RuntimeStep) => step.budget_status === 'SETTLED' && terminal(step) && step.domain_state === 'APPLIED';
-  const readyOriginalStep = (step: RuntimeStep) => step.budget_status === 'SETTLED' && step.dispatch_phase === 'SETTLED_WAITING_APPLY';
+  const closedOriginalStep = (step: RuntimeStep) => isClosedOriginalEnrichmentStep({ status: step.budget_status, dispatchPhase: step.dispatch_phase, domainState: step.domain_state });
+  const readyOriginalStep = (step: RuntimeStep) => isReadyOriginalEnrichmentStep({ status: step.budget_status, dispatchPhase: step.dispatch_phase });
   const requiredOriginalStepIds = (current: import('./enrichment-safety.contract').EnrichmentRuntimeExecutionRecord, contactId: string) =>
     current.steps.filter((step) => step.contact_id === contactId && step.dispatch_phase !== 'REDACTED' && hasOriginalTicket(step) && step.budget_status !== 'RELEASED').map((step) => step.id);
   const contactHasActiveOriginal = (current: import('./enrichment-safety.contract').EnrichmentRuntimeExecutionRecord, contactId: string) =>
@@ -426,14 +441,8 @@ export function createContactEnrichmentSafetyRuntime(deps: ContactEnrichmentSafe
       if (!record || record.view.status === "REDACTED" || !record.plan) throw new EnrichmentSafetyError("HOLD");
       return record as LoadedRecord;
     };
-    const decisionFor = (record: import('./enrichment-safety.contract').EnrichmentRuntimeExecutionRecord, contactId: string) => {
-      const snapshot = record.resultSnapshot;
-      if (snapshot === null || typeof snapshot !== 'object') return null;
-      const contacts = (snapshot as { contacts?: unknown }).contacts;
-      if (!Array.isArray(contacts)) return null;
-      const found = contacts.find((entry) => entry !== null && typeof entry === 'object' && (entry as { contactId?: unknown }).contactId === contactId);
-      return found === undefined ? null : parseEnrichmentContactApplyDecision(found);
-    };
+    const decisionFor = (record: import('./enrichment-safety.contract').EnrichmentRuntimeExecutionRecord, contactId: string) =>
+      findCommittedContactDecision(record.resultSnapshot, contactId);
     const linkIndex = async (step: import('./enrichment-safety.contract').EnrichmentStepContextRow, reference: import('./enrichment-safety.contract').SettledEnrichmentStepReference) => {
       if (step.budget_operation_id === null) throw new EnrichmentSafetyError('HOLD');
       const current = (await load()).steps.find((candidate) => candidate.id === step.id);
@@ -463,7 +472,7 @@ export function createContactEnrichmentSafetyRuntime(deps: ContactEnrichmentSafe
         return { providerKey: 'smtp_self', state: mapped.state, catchAllClass: mapped.catchAllClass, acceptAll: mapped.acceptAll };
       }
       const provider = row.provider;
-      if (provider !== 'millionverifier' && provider !== 'emailable' && provider !== 'zerobounce') throw new EnrichmentSafetyError('CONTROL_MISMATCH');
+      if (!isControlledEnrichmentVerifier(provider)) throw new EnrichmentSafetyError('CONTROL_MISMATCH');
       const restored = parseContactEmailVerificationResult(provider, materialized.result);
       return { providerKey: provider, state: restored.data.state, catchAllClass: restored.data.catchAllClass, acceptAll: restored.data.acceptAll };
     };
@@ -720,7 +729,7 @@ export async function createManagedContactEnrichmentSafety(input: {
       artifacts = new GenericOperationArtifactService(new GenericOperationArtifactRepository(prisma), sharedGenericOperationArtifactStore(genericArtifactStorageConfig(env)), input.budgetStore);
     }
     const providerStates = {} as Record<ControlledEnrichmentProvider, ControlledEnrichmentProviderState>;
-    for (const provider of ['hunter', 'prospeo', 'millionverifier', 'emailable', 'zerobounce'] as const) providerStates[provider] = await loadControlledEnrichmentProviderState(prisma, env, provider);
+    for (const provider of CONTROLLED_ENRICHMENT_PROVIDERS) providerStates[provider] = await loadControlledEnrichmentProviderState(prisma, env, provider);
     const originals = new EnrichmentOriginalResultRepository(prisma);
     const finderMaterializers = Object.freeze({
       'contact-email-find-hunter/v1': contactEmailFindMaterializer,
@@ -899,8 +908,8 @@ export function createSqlEnrichmentStepGuards(client: PrismaClient, env: NodeJS.
       if (row.contact_id === null) throw new EnrichmentSafetyError('CONTROL_MISMATCH');
       if (!(await contactMayUseExternalProcessing(tx, { workspaceId: row.workspace_id, contactId: row.contact_id }))) throw new EnrichmentSafetyError('HOLD');
       if (row.phase === 'SMTP') return { pricingVersion: row.pricing_version };
-      if (!(['hunter', 'prospeo', 'millionverifier', 'emailable', 'zerobounce'] as readonly string[]).includes(row.provider)) throw new EnrichmentSafetyError('CONTROL_MISMATCH');
-      const state = await loadControlledEnrichmentProviderState(client, env, row.provider as ControlledEnrichmentProvider);
+      if (!isControlledEnrichmentProvider(row.provider)) throw new EnrichmentSafetyError('CONTROL_MISMATCH');
+      const state = await loadControlledEnrichmentProviderState(client, env, row.provider);
       if (!state.enabled || !state.policyAllowed || !state.apiKey || state.pricingVersion !== row.pricing_version) throw new EnrichmentSafetyError('CONTROL_MISMATCH');
       return { pricingVersion: state.pricingVersion };
     },
@@ -913,7 +922,7 @@ export function createSqlEnrichmentStepGuards(client: PrismaClient, env: NodeJS.
         WHERE o.scope_key=${row.workspace_id} AND o.account_id=${row.account_id}::uuid AND o.generation=${row.generation} AND o.id=${candidate.operationId}::uuid`;
       const operation = rows[0];
       if (rows.length !== 1 || !operation || operation.status !== 'SETTLED' || operation.amount_unit !== 'microusd' ||
-          (operation.result_schema !== 'contact-email-find-hunter/v1' && operation.result_schema !== 'contact-email-find-prospeo/v1') || operation.result_digest !== candidate.resultDigest ||
+          !isControlledFinderResultSchema(operation.result_schema) || operation.result_digest !== candidate.resultDigest ||
           operation.scope_key !== row.workspace_id || operation.account_id !== row.account_id || operation.generation !== row.generation ||
           operation.step_contact_id !== row.contact_id || operation.step_execution_id !== row.execution_id ||
           operation.step_contact_ordinal !== row.contact_ordinal || operation.step_phase !== 'FINDER' ||
@@ -925,46 +934,23 @@ export function createSqlEnrichmentStepGuards(client: PrismaClient, env: NodeJS.
 /** Parameterized SQL store for the domain-commit port; real PG/RLS/immutability remains the original E gate. */
 export function createSqlEnrichmentDomainCommitStore(transactions: ContactEnrichmentPreparationDeps['prisma'], env: NodeJS.ProcessEnv): import('./enrichment-domain-commit').EnrichmentDomainCommitStore {
   void env;
-  const readDecision = (snapshot: unknown, contactId: string) => {
-    if (snapshot === null || typeof snapshot !== 'object') return null;
-    const contacts = (snapshot as { contacts?: unknown }).contacts;
-    if (!Array.isArray(contacts)) return null;
-    const found = contacts.find((entry) => entry !== null && typeof entry === 'object' && (entry as { contactId?: unknown }).contactId === contactId);
-    return found === undefined ? null : parseEnrichmentContactApplyDecision(found);
-  };
   const loadOriginalFacts = async (tx: import('@prisma/client').Prisma.TransactionClient, address: import('./enrichment-domain-commit').EnrichmentContactCommitAddress) =>
     tx.$queryRaw<Array<{ step_id: string; operation_id: string | null; operation_status: string | null; dispatch_phase: string; domain_state: string }>>`SELECT s.id::text AS step_id,o.id::text AS operation_id,o.status::text AS operation_status,s.dispatch_phase,s.domain_state
       FROM public.contact_enrichment_execution_step s
       LEFT JOIN public.tool_budget_operation o ON o.scope_key=s.workspace_id::text AND o.operation_key=s.operation_key AND o.account_id=(SELECT e.account_id FROM public.contact_enrichment_execution e WHERE e.workspace_id=s.workspace_id AND e.id=s.execution_id) AND o.generation=(SELECT e.generation FROM public.contact_enrichment_execution e WHERE e.workspace_id=s.workspace_id AND e.id=s.execution_id)
       WHERE s.workspace_id=${address.workspaceId}::uuid AND s.execution_id=${address.executionId}::uuid AND s.contact_id=${address.contactId}::uuid`;
-  const factsCoherent = (facts: readonly { operationId: string | null; status: string | null; dispatchPhase: string; domainState: string }[]) =>
-    !facts.some((fact) => fact.operationId !== null && fact.status !== 'RELEASED' &&
-      !(fact.status === 'SETTLED' && (fact.dispatchPhase === 'SETTLED' || fact.dispatchPhase === 'SETTLED_WAITING_APPLY') && fact.domainState === 'APPLIED'));
-  type HeadFact = { contact_id: string | null; dispatch_phase: string; domain_state: string; operation_id: string | null; operation_status: string | null };
-  const aggregateHeadStatus = (parsed: readonly import('./enrichment-domain-commit').EnrichmentContactApplyDecision[], facts: readonly HeadFact[], remaining: number, targetCount: number, pendingSignal = false): string => {
-    const activePaid = facts.some((fact) => fact.operation_id !== null && fact.operation_status !== 'RELEASED' &&
-      !(fact.operation_status === 'SETTLED' && (fact.dispatch_phase === 'SETTLED' || fact.dispatch_phase === 'SETTLED_WAITING_APPLY') && fact.domain_state === 'APPLIED'));
-    const releasedWithoutObligation = (fact: HeadFact) => fact.dispatch_phase === 'RELEASED' && (fact.operation_id === null || fact.operation_status === 'RELEASED');
-    const genuinePending = parsed.some((entry) => entry.status === 'SAVE_PENDING') || activePaid ||
-      facts.some((fact) => fact.domain_state === 'SAVE_PENDING' && !releasedWithoutObligation(fact));
-    const closed = parsed.length === targetCount && parsed.every((entry) => entry.status === 'APPLIED' || entry.status === 'REPLAYED') && !activePaid && !pendingSignal;
-    if (closed) return 'COMPLETED';
-    if (genuinePending || pendingSignal) return 'APPLY_PENDING';
-    if (remaining > 0) return 'RUNNING';
-    return parsed.length === targetCount ? 'APPLY_PENDING' : 'RUNNING';
-  };
   const readHeadFacts = async (tx: import('@prisma/client').Prisma.TransactionClient, address: { workspaceId: string; executionId: string }) =>
-    tx.$queryRaw<HeadFact[]>`SELECT s.contact_id::text,s.domain_state,s.dispatch_phase,o.id::text AS operation_id,o.status::text AS operation_status
+    tx.$queryRaw<EnrichmentHeadStepFact[]>`SELECT s.contact_id::text,s.domain_state,s.dispatch_phase,o.id::text AS operation_id,o.status::text AS operation_status
       FROM public.contact_enrichment_execution_step s
       LEFT JOIN public.tool_budget_operation o ON o.scope_key=s.workspace_id::text AND o.operation_key=s.operation_key AND o.account_id=(SELECT e.account_id FROM public.contact_enrichment_execution e WHERE e.workspace_id=s.workspace_id AND e.id=s.execution_id) AND o.generation=(SELECT e.generation FROM public.contact_enrichment_execution e WHERE e.workspace_id=s.workspace_id AND e.id=s.execution_id)
       WHERE s.workspace_id=${address.workspaceId}::uuid AND s.execution_id=${address.executionId}::uuid`;
   return {
     readCommitted: async (tx, address) => {
       const rows = await tx.$queryRaw<{ result_snapshot: unknown }[]>`SELECT result_snapshot FROM public.contact_enrichment_execution WHERE workspace_id=${address.workspaceId}::uuid AND id=${address.executionId}::uuid AND company_id=${address.companyId}::uuid`;
-      const decision = rows.length === 1 ? readDecision(rows[0]?.result_snapshot, address.contactId) : null;
+      const decision = rows.length === 1 ? findCommittedContactDecision(rows[0]?.result_snapshot, address.contactId) : null;
       if (!decision || decision.status === 'SAVE_PENDING') return decision;
       const facts = await loadOriginalFacts(tx, address);
-      return factsCoherent(facts.map((fact) => ({ operationId: fact.operation_id, status: fact.operation_status, dispatchPhase: fact.dispatch_phase, domainState: fact.domain_state }))) ? decision : null;
+      return areOriginalStepFactsCoherent(facts.map((fact) => ({ operationId: fact.operation_id, status: fact.operation_status, dispatchPhase: fact.dispatch_phase, domainState: fact.domain_state }))) ? decision : null;
     },
     lockAndLoad: async (tx, address) => {
       const initialHeads = await tx.$queryRaw<Array<{ id: string; workspace_id: string; company_id: string | null; authority_id: string; account_id: string; generation: number; account_key: string }>>`SELECT e.id::text,e.workspace_id::text,e.company_id::text,e.authority_id::text,e.account_id::text,e.generation,a.account_key
@@ -1023,7 +1009,7 @@ export function createSqlEnrichmentDomainCommitStore(transactions: ContactEnrich
         qualityPoints: pointRows.map((point) => ({ id: point.id, type: point.type, emailType: point.emailType ?? null, verificationState: point.verificationState })),
         originalReferences: references,
         originalFacts: stepRows.map((step) => ({ stepId: step.id, operationId: step.budget_original_id, status: step.budget_status, dispatchPhase: step.dispatch_phase, domainState: step.domain_state })),
-        committed: readDecision(head.result_snapshot, address.contactId),
+        committed: findCommittedContactDecision(head.result_snapshot, address.contactId),
         redacted: false,
         lawfulBasis: { basis: (limits?.executionOptions?.lawfulBasisKind ?? 'legitimate_interest') as import('../../discovery/provider-contract').LawfulBasisKind },
         pendingOperationIds: pending.map((row) => row.operation_id),
@@ -1060,7 +1046,7 @@ export function createSqlEnrichmentDomainCommitStore(transactions: ContactEnrich
       const remaining = await tx.$queryRaw<Array<{ count: bigint }>>`SELECT count(*)::bigint AS count FROM public.contact_enrichment_execution_step
         WHERE workspace_id=${address.workspaceId}::uuid AND execution_id=${address.executionId}::uuid AND dispatch_phase NOT IN ('SETTLED','RELEASED','REDACTED')`;
       const stepStates = await readHeadFacts(tx, address);
-      const nextStatus = aggregateHeadStatus(parsed, stepStates, Number(remaining[0]?.count ?? -1), targetCount);
+      const nextStatus = aggregateEnrichmentHeadStatus(parsed, stepStates, Number(remaining[0]?.count ?? -1), targetCount);
       await tx.$queryRaw`UPDATE public.contact_enrichment_execution
         SET result_snapshot=${canonicalSafetyJson({ version: 2, targetCount, newCandidatePoints, contacts: parsed, quality: { version: 1, contacts: qualityContacts } })}::jsonb,result_revision=result_revision+1,status=${nextStatus}
         WHERE workspace_id=${address.workspaceId}::uuid AND id=${address.executionId}::uuid AND company_id=${address.companyId}::uuid AND status<>'REDACTED'`;
@@ -1077,7 +1063,7 @@ export function createSqlEnrichmentDomainCommitStore(transactions: ContactEnrich
         const remaining = await tx.$queryRaw<Array<{ count: bigint }>>`SELECT count(*)::bigint AS count FROM public.contact_enrichment_execution_step
           WHERE workspace_id=${address.workspaceId}::uuid AND execution_id=${address.executionId}::uuid AND dispatch_phase NOT IN ('SETTLED','RELEASED','REDACTED')`;
         const facts = await readHeadFacts(tx, address);
-        const aggregate = aggregateHeadStatus(parsed, facts, Number(remaining[0]?.count ?? -1), targetCount);
+        const aggregate = aggregateEnrichmentHeadStatus(parsed, facts, Number(remaining[0]?.count ?? -1), targetCount);
         const nextStatus = aggregate === 'RUNNING' ? 'APPLY_PENDING' : aggregate;
         await tx.$queryRaw`UPDATE public.contact_enrichment_execution SET status=${nextStatus}
           WHERE workspace_id=${address.workspaceId}::uuid AND id=${address.executionId}::uuid AND company_id=${address.companyId}::uuid AND status NOT IN ('COMPLETED','FAILED','REDACTED')`;
@@ -1096,7 +1082,7 @@ export function createSqlEnrichmentDomainCommitStore(transactions: ContactEnrich
       const remaining = await tx.$queryRaw<Array<{ count: bigint }>>`SELECT count(*)::bigint AS count FROM public.contact_enrichment_execution_step
         WHERE workspace_id=${address.workspaceId}::uuid AND execution_id=${address.executionId}::uuid AND dispatch_phase NOT IN ('SETTLED','RELEASED','REDACTED')`;
       const facts = await readHeadFacts(tx, address);
-      const nextStatus = aggregateHeadStatus(parsed, facts, Number(remaining[0]?.count ?? -1), targetCount, true);
+      const nextStatus = aggregateEnrichmentHeadStatus(parsed, facts, Number(remaining[0]?.count ?? -1), targetCount, true);
       await tx.$queryRaw`UPDATE public.contact_enrichment_execution SET status=${nextStatus}
         WHERE workspace_id=${address.workspaceId}::uuid AND id=${address.executionId}::uuid AND company_id=${address.companyId}::uuid AND status NOT IN ('COMPLETED','FAILED','REDACTED')`;
     },

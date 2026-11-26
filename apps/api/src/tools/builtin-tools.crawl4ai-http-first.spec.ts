@@ -64,13 +64,13 @@ describe('crawl4ai.fetch 的 HTTP-first 分级（PR-A）', () => {
     expect(out.provenance?.parserVersion).toBe('http-first/1');
   });
 
-  it('falls back to the rendered markdown when the HTTP page is thin', async () => {
+  it('falls back to the rendered markdown when the HTTP page is thin without charging phantom 1c', async () => {
     const crawlUrl = vi.fn(async () => ({ url: 'https://acme.example/', text: 'rendered content' }));
     const tool = makeTool({ crawlUrl });
     const out = await tool.execute({ url: 'https://acme.example/' }, ctx);
     expect(crawlUrl).toHaveBeenCalledOnce();
     expect(out.data.text).toBe('rendered content');
-    expect(out.costCents).toBe(1);
+    expect(out.costCents).toBe(0);
   });
 
   it('goes straight to the renderer when HTTP_FIRST_FETCH=off', async () => {

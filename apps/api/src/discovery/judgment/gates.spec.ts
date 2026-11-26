@@ -18,6 +18,7 @@ import {
   decideSuppressionGate,
   evaluateGates,
   gateInputDigest,
+  isGateEnrichmentTaskWriteEnabled,
   normalizeCountryIso,
   normalizeMarketIsos,
   sanctionsFreshnessState,
@@ -864,9 +865,12 @@ describe('evaluateGates（编排 / 写库语义）', () => {
     ]);
   });
 
-  it('UNKNOWN 不短路：国家缺失 → 后续门照常评估，整链 UNKNOWN，写补数任务', async () => {
-    const store: FakeStore = { results: [], tasks: [] };
-    const evaluation = await evaluateGates(
+  it('UNKNOWN 不短路：默认关闭死队列写入（0 行），显式开启 GATE_ENRICHMENT_TASK_WRITE_ENABLED=on 时写补数任务', async () => {
+    expect(isGateEnrichmentTaskWriteEnabled({})).toBe(false);
+    expect(isGateEnrichmentTaskWriteEnabled({ GATE_ENRICHMENT_TASK_WRITE_ENABLED: 'on' })).toBe(true);
+
+    const defaultStore: FakeStore = { results: [], tasks: [] };
+    const defaultEval = await evaluateGates(
       makeTx(
         happyWorld({
           company: {
@@ -874,56 +878,89 @@ describe('evaluateGates（编排 / 写库语义）', () => {
             country: null,
           },
         }),
-        store,
+        defaultStore,
       ),
       CTX,
     );
-    expect(evaluation.verdict).toBe('UNKNOWN');
-    expect(evaluation.results).toHaveLength(6);
-    expect(evaluation.unknownGates.map((decision) => decision.gateId)).toEqual(['G_COUNTRY']);
-    expect(store.tasks).toHaveLength(1);
-    expect(store.tasks[0]).toMatchObject({
-      gateId: 'G_COUNTRY',
-      reasonCode: 'GATE_COUNTRY_UNKNOWN',
-      status: 'queued',
-      icpId: CTX.icpId,
-    });
+    expect(defaultEval.verdict).toBe('UNKNOWN');
+    expect(defaultEval.results).toHaveLength(6);
+    expect(defaultEval.unknownGates.map((decision) => decision.gateId)).toEqual(['G_COUNTRY']);
+    expect(defaultEval.enrichmentTaskCount).toBe(0);
+    expect(defaultStore.tasks).toHaveLength(0);
+
+    vi.stubEnv('GATE_ENRICHMENT_TASK_WRITE_ENABLED', 'on');
+    try {
+      const enabledStore: FakeStore = { results: [], tasks: [] };
+      const evaluation = await evaluateGates(
+        makeTx(
+          happyWorld({
+            company: {
+              ...happyWorld().company,
+              country: null,
+            },
+          }),
+          enabledStore,
+        ),
+        CTX,
+      );
+      expect(evaluation.verdict).toBe('UNKNOWN');
+      expect(evaluation.enrichmentTaskCount).toBe(1);
+      expect(enabledStore.tasks).toHaveLength(1);
+      expect(enabledStore.tasks[0]).toMatchObject({
+        gateId: 'G_COUNTRY',
+        reasonCode: 'GATE_COUNTRY_UNKNOWN',
+        status: 'queued',
+        icpId: CTX.icpId,
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
-  it('G5 无域名 → UNKNOWN + 补数任务（GATE_DOMAIN_MISSING）', async () => {
-    const store: FakeStore = { results: [], tasks: [] };
-    const evaluation = await evaluateGates(
-      makeTx(
-        happyWorld({
-          company: { ...happyWorld().company, domain: null },
-        }),
-        store,
-      ),
-      CTX,
-    );
-    expect(evaluation.verdict).toBe('UNKNOWN');
-    expect(evaluation.unknownGates.map((decision) => decision.reasonCode)).toEqual([
-      'GATE_DOMAIN_MISSING',
-    ]);
-    expect(store.tasks).toHaveLength(1);
-    expect(store.tasks[0]).toMatchObject({
-      gateId: 'G_DOMAIN',
-      reasonCode: 'GATE_DOMAIN_MISSING',
-      status: 'queued',
-    });
+  it('G5 无域名 → UNKNOWN（开启开关时写 GATE_DOMAIN_MISSING 补数任务，默认不写死队列）', async () => {
+    vi.stubEnv('GATE_ENRICHMENT_TASK_WRITE_ENABLED', 'on');
+    try {
+      const store: FakeStore = { results: [], tasks: [] };
+      const evaluation = await evaluateGates(
+        makeTx(
+          happyWorld({
+            company: { ...happyWorld().company, domain: null },
+          }),
+          store,
+        ),
+        CTX,
+      );
+      expect(evaluation.verdict).toBe('UNKNOWN');
+      expect(evaluation.unknownGates.map((decision) => decision.reasonCode)).toEqual([
+        'GATE_DOMAIN_MISSING',
+      ]);
+      expect(store.tasks).toHaveLength(1);
+      expect(store.tasks[0]).toMatchObject({
+        gateId: 'G_DOMAIN',
+        reasonCode: 'GATE_DOMAIN_MISSING',
+        status: 'queued',
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
-  it('域名存活校验 DEAD（ctx.domainStatus）→ G5 UNKNOWN + 补数任务（GATE_DOMAIN_DEAD）', async () => {
-    const store: FakeStore = { results: [], tasks: [] };
-    const evaluation = await evaluateGates(makeTx(happyWorld(), store), {
-      ...CTX,
-      domainStatus: 'DEAD',
-    });
-    expect(evaluation.verdict).toBe('UNKNOWN');
-    expect(store.tasks[0]).toMatchObject({
-      gateId: 'G_DOMAIN',
-      reasonCode: 'GATE_DOMAIN_DEAD',
-    });
+  it('域名存活校验 DEAD（ctx.domainStatus）→ G5 UNKNOWN（开启开关时写 GATE_DOMAIN_DEAD）', async () => {
+    vi.stubEnv('GATE_ENRICHMENT_TASK_WRITE_ENABLED', 'on');
+    try {
+      const store: FakeStore = { results: [], tasks: [] };
+      const evaluation = await evaluateGates(makeTx(happyWorld(), store), {
+        ...CTX,
+        domainStatus: 'DEAD',
+      });
+      expect(evaluation.verdict).toBe('UNKNOWN');
+      expect(store.tasks[0]).toMatchObject({
+        gateId: 'G_DOMAIN',
+        reasonCode: 'GATE_DOMAIN_DEAD',
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it('ICP allow_domainless=true → G5 NOT_APPLICABLE，无补数任务', async () => {

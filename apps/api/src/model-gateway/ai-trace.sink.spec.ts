@@ -379,11 +379,65 @@ describe('AiTraceSink', () => {
     });
 
     await vi.waitFor(() => expect(usageLedgerCreate).toHaveBeenCalledTimes(1));
+    expect(aiTraceCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        costUsd: 0.42,
+      }),
+    });
     expect(usageLedgerCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({
         costUsd: 0.42,
         meta: expect.objectContaining({ costSource: 'provider' }),
       }),
     });
+  });
+
+  it('unifies ai_trace.costUsd with usage_ledger.costUsd when token-estimated, and keeps released failures null', async () => {
+    const aiTraceCreate = vi.fn(async () => ({ id: 'trace-unified-1' }));
+    const usageLedgerCreate = vi.fn(async () => ({}));
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId: string, fn: (tx: unknown) => Promise<unknown>) =>
+        fn({
+          aiTrace: { create: aiTraceCreate },
+          usageLedger: { create: usageLedgerCreate },
+        }),
+      ),
+    } as unknown as PrismaService;
+    const sink = new AiTraceSink(prisma);
+
+    sink.record({
+      workspaceId: '00000000-0000-0000-0000-000000000001',
+      task: 'discovery.qualify_fit',
+      op: 'generateStructured',
+      provider: 'gateway',
+      model: 'deepseek-v4-pro',
+      status: 'OK',
+      latencyMs: 12,
+      inputTokens: 7,
+      outputTokens: 3,
+    });
+    await vi.waitFor(() => expect(usageLedgerCreate).toHaveBeenCalledTimes(1));
+    expect(aiTraceCreate).toHaveBeenLastCalledWith({
+      data: expect.objectContaining({ costUsd: 0.01 }),
+    });
+
+    sink.record({
+      workspaceId: '00000000-0000-0000-0000-000000000001',
+      task: 'discovery.qualify_fit',
+      op: 'generateStructured',
+      provider: 'gateway',
+      model: 'deepseek-v4-pro',
+      status: 'ERROR',
+      latencyMs: 12,
+      inputTokens: 100,
+      outputTokens: 0,
+      budgetOperationId: '7d5e8f1a-2b3c-4d5e-8f90-a1b2c3d4e5f6',
+      budgetDisposition: 'RELEASED_DEFINITE_FAILURE',
+    });
+    await vi.waitFor(() => expect(aiTraceCreate).toHaveBeenCalledTimes(2));
+    expect(aiTraceCreate).toHaveBeenLastCalledWith({
+      data: expect.objectContaining({ costUsd: null }),
+    });
+    expect(usageLedgerCreate).toHaveBeenCalledTimes(1);
   });
 });

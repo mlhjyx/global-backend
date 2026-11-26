@@ -78,9 +78,18 @@ export async function searxSearch(query: SearxQuery, timeoutMs = 30_000): Promis
   };
 }
 
+import {
+  classifySearxngCooldownReason,
+  executeWithSearxngFallback,
+  type SearxngFallbackDeps,
+  type SearxngFallbackResult,
+} from './searxng-fallback';
+
 /**
  * 便捷：多页拉取（分页），用于需要更多候选的发现查询。
  * pages=2 通常够；每页 SearXNG 已聚合多引擎结果。
+ * 首页触发 403/429/5xx 限流或封禁错误时显式抛出，便于上层冷却切换至 Serper/Exa；
+ * 后续翻页失败保持返回已得结果的容错语义。
  */
 export async function searxSearchPaged(query: SearxQuery, pages = 1, timeoutMs = 30_000): Promise<SearxResult[]> {
   const out: SearxResult[] = [];
@@ -89,7 +98,10 @@ export async function searxSearchPaged(query: SearxQuery, pages = 1, timeoutMs =
     let resp: SearxResponse;
     try {
       resp = await searxSearch({ ...query, pageno: p }, timeoutMs);
-    } catch {
+    } catch (error) {
+      if (p === 1 && out.length === 0 && classifySearxngCooldownReason(error) !== null) {
+        throw error;
+      }
       break; // 某页失败则停止翻页，返回已得
     }
     for (const r of resp.results) {
@@ -101,4 +113,18 @@ export async function searxSearchPaged(query: SearxQuery, pages = 1, timeoutMs =
     if (!resp.results.length) break;
   }
   return out;
+}
+
+/** 带 403/429 冷却与 Serper/Exa 自动兜底的分页搜索入口。 */
+export async function searxSearchPagedWithFallback(
+  query: SearxQuery,
+  pages = 1,
+  timeoutMs = 30_000,
+  deps: SearxngFallbackDeps = {},
+): Promise<SearxngFallbackResult> {
+  return executeWithSearxngFallback(
+    () => searxSearchPaged(query, pages, timeoutMs),
+    query,
+    { pages, ...deps },
+  );
 }

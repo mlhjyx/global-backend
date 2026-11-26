@@ -1,7 +1,7 @@
 {
   "$comment": "G16：apps/api 运行时跨模块依赖对基线（按 from -> to 去重）。新增对必须显式更新本文件；消失的对不阻断。",
   "schemaVersion": "g16-module-boundaries/v1",
-  "generatedFrom": "6990f3ba550fdec1ee8dcd06d1b48b4636cf05e1",
+  "generatedFrom": "a442db98c107ff1dfd746865208497b3610523e1",
   "pairs": [
     {
       "from": "(root)",
@@ -813,6 +813,10 @@
     },
     {
       "from": "model-gateway",
+      "to": "adapters"
+    },
+    {
+      "from": "model-gateway",
       "to": "ai-tasks"
     },
     {
@@ -981,6 +985,10 @@
     },
     {
       "from": "runtime",
+      "to": "adapters"
+    },
+    {
+      "from": "runtime",
       "to": "auth"
     },
     {
@@ -989,7 +997,15 @@
     },
     {
       "from": "runtime",
+      "to": "discovery"
+    },
+    {
+      "from": "runtime",
       "to": "durable-results"
+    },
+    {
+      "from": "runtime",
+      "to": "enrichment"
     },
     {
       "from": "runtime",
@@ -1014,6 +1030,10 @@
     {
       "from": "runtime",
       "to": "site-builder"
+    },
+    {
+      "from": "runtime",
+      "to": "temporal"
     },
     {
       "from": "runtime",
