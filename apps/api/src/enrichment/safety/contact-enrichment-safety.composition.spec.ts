@@ -397,6 +397,7 @@ describe('v6 remediation: current-fact flow, stop rules, cache/circuit, recover 
   type Verdict = 'VALID' | 'INVALID' | 'UNKNOWN' | 'CATCH_ALL_RISKY';
   interface Opts {
     contacts?: 1 | 2; finder?: 'hit' | 'miss'; verifiers?: Array<{ provider: 'millionverifier' | 'emailable' | 'zerobounce'; state: Verdict }>;
+    verificationError?: boolean;
     reusable?: { outcome: string; emailState: string | null } | null; circuitOpen?: boolean; circuitState?: 'CLOSED' | 'OPEN_FRESH' | 'OPEN_EXPIRED' | 'HALF_OPEN'; finderError?: boolean; attemptRows?: Array<{ requestHash: string; outcome: string; emailState?: string | null; attemptedAt: Date }>; useDefaultAttemptCache?: boolean; crash?: boolean; tier?: 'A' | 'B'; deadlinePast?: boolean; uncertain?: boolean; currentEmailPoint?: boolean;
   }
   function flowWorld(options: Opts = {}) {
@@ -486,6 +487,7 @@ throw new Error('unexpected flow SQL: ' + sql.slice(0, 140));
         const data = finderPayload(step.slot.contactId);
         return { data, costCents: 0.17, costMicrousd: '1700', durableReceipt: receiptFor(step, operationId) };
       }
+      if (options.verificationError) throw new ExecutionControlError('BUDGET_OPERATION_REPLAY_UNAVAILABLE');
       const position = verifyIndex.get(step.slot.contactId) ?? 0; verifyIndex.set(step.slot.contactId, position + 1);
       const verdict = verifiers[position]?.state ?? 'UNKNOWN'; const quote = Number(step.slot.quoteMicrousd);
       const data = { providerKey: step.slot.provider, state: verdict, catchAll: 'unknown', catchAllClass: 'unknown', score: verdict === 'VALID' ? 90 : 10, acceptAll: false, disposable: null, role: null, reason: 'provider_verdict', costBasis: 'estimated_upper_bound' };
@@ -528,6 +530,21 @@ throw new Error('unexpected flow SQL: ' + sql.slice(0, 140));
     const x = flowWorld({ verifiers: [{ provider: 'millionverifier', state: 'VALID' }] }); const original = x.plan.planSha256; const quotes = x.plan.slots.map((s) => s.quoteMicrousd).join(',');
     const result = await run(x); expect(result.attempted).toBe(1); expect(x.broker.invoke).toHaveBeenCalledTimes(2); expect(x.steps[1]!.ledger).not.toBeNull();
     expect(x.plan.planSha256).toBe(original); expect(x.plan.slots.map((s) => s.quoteMicrousd).join(',')).toBe(quotes);
+  });
+  it('persists SAVE_PENDING when a verifier fails after claiming its original operation', async () => {
+    const x = flowWorld({
+      verificationError: true,
+      verifiers: [{ provider: 'millionverifier', state: 'VALID' }, { provider: 'emailable', state: 'VALID' }],
+    });
+    const result = await run(x);
+    expect(x.broker.invoke).toHaveBeenCalledTimes(2);
+    expect(x.steps[1]?.ledger?.status).toBe('RESERVED');
+    expect(x.steps[2]?.ledger).toBeNull();
+    expect(x.store.savePending).toHaveBeenCalledWith(
+      expect.anything(), expect.objectContaining({ contactId: CA }), 'RESULT_UNKNOWN',
+    );
+    expect(x.store.persist).not.toHaveBeenCalled();
+    expect(result.results[0]).toMatchObject({ contactId: CA, reason: 'RESULT_UNKNOWN' });
   });
   it('F06 each contact verification uses its own finder candidate', async () => {
     const x = flowWorld({ contacts: 2, verifiers: [{ provider: 'millionverifier', state: 'VALID' }] });
@@ -944,7 +961,17 @@ describe('V8 lifecycle RED/GREEN: real managed loader and real SQL store status'
         if (sql.includes('FROM public.contact_enrichment_execution_step s JOIN')) return [row];
         throw new Error('unexpected lifecycle SQL: ' + sql.slice(0, 120));
       }),
-      canonicalContact: { findFirst: vi.fn(async () => ({ fullName: 'Synthetic Person', company: { name: 'Synthetic Company', domain: 'company.example.invalid' } })) },
+      canonicalContact: {
+        findFirst: vi.fn(async ({ select, where }) => {
+          expect(select).toMatchObject({ workspaceId: true, fullName: true });
+          expect(where).toMatchObject({ workspaceId: LW, companyId: LC });
+          return {
+            workspaceId: LW,
+            fullName: 'Synthetic Person',
+            company: { name: 'Synthetic Company', domain: 'company.example.invalid' },
+          };
+        }),
+      },
     };
     return {
       dataProvider: { findUnique: vi.fn(async () => ({ status: 'ENABLED' })) },
