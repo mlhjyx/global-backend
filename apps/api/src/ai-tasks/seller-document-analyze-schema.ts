@@ -4,7 +4,7 @@ import {
   boundedString,
   closedObject,
   type OutputSchema,
-} from '../ai-tasks/task-schema-bounds';
+} from './task-schema-bounds';
 
 const ATTRIBUTE_SCALAR: OutputSchema = {
   oneOf: [

@@ -1,6 +1,6 @@
 import { GENERATION_INPUT_SCHEMA } from '../market-candidate-generation/generation-basis';
 import { GENERATION_OUTPUT_SCHEMA } from '../market-candidate-generation/generation-output';
-import { SELLER_DOCUMENT_ANALYZE_DESCRIPTION, SELLER_DOCUMENT_ANALYZE_OUTPUT_SCHEMA } from '../seller-knowledge/seller-document-analyze-schema';
+import { SELLER_DOCUMENT_ANALYZE_DESCRIPTION, SELLER_DOCUMENT_ANALYZE_OUTPUT_SCHEMA } from './seller-document-analyze-schema';
 import { boundedString, boundedNumber, boundedArray, closedObject, type OutputSchema } from './task-schema-bounds';
 import { AiTaskContract } from './task-contract';
 import {

@@ -323,7 +323,7 @@ export function createSellerDocumentActivities(deps: SellerDocumentActivityDeps)
       ((detectedPages !== null && detectedPages > PRIORITY_PDF_PAGES) ||
         (detectedPages === null && content.byteLength > LARGE_UNKNOWN_PDF_BYTES));
 
-    let markdown = '';
+    let markdown: string;
     let doclingPageCount: number | undefined;
     try {
       const converted = await deps.docling.convertToMarkdown(

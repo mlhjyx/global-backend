@@ -70,9 +70,17 @@ const SIZE_SLACK_BYTES = 1024;
 export const SELLER_DOCUMENT_MAX_PART_BYTES = 6 * 1024 * 1024;
 export const SELLER_DOCUMENT_MAX_PARTS = 100;
 
+function hasAsciiControlChar(value: string): boolean {
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i);
+    if (code <= 0x1f || code === 0x7f) return true;
+  }
+  return false;
+}
+
 function validMultipartUploadId(uploadId: string): string {
   const trimmed = typeof uploadId === 'string' ? uploadId.trim() : '';
-  if (!trimmed || trimmed.length > 512 || /[\u0000-\u001f\u007f]/u.test(trimmed)) {
+  if (!trimmed || trimmed.length > 512 || hasAsciiControlChar(trimmed)) {
     throw new BadRequestException({
       error: { code: 'SELLER_DOCUMENT_UPLOAD_ID_INVALID', message: '分片上传标识不合法' },
     });
