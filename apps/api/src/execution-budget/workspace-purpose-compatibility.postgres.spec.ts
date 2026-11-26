@@ -21,6 +21,7 @@ const PAIRS = [
   ['understanding.run', 'company', 1800, 'UNDERSTANDING_RUN'],
   ['icp.design', 'company', 1800, 'ICP_DESIGN'],
   ['icp.query_plan', 'icp', 1800, 'ICP_QUERY_PLAN'],
+  ['icp.rejudge', 'icp', 3600, 'ICP_REJUDGE'],
   ['discovery.run', 'discovery_run', 10800, 'DISCOVERY_RUN'],
   ['discovery.run', 'company', null, 'DISCOVERY_RUN'],
   ['contact.verify', 'contact_point', null, 'CONTACT_VERIFY'],

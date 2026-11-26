@@ -54,7 +54,7 @@ describe('Workspace technical budget quote OpenAPI', () => {
     );
     const variants = operation.requestBody?.content?.['application/json']
       ?.schema?.oneOf;
-    expect(variants).toHaveLength(12);
+    expect(variants).toHaveLength(13);
     expect(
       variants?.every((variant) => variant.additionalProperties === false),
     ).toBe(true);
@@ -102,6 +102,45 @@ describe('Workspace technical budget quote OpenAPI', () => {
     const response = document().components.schemas.WorkspaceTechnicalBudgetQuoteResponseDto;
     expect(JSON.stringify(response)).toContain('market.candidates.generate');
     expect(JSON.stringify(response)).toContain('market_candidate_generation');
+  });
+
+  it('documents the bounded icp.rejudge quote variant and purpose enum', () => {
+    const operation = document().paths['/api/v1/execution-budget/workspace-technical-quote']?.post;
+    const body = operation?.requestBody as {
+      content: {
+        'application/json': {
+          schema: {
+            oneOf: Array<{
+              properties: Record<string, unknown>;
+              required: string[];
+              additionalProperties: boolean;
+            }>;
+          };
+        };
+      };
+    };
+    const variant = body.content['application/json'].schema.oneOf.find(
+      (v) => (v.properties.operation as { enum: string[] }).enum[0] === 'POST /icps/:icpId/rejudge',
+    );
+    expect(variant).toMatchObject({
+      additionalProperties: false,
+      required: ['operation', 'icpId', 'body'],
+      properties: {
+        icpId: { format: 'uuid' },
+        body: {
+          additionalProperties: false,
+          required: ['attemptId'],
+          properties: {
+            attemptId: { minLength: 1, maxLength: 128 },
+            maxCompanies: { minimum: 1, maximum: 100 },
+            batchSize: { minimum: 1, maximum: 25 },
+            companyIds: { minItems: 1, maxItems: 100 },
+          },
+        },
+      },
+    });
+    const response = document().components.schemas.WorkspaceTechnicalBudgetQuoteResponseDto;
+    expect(JSON.stringify(response)).toContain('icp.rejudge');
   });
 
 });

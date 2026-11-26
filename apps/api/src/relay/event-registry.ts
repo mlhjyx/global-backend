@@ -11,6 +11,7 @@ export const INTERNAL_COMMANDS: ReadonlySet<string> = new Set([
   'CompanyProfileCreated',
   'DiscoveryRunRequested',
   'QualifyRequested',
+  'LeadRejudgeRequested',
   'DeletionRequested', // 收口⑥ PR-B：relay dispatch → 起 deletionWorkflow（Art.17 擦除编排）
   'SellerDocumentCleanupRequested', // S1a 内部文档清理命令（subjectType=seller_document）
   'PersonalArtifactCleanupRequested',

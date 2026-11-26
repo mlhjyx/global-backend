@@ -17,6 +17,7 @@ const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const WORKSPACE_PURPOSES = new Set<ExecutionBudgetPurpose>([
   'icp.design',
   'icp.query_plan',
+  'icp.rejudge',
   'understanding.run',
   'discovery.run',
   'contact.verify',

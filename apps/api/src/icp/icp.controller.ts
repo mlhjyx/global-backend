@@ -29,6 +29,8 @@ import {
   RECORD_FEEDBACK_RESPONSE_SCHEMA,
   RecordIcpFeedbackDto,
 } from './dto/feedback-learning.dto';
+import { IcpRejudgeService } from './icp-rejudge.service';
+import { RejudgeIcpLeadsDto, RejudgeIcpLeadsResponseDto } from './icp-rejudge.dto';
 import { IcpDto } from './dto/icp.dto';
 import {
   BacktestDto,
@@ -129,6 +131,7 @@ export class IcpController {
     private readonly icps: IcpService,
     private readonly feedback: IcpFeedbackService,
     @Optional() private readonly feedbackLearning?: FeedbackLearningService,
+    @Optional() private readonly rejudge?: IcpRejudgeService,
   ) {}
 
   @Post('companies/:companyId/icps')
@@ -339,6 +342,32 @@ export class IcpController {
             this.icps.generateQueryPlan(ctx, icpId, compactJws, dto?.attemptId),
           ),
         ),
+      ),
+    );
+  }
+
+  @Post('icps/:icpId/rejudge')
+  @RequireScopes('acquisition:write')
+  @HttpCode(202)
+  @ApiOperation({
+    summary: '触发审计合规的存量 Lead 重判（走 WORKSPACE_GRANT + Outbox + rejudgeWorkflow，保护人工决策）',
+    description:
+      '要求 JUDGE_CONTRACT_MODE=enforce 且 ICP 处于 ACTIVE 状态。先对 Grant 验签并做候选与预算预检（无候选返回 409 NO_REJUDGE_CANDIDATES、超帽返回 409 REJUDGE_COST_CAP_EXCEEDED，均不消耗 Grant），通过后在单事务内原子核销 Grant 并投递 LeadRejudgeRequested。',
+  })
+  @ApiExecutionBudgetGrant({
+    additionalConflictCodes: ['INVALID_STATE', 'NO_REJUDGE_CANDIDATES', 'REJUDGE_COST_CAP_EXCEEDED'],
+  })
+  @ApiBody({ type: RejudgeIcpLeadsDto })
+  @ApiEnvelope(RejudgeIcpLeadsResponseDto, { status: 202 })
+  async rejudgeLeads(
+    @Ctx() ctx: RequestContext,
+    @Param('icpId', ParseUUIDPipe) icpId: string,
+    @Body() dto: RejudgeIcpLeadsDto,
+    @ExecutionBudgetGrant() compactJws?: string,
+  ): Promise<Enveloped<RejudgeIcpLeadsResponseDto>> {
+    return envelope(
+      await asExecutionBudgetHttpBoundary(() =>
+        this.rejudge!.requestRejudge(ctx, icpId, dto, compactJws),
       ),
     );
   }

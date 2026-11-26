@@ -18,6 +18,8 @@ export const UNDERSTANDING_WORKFLOW = 'understandingWorkflow';
 export const DISCOVERY_WORKFLOW = 'discoveryWorkflow';
 export const DISCOVERY_STREAMING_WORKFLOW = 'discoveryStreamingWorkflow';
 export const QUALIFY_WORKFLOW = 'qualifyWorkflow';
+export const REJUDGE_WORKFLOW = 'rejudgeWorkflow';
+export const REJUDGE_EXECUTION_TIMEOUT = '70 minutes' as const;
 export const ACQUISITION_SWEEP_WORKFLOW = ACQ_SWEEP_CONTRACT.workflowType;
 export const ACQ_SWEEP_SCHEDULE_ID =
   ACQ_SWEEP_CONTRACT.scheduleId as 'acq-sweep';

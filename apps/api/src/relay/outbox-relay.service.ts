@@ -1,4 +1,5 @@
 import { discoveryManufacturerCommandArguments, NonRetryableOutboxCommandError, resolveDiscoveryWorkflowType } from './discovery-run-command';
+import { dispatchRejudgeCommand } from './rejudge-command';
 import { assertCandidateWorkspaceAllowed, assertRuntimeCandidateOperational, candidateWorkspaceWhere } from '../runtime/development-candidate';
 import { createHmac } from "node:crypto";
 import {
@@ -1034,5 +1035,6 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
         `asset ${command.objectClass} cleanup for event ${ev.eventId}`,
       );
     }
+    if (ev.eventType === "LeadRejudgeRequested") await dispatchRejudgeCommand(ev, (w, o, d) => this.startWorkflowIdempotent(w, o, d));
   }
 }

@@ -22,6 +22,7 @@ describe('workspace execution technical envelope catalog', () => {
       'POST /companies',
       'POST /companies/:companyId/icps',
       'POST /icps/:icpId/query-plans',
+      'POST /icps/:icpId/rejudge',
       'POST /query-plans/:planId/execute',
       'POST /canonical-companies/:id/discover-contacts',
       'POST /canonical-companies/:id/enrich-contacts',
@@ -521,4 +522,105 @@ describe('DISCOVERY_UNCAPPED=on —— 报价按防爆安全界（余额是唯�
 it('quotes one market-generation task at 40 cents with the unchanged two-wire repair ceiling, not a fresh per-attempt pool', () => {
   const envelope = resolveWorkspaceTechnicalBudgetEnvelope({ operation: 'POST /market-candidate-generations/:generationId/execute', generationId: '66666666-6666-4666-8666-666666666666', body: { intentDigest: 'a'.repeat(64) } });
   expect(envelope).toMatchObject({ requiredCapMicrousd: 800_000n, policy: { tools: [], executionLimits: { modelLogicalInvocations: 1 }, models: [{ taskId: 'market.candidates.generate', logicalInvocations: 1, structuredWireUpperBound: 2, maxCostCents: 40, maxOutputTokens: 16_000 }] } });
+});
+
+describe('icp rejudge technical budget envelope (4x Panel x 2x Wire, strict fail-closed)', () => {
+  const FIVE_COMPANY_IDS = [
+    '10000000-0000-4000-8000-000000000001',
+    '10000000-0000-4000-8000-000000000002',
+    '10000000-0000-4000-8000-000000000003',
+    '10000000-0000-4000-8000-000000000004',
+    '10000000-0000-4000-8000-000000000005',
+  ];
+
+  it('quotes 100 companies at $160 without website refresh and $166 with website refresh', () => {
+    const base = resolveWorkspaceTechnicalBudgetEnvelope({
+      operation: 'POST /icps/:icpId/rejudge',
+      icpId: ICP_ID,
+      body: { attemptId: 'rejudge-100' },
+    } as never);
+    // 100 companies * (1 L2 + 3 Panel) * 2 wire * 20c = 16_000 cents = $160.00
+    expect(base.requiredCapMicrousd).toBe(160_000_000n);
+    expect(base.policy.models).toEqual([
+      expect.objectContaining({
+        taskId: 'discovery.qualify_fit',
+        logicalInvocations: 400,
+        structuredWireUpperBound: 2,
+        maxCostCents: 20,
+      }),
+    ]);
+    expect(base.policy.tools.map((t) => [t.toolId, t.maxPhysicalInvocations, t.estimatedCents])).toEqual([
+      ['vies.check', 100, 0],
+      ['gleif.fetch', 400, 0],
+      ['wikidata.entity', 300, 0],
+    ]);
+
+    const withWebsite = resolveWorkspaceTechnicalBudgetEnvelope({
+      operation: 'POST /icps/:icpId/rejudge',
+      icpId: ICP_ID,
+      body: { attemptId: 'rejudge-100-web', refreshWebsiteProfile: true },
+    } as never);
+    // + 100 * 1 * 2 wire * 3c = +600 cents = $166.00
+    expect(withWebsite.requiredCapMicrousd).toBe(166_000_000n);
+    expect(withWebsite.policy.models.map((m) => [m.taskId, m.logicalInvocations])).toEqual([
+      ['discovery.qualify_fit', 400],
+      ['discovery.classify_trade_role', 100],
+    ]);
+    expect(withWebsite.policy.tools.map((t) => [t.toolId, t.maxPhysicalInvocations, t.estimatedCents])).toEqual([
+      ['vies.check', 100, 0],
+      ['gleif.fetch', 400, 0],
+      ['wikidata.entity', 300, 0],
+      ['crawl4ai.fetch', 300, 0],
+      ['crawl4ai.render', 100, 0],
+    ]);
+  });
+
+  it('bounds targeted 5-company canary at $8.30 with website refresh and deduplicates companyIds', () => {
+    const canary = resolveWorkspaceTechnicalBudgetEnvelope({
+      operation: 'POST /icps/:icpId/rejudge',
+      icpId: ICP_ID,
+      body: {
+        attemptId: 'canary-5',
+        companyIds: [...FIVE_COMPANY_IDS, FIVE_COMPANY_IDS[0]!],
+        refreshCorroboration: true,
+        refreshWebsiteProfile: true,
+      },
+    } as never);
+    expect(canary.requiredCapMicrousd).toBe(8_300_000n);
+    expect(canary.policy.executionLimits).toMatchObject({
+      companies: 5,
+      fitLogicalInvocationsPerCompany: 4,
+      refreshCorroboration: 1,
+      refreshWebsiteProfile: 1,
+    });
+  });
+
+  it('omits corroboration tools when refreshCorroboration is false', () => {
+    const noCorrob = resolveWorkspaceTechnicalBudgetEnvelope({
+      operation: 'POST /icps/:icpId/rejudge',
+      icpId: ICP_ID,
+      body: { attemptId: 'no-corrob', maxCompanies: 2, refreshCorroboration: false },
+    } as never);
+    expect(noCorrob.requiredCapMicrousd).toBe(3_200_000n);
+    expect(noCorrob.policy.tools).toEqual([]);
+  });
+
+  it.each([
+    { attemptId: 'bad', companyIds: [] },
+    { attemptId: 'bad', maxCompanies: 0 },
+    { attemptId: 'bad', maxCompanies: 101 },
+    { attemptId: 'bad', batchSize: 0 },
+    { attemptId: 'bad', batchSize: 26 },
+    { attemptId: 'bad', includeFresh: true },
+    { attemptId: '' },
+    { attemptId: 'bad', companyIds: ['not-a-uuid'] },
+  ])('fails closed with EXECUTION_BUDGET_QUOTE_INVALID on out-of-range body %j (no silent clamp)', (body) => {
+    expect(() =>
+      resolveWorkspaceTechnicalBudgetEnvelope({
+        operation: 'POST /icps/:icpId/rejudge',
+        icpId: ICP_ID,
+        body,
+      } as never),
+    ).toThrow('EXECUTION_BUDGET_QUOTE_INVALID');
+  });
 });

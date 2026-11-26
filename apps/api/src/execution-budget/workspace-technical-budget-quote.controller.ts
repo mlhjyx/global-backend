@@ -39,6 +39,11 @@ import {
   WorkspaceTechnicalBudgetQuoteService,
   type WorkspaceTechnicalBudgetQuote,
 } from './workspace-technical-budget-quote';
+import {
+  canonicalIcpRejudgeRequestMaterialBody,
+  ICP_REJUDGE_QUOTE_BODY_OPENAPI_SCHEMA,
+  normalizeIcpRejudgeBudgetBody,
+} from './icp-rejudge-budget-request';
 
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -69,6 +74,7 @@ class WorkspaceTechnicalBudgetQuoteResponseDto {
       'understanding.run',
       'icp.design',
       'icp.query_plan',
+      'icp.rejudge',
       'discovery.run',
       'contact.verify',
       'contact.enrich',
@@ -277,6 +283,27 @@ function marketGenerationQuoteRequest(input: Record<string, unknown>): Workspace
     generationId: uuid(input.generationId).toLowerCase(), body: Object.freeze({ intentDigest: body.intentDigest }) });
 }
 
+function understandingRetryQuoteRequest(input: Record<string, unknown>): WorkspaceExecutionBudgetRequest {
+  exactKeys(input, ['operation', 'companyId', 'body']);
+  const body = record(input.body);
+  exactKeys(body, ['attemptId']);
+  return Object.freeze({
+    operation: 'POST /companies/:companyId/understanding/retry',
+    companyId: uuid(input.companyId),
+    body: Object.freeze({ attemptId: uuid(body.attemptId) }),
+  });
+}
+
+function icpRejudgeQuoteRequest(input: Record<string, unknown>): WorkspaceExecutionBudgetRequest {
+  exactKeys(input, ['operation', 'icpId', 'body']);
+  const normalized = normalizeIcpRejudgeBudgetBody(input.body, invalid);
+  return Object.freeze({
+    operation: 'POST /icps/:icpId/rejudge',
+    icpId: uuid(input.icpId),
+    body: canonicalIcpRejudgeRequestMaterialBody(normalized),
+  });
+}
+
 function parseRequest(value: unknown): WorkspaceExecutionBudgetRequest {
   const input = record(value);
   if (
@@ -378,20 +405,8 @@ function parseRequest(value: unknown): WorkspaceExecutionBudgetRequest {
         companyId: uuid(input.companyId),
         ...attemptBody(input.body),
       });
-    case 'POST /companies/:companyId/understanding/retry': {
-      exactKeys(input, ['operation', 'companyId', 'body']);
-      const body = input.body;
-      if (body === null || typeof body !== 'object' || Array.isArray(body)) {
-        return invalid();
-      }
-      const record = body as Record<string, unknown>;
-      exactKeys(record, ['attemptId']);
-      return Object.freeze({
-        operation: input.operation,
-        companyId: uuid(input.companyId),
-        body: Object.freeze({ attemptId: uuid(record.attemptId) }),
-      });
-    }
+    case 'POST /companies/:companyId/understanding/retry':
+      return understandingRetryQuoteRequest(input);
     case 'POST /icps/:icpId/query-plans':
       exactKeys(input, ['operation', 'icpId'], ['body']);
       return Object.freeze({
@@ -399,6 +414,8 @@ function parseRequest(value: unknown): WorkspaceExecutionBudgetRequest {
         icpId: uuid(input.icpId),
         ...attemptBody(input.body),
       });
+    case 'POST /icps/:icpId/rejudge':
+      return icpRejudgeQuoteRequest(input);
     case 'POST /query-plans/:planId/execute':
       exactKeys(input, ['operation', 'planId'], ['body']);
       return Object.freeze({
@@ -561,6 +578,14 @@ const WORKSPACE_QUOTE_REQUEST_SCHEMAS = [
     'POST /icps/:icpId/query-plans',
     { icpId: { type: 'string', format: 'uuid' } },
     ['icpId'],
+  ),
+  operationVariant(
+    'POST /icps/:icpId/rejudge',
+    {
+      icpId: { type: 'string', format: 'uuid' },
+      body: ICP_REJUDGE_QUOTE_BODY_OPENAPI_SCHEMA,
+    },
+    ['icpId', 'body'],
   ),
   operationVariant(
     'POST /query-plans/:planId/execute',

@@ -3,6 +3,7 @@ export type ExecutionBudgetAuthorityKind = 'WORKSPACE_GRANT' | 'PLATFORM_GRANT';
 export type ExecutionBudgetPurpose =
   | 'icp.design'
   | 'icp.query_plan'
+  | 'icp.rejudge'
   | 'understanding.run'
   | 'discovery.run'
   | 'contact.verify'
@@ -204,6 +205,7 @@ const WORKSPACE_PURPOSE_SUBJECT_TYPES: Readonly<
   'understanding.run': ['company'],
   'icp.design': ['company'],
   'icp.query_plan': ['icp'],
+  'icp.rejudge': ['icp'],
   'discovery.run': ['discovery_run', 'company'],
   'contact.verify': ['contact_point'],
   'contact.enrich': ['company'],
