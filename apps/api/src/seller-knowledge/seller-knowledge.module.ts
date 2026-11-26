@@ -22,6 +22,6 @@ import { EmbeddingsClient } from '../site-builder/embeddings.client';
     { provide: SellerDocumentsStorage, useFactory: () => new SellerDocumentsStorage() },
     { provide: SELLER_DOCUMENTS_INGEST_LAUNCHER, useClass: TemporalSellerDocumentsIngestLauncher },
   ],
-  exports: [SellerDocumentsService],
+  exports: [SellerDocumentsService, SellerDocumentClaimsService],
 })
 export class SellerKnowledgeModule {}

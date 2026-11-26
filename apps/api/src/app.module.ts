@@ -50,6 +50,7 @@ import { PlatformAuthorityModule } from './platform-authority/platform-authority
 import { PlatformTargetLookupModule } from './platform-authority/platform-target-lookup.module';
 import { PlatformRevocationHttpModule } from './platform-authority/platform-revocation-http.module';
 import { CampaignPlanModule } from './campaign-plan/campaign-plan.module';
+import { WorkspaceModule } from './workspace/workspace.module';
 
 /**
  * Root module. Domain modules (company-knowledge, icp, data-hub, lead) are
@@ -97,6 +98,7 @@ import { CampaignPlanModule } from './campaign-plan/campaign-plan.module';
     SkillsModule,
     PacksModule,
     AgentsModule,
+    WorkspaceModule,
   ],
   controllers: [HealthController, WhoamiController],
   providers: [

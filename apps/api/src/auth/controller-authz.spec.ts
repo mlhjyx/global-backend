@@ -26,6 +26,7 @@ import { IntakeController } from '../site-builder/intake.controller';
 import { KbController } from '../site-builder/kb.controller';
 import { SitesController } from '../site-builder/sites.controller';
 import { SiteBuildTechnicalBudgetQuoteController } from '../site-builder/site-build-technical-budget-quote.controller';
+import { WorkspaceController } from '../workspace/workspace.controller';
 import { WhoamiController } from '../whoami/whoami.controller';
 import { AuthGuard } from './auth.guard';
 import { ScopesGuard } from './scopes.guard';
@@ -50,6 +51,7 @@ const PROTECTED_CONTROLLERS = [
   KbController,
   SitesController,
   SiteBuildTechnicalBudgetQuoteController,
+  WorkspaceController,
   WhoamiController,
 ] as const;
 

@@ -10,8 +10,14 @@ const DELETION_REQUEST_ID = '11d5ac4e-451e-4a89-b19f-c2f59e632dc9';
 function makeTx(companyPoints: number, companyChannels = 0) {
   const order: string[] = [];
   const tx = {
-    $queryRaw: vi.fn(async (strings: TemplateStringsArray) => {
-      order.push(strings.join('?').includes('FOR UPDATE') ? 'company-for-update' : 'policy-lock');
+    $queryRaw: vi.fn(async (query: { strings?: TemplateStringsArray } | TemplateStringsArray) => {
+      const sqlText = Array.isArray(query)
+        ? query.join('?')
+        : (query.strings?.join('?') ?? '');
+      if (sqlText.includes('purge_workspace_company_outreach_drafts_v1')) {
+        return [{ deleted: 0 }];
+      }
+      order.push(sqlText.includes('FOR UPDATE') ? 'company-for-update' : 'policy-lock');
       return [];
     }),
     $executeRaw: vi.fn(async () => 1),
@@ -37,7 +43,10 @@ function makeTx(companyPoints: number, companyChannels = 0) {
         return { count: companyChannels };
       }),
     },
-    canonicalCompany: { updateMany: vi.fn(async () => ({ count: 1 })) },
+    canonicalCompany: {
+      findMany: vi.fn(async () => []),
+      updateMany: vi.fn(async () => ({ count: 1 })),
+    },
     outboxEvent: { create: vi.fn(async () => ({})) },
   };
   const prisma = { withWorkspace: vi.fn(async (_workspaceId: string, callback: (client: unknown) => unknown) => callback(tx)) };

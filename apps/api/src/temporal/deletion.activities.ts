@@ -11,6 +11,10 @@ import {
   countsFromLocated,
 } from '../compliance/deletion-snapshot';
 import {
+  eraseCompanyPiiArtifactsInTransaction,
+  parsePersistedErasureStats,
+} from '../compliance/deletion-company-scrub';
+import {
   DELETION_SUBJECT_TYPES,
   DeletionWorkflowInput,
   ErasureCounts,
@@ -164,7 +168,10 @@ export function createDeletionActivities(deps: {
             where: { id: input.deletionRequestId },
             select: { stats: true },
           });
-          return (req?.stats as ErasureCounts | null) ?? countsFromLocated(located);
+          return (
+            parsePersistedErasureStats(req?.stats).counts ??
+            countsFromLocated(located)
+          );
         }
 
         // 🔒 Codex P1「Prevent inserts after the company contact re-read」：company 主体擦除前对公司行取
@@ -269,11 +276,13 @@ export function createDeletionActivities(deps: {
         await tx.$executeRaw`DELETE FROM url_content_cache WHERE workspace_id = ${input.workspaceId}::uuid`;
         await tx.$executeRaw`DELETE FROM llm_extraction_cache WHERE workspace_id = ${input.workspaceId}::uuid`;
 
-        // company 主体：整公司标 SUPPRESSED（幂等——freeze 已置；此处兜底。保留绿区公司事实，company 非自然人不硬删）
+        // company 主体：标 SUPPRESSED 并清洗 attributes（strip contact_email + sanitize），
+        // 经 SECURITY DEFINER RPC 清理 lead_outreach_draft，并清理历史 red 级公司 field_evidence。
         if (located.companyIdsToSuppress.length) {
-          await tx.canonicalCompany.updateMany({
-            where: { id: { in: located.companyIdsToSuppress } },
-            data: { status: 'SUPPRESSED' },
+          await eraseCompanyPiiArtifactsInTransaction(tx, {
+            workspaceId: input.workspaceId,
+            deletionRequestId: input.deletionRequestId,
+            companyIds: located.companyIdsToSuppress,
           });
         }
 
@@ -300,11 +309,19 @@ export function createDeletionActivities(deps: {
           leadsRescoreRequested: located.affectedIcpIds.length,
           patentCacheErased,
         };
+        const erasedContactRefs =
+          input.subjectType === 'company'
+            ? [...new Set(eraseContactIds)].sort()
+            : undefined;
+        const persistedStats = {
+          ...counts,
+          ...(erasedContactRefs !== undefined ? { erasedContactRefs } : {}),
+        };
         // 同 tx 持久化真实计数（stats），供 completeDeletion 忠实取用——即便 complete 后续失败、人工重跑时
         // located 重算为空，也不伪造 0。CAS where=ERASING（本 tx 内已置）。
         await tx.deletionRequest.updateMany({
           where: { id: input.deletionRequestId, status: 'ERASING' },
-          data: { stats: counts as unknown as Prisma.InputJsonValue },
+          data: { stats: persistedStats as unknown as Prisma.InputJsonValue },
         });
         return counts;
       });
@@ -328,8 +345,13 @@ export function createDeletionActivities(deps: {
 
         // 🔴 真实计数优先取擦除阶段持久化的 stats（防 complete 后失败、人工重跑时 located 重算为空 → 伪造 0 回执）；
         // stats 未持久化 = 擦除尚未发生，回退 located（此时应为合法的空/0）。
-        const persisted = (req.stats as ErasureCounts | null) ?? null;
+        const { counts: persisted, erasedContactRefs: persistedContactRefs } =
+          parsePersistedErasureStats(req.stats);
         const counts = persisted ?? countsFromLocated(located);
+        const erasedContactRefs =
+          input.subjectType === 'company'
+            ? (persistedContactRefs ?? [...new Set(located.contactIds)].sort())
+            : undefined;
 
         if (req.status === 'COMPLETED') return counts; // 幂等：回执与事件已写过
 
@@ -379,6 +401,7 @@ export function createDeletionActivities(deps: {
           subjectId: input.subjectId,
           counts,
           erasedAt,
+          ...(erasedContactRefs !== undefined ? { erasedContactRefs } : {}),
         });
         await tx.outboxEvent.create({
           data: {

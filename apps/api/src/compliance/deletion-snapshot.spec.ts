@@ -155,4 +155,40 @@ describe("deletion-snapshot", () => {
     );
     expect(classifyDeletionCompleted(zero)).toBe("CONFIDENTIAL");
   });
+
+  it("includes sorted deduplicated erased_contact_refs for company subjects and omits it for contact subjects", () => {
+    const validate = deletionCompletedValidator();
+    const contactA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const contactB = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const companyPayload = buildDeletionCompletedPayload({
+      deletionRequestId: "11111111-1111-4111-8111-111111111111",
+      subjectType: "company",
+      subjectId: "22222222-2222-4222-8222-222222222222",
+      counts: { ...zero, contactsErased: 2, companiesSuppressed: 1 },
+      erasedAt: "2026-11-26T00:00:00.000Z",
+      erasedContactRefs: [contactB, contactA, contactB],
+    });
+    expect(companyPayload.erased_contact_refs).toEqual([contactA, contactB]);
+    expect(validate(companyPayload), JSON.stringify(validate.errors)).toBe(true);
+    expect(Object.keys(companyPayload).join(",")).not.toMatch(/name|email|value|full/i);
+
+    const contactPayload = buildDeletionCompletedPayload({
+      deletionRequestId: "11111111-1111-4111-8111-111111111111",
+      subjectType: "contact",
+      subjectId: contactA,
+      counts: { ...zero, contactsErased: 1 },
+      erasedAt: "2026-11-26T00:00:00.000Z",
+      erasedContactRefs: [contactA],
+    });
+    expect(contactPayload.erased_contact_refs).toBeUndefined();
+    expect("erased_contact_refs" in contactPayload).toBe(false);
+    expect(validate(contactPayload), JSON.stringify(validate.errors)).toBe(true);
+
+    expect(
+      validate({ ...companyPayload, erased_contact_refs: ["not-a-uuid"] }),
+    ).toBe(false);
+    expect(
+      validate({ ...companyPayload, erased_contact_refs: contactA }),
+    ).toBe(false);
+  });
 });

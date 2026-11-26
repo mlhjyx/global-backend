@@ -150,4 +150,50 @@ describe('integration event payload gate', () => {
       reason: 'payload_contract_mismatch',
     });
   });
+
+  it('validates optional erased_contact_refs on DeletionCompleted for company subjects only', () => {
+    const contactA = '50000000-0000-4000-8000-000000000001';
+    expect(
+      validateIntegrationEvent(
+        event('DeletionCompleted', {
+          ...deletionPayload,
+          subject_type: 'company',
+          subject_ref: companyId,
+          erased_contact_refs: [contactA],
+        }),
+      ),
+    ).toBe(true);
+
+    expect(
+      validateIntegrationEvent(
+        event('DeletionCompleted', {
+          ...deletionPayload,
+          subject_type: 'contact',
+          erased_contact_refs: [contactA],
+        }),
+      ),
+    ).toBe(false);
+
+    expect(
+      validateIntegrationEvent(
+        event('DeletionCompleted', {
+          ...deletionPayload,
+          subject_type: 'company',
+          subject_ref: companyId,
+          erased_contact_refs: ['not-a-uuid'],
+        }),
+      ),
+    ).toBe(false);
+
+    expect(
+      validateIntegrationEvent(
+        event('DeletionCompleted', {
+          ...deletionPayload,
+          subject_type: 'company',
+          subject_ref: companyId,
+          erased_contact_refs: contactA,
+        }),
+      ),
+    ).toBe(false);
+  });
 });
