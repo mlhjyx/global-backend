@@ -12,6 +12,7 @@ import {
   SharedGreenFactStore,
 } from '../shared-facts';
 import { SharedFactsStreamingHook } from '../discovery/streaming/shared-facts-hook';
+import { createInitialStreamingProgress } from '../discovery/streaming/streaming-progress';
 import { resolveDiscoveryWorkflowType } from '../relay/discovery-run-command';
 import {
   DISCOVERY_STREAMING_WORKFLOW,
@@ -54,12 +55,19 @@ describe('streaming discovery activities & rollout switch', () => {
     const runUpdate = vi.fn(async () => ({}));
     const jobUpdateMany = vi.fn(async () => ({ count: 2 }));
     const runEventCreate = vi.fn(async () => ({}));
+    const queryRaw = vi.fn(async (strings: TemplateStringsArray, ..._parameters: unknown[]) =>
+      strings.join('').includes('usage_ledger') ? [{ cost_usd: 0 }] : [{ locked: 'ok' }],
+    );
+    let currentStatus = 'RUNNING';
     const tx = {
-      discoveryCompanyJob: { updateMany: jobUpdateMany },
+      discoveryCompanyJob: {
+        updateMany: jobUpdateMany,
+        groupBy: vi.fn(async () => []),
+      },
       discoveryRun: {
         findUnique: vi.fn(async () => ({
           id: RUN_ID,
-          status: 'RUNNING',
+          status: currentStatus,
           stats: {},
           phases: {},
           createdAt: new Date('2026-11-26T00:00:00Z'),
@@ -73,7 +81,7 @@ describe('streaming discovery activities & rollout switch', () => {
         aggregate: vi.fn(async () => ({ _max: { seq: 5n } })),
         create: runEventCreate,
       },
-      $queryRaw: vi.fn(async () => [{ locked: 'ok' }]),
+      $queryRaw: queryRaw,
     };
     const prisma = {
       withWorkspace: vi.fn(async (_ws: string, fn: (t: typeof tx) => unknown) => fn(tx)),
@@ -90,12 +98,12 @@ describe('streaming discovery activities & rollout switch', () => {
       budgetStore,
     });
 
-    await activities.finalizeStreamingRun({
-      ...AUTHORITY,
+    const finalizeArgs = {
+      workspaceId: WORKSPACE_ID,
       runId: RUN_ID,
       planId: PLAN_ID,
       icpId: ICP_ID,
-      status: 'CANCELLED',
+      status: 'CANCELLED' as const,
       summary: {
         queriesTotal: 2,
         queriesCompleted: 2,
@@ -110,7 +118,8 @@ describe('streaming discovery activities & rollout switch', () => {
         l2Failed: 0,
         watchesRegistered: 0,
       },
-    });
+    };
+    await activities.finalizeStreamingRun(finalizeArgs);
 
     expect(jobUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -131,7 +140,24 @@ describe('streaming discovery activities & rollout switch', () => {
         }),
       }),
     );
-    expect(tx.$queryRaw).toHaveBeenCalled();
+    const costRead = queryRaw.mock.calls.find(([sql]) => sql.join('').includes('usage_ledger'));
+    expect(costRead?.slice(1)).toEqual([WORKSPACE_ID, RUN_ID]);
+    expect(tx.discoveryQueryPlan.updateMany).not.toHaveBeenCalled();
+    expect(outboxCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          eventType: 'DiscoveryRunCompleted',
+          aggregateType: 'DiscoveryRun',
+          aggregateId: RUN_ID,
+          payload: expect.objectContaining({
+            planId: PLAN_ID,
+            status: 'CANCELLED',
+            cost: 0,
+            costBasis: 'usage_ledger-runid/v1',
+          }),
+        }),
+      }),
+    );
     expect(outboxCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -141,7 +167,147 @@ describe('streaming discovery activities & rollout switch', () => {
         }),
       }),
     );
+    currentStatus = 'CANCELLED';
+    await activities.finalizeStreamingRun(finalizeArgs);
+    expect(runUpdate).toHaveBeenCalledTimes(1);
+    expect(runEventCreate).toHaveBeenCalledTimes(1);
+    expect(outboxCreate).toHaveBeenCalledTimes(2);
   });
+
+  it.each(['FAILED', 'DONE', 'PARTIAL'] as const)(
+    'finalizeStreamingRun reports %s with taskRef, cost and distinct fit results once',
+    async (status) => {
+      const outboxCreate = vi.fn(async (_args: { data: { payload: { stats?: unknown } } }) => ({
+        id: 'ev-completed',
+      }));
+      const runUpdate = vi.fn(async () => ({}));
+      const taskRef = {
+        taskId: '70000000-0000-4000-8000-000000000007',
+        taskRunId: '80000000-0000-4000-8000-000000000008',
+      };
+      const createdAt = new Date('2026-11-26T00:00:00Z');
+      const progress = createInitialStreamingProgress(RUN_ID, { now: createdAt.toISOString() });
+      const failure =
+        status === 'FAILED'
+          ? { stage: 'query' as const, errorType: 'ExecutionBudgetGrantError', control: true }
+          : undefined;
+      const groupByVerdict = vi.fn(async () => [
+        { verdictDeep: 'match', _count: { _all: 2 } },
+        { verdictDeep: 'weak', _count: { _all: 1 } },
+      ]);
+      const queryRaw = vi.fn(async (strings: TemplateStringsArray, ..._parameters: unknown[]) => {
+        if (strings.join('').includes('usage_ledger')) return [{ cost_usd: 0.042 }];
+        return [{ locked: 'ok' }];
+      });
+      let currentStatus: string = 'RUNNING';
+      const tx = {
+        discoveryCompanyJob: { groupBy: groupByVerdict },
+        discoveryRun: {
+          findUnique: vi.fn(async () => ({
+            id: RUN_ID,
+            status: currentStatus,
+            stats: {
+              queryDiagnostics: { trace: 'internal-only' },
+              streaming: {
+                ...progress,
+                stages: {
+                  ...progress.stages,
+                  // An L1 activity can retry after committing and increment progress again.
+                  l1ExtractFit: { ...progress.stages.l1ExtractFit, processed: 7, fitMatch: 4, fitWeak: 1, fitMismatch: 2 },
+                },
+              },
+            },
+            phases: {},
+            taskRef,
+            createdAt,
+            completedAt: null,
+          })),
+          update: runUpdate,
+        },
+        discoveryQueryPlan: { updateMany: vi.fn(async () => ({ count: 0 })) },
+        outboxEvent: { create: outboxCreate },
+        runEvent: {
+          aggregate: vi.fn(async () => ({ _max: { seq: 1n } })),
+          create: vi.fn(async () => ({})),
+        },
+        $queryRaw: queryRaw,
+      };
+      const prisma = {
+        withWorkspace: vi.fn(async (_ws: string, fn: (t: typeof tx) => unknown) => fn(tx)),
+      } as unknown as PrismaService;
+      const activities = createStreamingDiscoveryActivities({
+        prisma,
+        providers: {} as DiscoveryProviderRegistry,
+        gateway: {} as ModelGateway,
+        broker: {} as ExecutionBroker,
+        budgetStore: { attestAuthorized: vi.fn(async () => undefined) } as unknown as BudgetStore,
+      });
+
+      const finalizeArgs = {
+        ...AUTHORITY,
+        runId: RUN_ID,
+        planId: PLAN_ID,
+        icpId: ICP_ID,
+        status,
+        ...(failure ? { failure } : {}),
+        summary: {
+          queriesTotal: 2,
+          queriesCompleted: 0,
+          queriesFailed: 2,
+          rawCount: 0,
+          canonicalCount: 0,
+          l1Processed: 0,
+          l1Failed: 0,
+          l2Selected: 0,
+          l2Enriched: 0,
+          l2ContactsFound: 0,
+          l2Failed: 0,
+          watchesRegistered: 0,
+        },
+      };
+
+      await activities.finalizeStreamingRun(finalizeArgs);
+      expect(outboxCreate).toHaveBeenCalledTimes(1);
+      expect(outboxCreate).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          workspaceId: WORKSPACE_ID,
+          eventType: 'DiscoveryRunCompleted',
+          aggregateType: 'DiscoveryRun',
+          aggregateId: RUN_ID,
+          payload: expect.objectContaining({
+            planId: PLAN_ID,
+            status,
+            cost: 0.042,
+            costBasis: 'usage_ledger-runid/v1',
+            taskRef,
+            stats: expect.objectContaining({
+              fit: { evaluated: 3, match: 2, weak: 1, mismatch: 0 },
+              ...(failure ? { failure } : {}),
+            }),
+          }),
+        }),
+      });
+      expect(groupByVerdict).toHaveBeenCalledWith({
+        by: ['verdictDeep'],
+        where: {
+          workspaceId: WORKSPACE_ID,
+          runId: RUN_ID,
+          verdictDeep: { in: ['match', 'weak', 'mismatch'] },
+        },
+        _count: { _all: true },
+      });
+      const costRead = queryRaw.mock.calls.find(([sql]) => sql.join('').includes('usage_ledger'));
+      expect(costRead?.slice(1)).toEqual([WORKSPACE_ID, AUTHORITY.executionBudget.accountKey]);
+      expect(tx.discoveryQueryPlan.updateMany).toHaveBeenCalledTimes(status === 'FAILED' ? 0 : 1);
+      expect(outboxCreate.mock.calls[0]?.[0].data.payload.stats).not.toHaveProperty('queryDiagnostics');
+
+      currentStatus = status;
+      await activities.finalizeStreamingRun(finalizeArgs);
+      expect(runUpdate).toHaveBeenCalledTimes(1);
+      expect(tx.runEvent.create).toHaveBeenCalledTimes(1);
+      expect(outboxCreate).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it('processStreamingL1Company persists streaming extraction, company_signal, Lead fit, and live progress', async () => {
     const signalCreateMany = vi.fn(async () => ({ count: 1 }));

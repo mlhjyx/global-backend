@@ -39,6 +39,7 @@ import {
   type StreamingRunProgressSnapshot,
 } from '../discovery/streaming/streaming-progress';
 import type { DiscoveryRunFailure } from './discovery.run-failure';
+import { projectDiscoveryCompletedStats } from './discovery-run-final-stats';
 import { startActivityHeartbeat } from './activity-heartbeat';
 import { parseConfiguredLawfulBasis } from './backlog.activities';
 
@@ -941,7 +942,8 @@ export function createStreamingDiscoveryActivities(deps: {
         }
         await lockDiscoveryRunRow(tx, args.workspaceId, args.runId);
         const run = await tx.discoveryRun.findUnique({ where: { id: args.runId } });
-        if (!run) return;
+        // A completed write and its outbox event commit together. A retry keeps that event's ID.
+        if (!run || run.status !== 'RUNNING') return;
         const stageOutcome =
           args.status === 'CANCELLED' ? 'cancelled' : args.status === 'FAILED' ? 'failed' : 'done';
         const { nextStats } = mergeStreamingProgress(run.stats, run, (current) => ({
@@ -980,6 +982,22 @@ export function createStreamingDiscoveryActivities(deps: {
             },
           },
         }));
+        // A retry can increment progress again or move a judged job back to profiling.
+        // Count each persisted company verdict once, regardless of its current job stage.
+        const fitCounts = await tx.discoveryCompanyJob.groupBy({
+          by: ['verdictDeep'],
+          where: {
+            workspaceId: args.workspaceId,
+            runId: args.runId,
+            verdictDeep: { in: ['match', 'weak', 'mismatch'] },
+          },
+          _count: { _all: true },
+        });
+        const countVerdict = (verdict: string): number =>
+          fitCounts.find((row) => row.verdictDeep === verdict)?._count._all ?? 0;
+        const match = countVerdict('match');
+        const weak = countVerdict('weak');
+        const mismatch = countVerdict('mismatch');
         const finalStats: Record<string, unknown> = {
           ...nextStats,
           pipelineMode: 'streaming',
@@ -990,6 +1008,7 @@ export function createStreamingDiscoveryActivities(deps: {
           canonicalCount: args.summary.canonicalCount,
           fitEvaluated: args.summary.l1Processed,
           fitFailed: args.summary.l1Failed,
+          fit: { evaluated: match + weak + mismatch, match, weak, mismatch },
           contactsEnriched: args.summary.l2Enriched,
           contactsCreated: args.summary.l2ContactsFound,
           watchesRegistered: args.summary.watchesRegistered,
@@ -1016,6 +1035,43 @@ export function createStreamingDiscoveryActivities(deps: {
           runId: args.runId,
           type: 'run_finished',
           payload: { status: args.status, pipelineMode: 'streaming', ...args.summary },
+        });
+        let costAccountKey: string;
+        try {
+          costAccountKey = parseExecutionBudgetBinding(args.executionBudget, {
+            scopeKey: args.workspaceId,
+            purpose: 'discovery.run',
+            subjectType: 'discovery_run',
+          }).accountKey;
+        } catch {
+          costAccountKey = args.runId;
+        }
+        const [runCost] = await tx.$queryRaw<Array<{ cost_usd: number }>>`
+          SELECT COALESCE(SUM(cost_usd), 0)::float8 AS cost_usd
+          FROM usage_ledger
+          WHERE workspace_id = ${args.workspaceId}::uuid
+            AND ref_type = 'ai_trace'
+            AND meta->>'runId' = ${costAccountKey}
+        `;
+        const runCostUsd =
+          typeof runCost?.cost_usd === 'number' && Number.isFinite(runCost.cost_usd)
+            ? runCost.cost_usd
+            : 0;
+        await tx.outboxEvent.create({
+          data: {
+            workspaceId: args.workspaceId,
+            eventType: 'DiscoveryRunCompleted',
+            aggregateType: 'DiscoveryRun',
+            aggregateId: args.runId,
+            payload: {
+              planId: args.planId,
+              status: args.status,
+              stats: projectDiscoveryCompletedStats(finalStats),
+              cost: runCostUsd,
+              costBasis: 'usage_ledger-runid/v1',
+              ...(run.taskRef ? { taskRef: run.taskRef } : {}),
+            } as Prisma.InputJsonValue,
+          },
         });
         if (args.summary.l1Processed > 0) {
           await tx.outboxEvent.create({

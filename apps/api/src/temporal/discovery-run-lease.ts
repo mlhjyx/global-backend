@@ -1,6 +1,7 @@
 import { ApplicationFailure } from '@temporalio/activity';
 import type { ExecutionBudgetBinding } from '../execution-budget/execution-budget-binding';
 import { ExecutionBudgetGrantError } from '../execution-budget/execution-budget-authority.types';
+import { isLegacyExecutionBudgetBypass } from '../execution-budget/legacy-execution-budget-mode';
 import { MAX_MODEL_GATEWAY_REQUEST_TIMEOUT_MS } from '../model-gateway/gateway-credential-boundary';
 import { MODEL_STRUCTURED_OUTPUT_WIRE_UPPER_BOUND } from '../model-gateway/model-execution-envelope';
 import type { PrismaService } from '../prisma/prisma.service';
@@ -52,7 +53,7 @@ export interface DiscoveryRunLease {
   slackMs(): number;
 }
 
-/** Milliseconds left on the run's admission lease, measured on the database clock. */
+/** Milliseconds available to the activity under the run's lease policy. */
 export type DiscoveryRunLeaseReader = (binding: ExecutionBudgetBinding) => Promise<number>;
 
 /** No lease reader wired: nothing stops early, and the database still refuses work past the lease. */
@@ -73,15 +74,29 @@ export function startDiscoveryRunLease(remainingMs: number, clock: () => number)
 }
 
 /**
+ * Bypass uses the admission lease duration as a finite window for each activity read.
+ * Temporal still applies DISCOVERY_RUN_EXECUTION_TIMEOUT to the whole workflow.
+ */
+const BYPASS_DISCOVERY_ACTIVITY_WINDOW_MS = 3 * 60 * 60_000;
+
+/**
  * Reads the time left on the run's grant the way attest_authorized_tool_budget_v1 judges the lease
  * (COALESCE(admission_lease_expires_at, expires_at)), without its 60-second tolerance. Under RLS
  * app_user sees only the workspace's own grants; anything but exactly one finite answer fails
  * closed as a control error.
+ *
+ * When `LEGACY_EXECUTION_BUDGET_MODE=bypass` is enabled, `ExecutionBudgetAuthorityService` mints a
+ * synthetic binding without writing to `execution_budget_authority`. The activity window
+ * requires no legacy row in that mode.
  */
 export function prismaDiscoveryRunLeaseReader(
   prisma: Pick<PrismaService, 'withWorkspace'>,
+  env: NodeJS.ProcessEnv = process.env,
 ): DiscoveryRunLeaseReader {
   return async (binding) => {
+    if (isLegacyExecutionBudgetBypass(env)) {
+      return BYPASS_DISCOVERY_ACTIVITY_WINDOW_MS;
+    }
     const rows = await prisma.withWorkspace(binding.scopeKey, (tx) =>
       tx.$queryRaw<ReadonlyArray<{ remaining_ms: number | null }>>`
         SELECT (EXTRACT(EPOCH FROM (COALESCE(admission_lease_expires_at, expires_at) - statement_timestamp())) * 1000)::double precision AS remaining_ms

@@ -102,7 +102,7 @@ describe('prismaDiscoveryRunLeaseReader', () => {
   it("reads the time left on the run's own grant the way attest judges it, on the database clock", async () => {
     const { prisma, queryRaw, withWorkspace } = prismaReturning([{ remaining_ms: 4_200_000.5 }]);
 
-    await expect(prismaDiscoveryRunLeaseReader(prisma)(BINDING)).resolves.toBe(4_200_000.5);
+    await expect(prismaDiscoveryRunLeaseReader(prisma, {})(BINDING)).resolves.toBe(4_200_000.5);
 
     expect(withWorkspace).toHaveBeenCalledWith('22222222-2222-4222-8222-222222222222', expect.any(Function));
     const [strings, ...values] = queryRaw.mock.calls[0]!;
@@ -121,9 +121,29 @@ describe('prismaDiscoveryRunLeaseReader', () => {
   ])('fails closed on %s', async (_label, rows) => {
     const { prisma } = prismaReturning(rows);
 
-    await expect(prismaDiscoveryRunLeaseReader(prisma)(BINDING)).rejects.toEqual(
-      new ExecutionBudgetGrantError('EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE'),
-    );
+    await expect(
+      prismaDiscoveryRunLeaseReader(prisma, { LEGACY_EXECUTION_BUDGET_MODE: 'enforce' })(BINDING),
+    ).rejects.toEqual(new ExecutionBudgetGrantError('EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE'));
+  });
+
+  it('returns a finite three-hour window in bypass even if the legacy lease store is unavailable', async () => {
+    const { prisma, withWorkspace, queryRaw } = prismaReturning([]);
+    withWorkspace.mockRejectedValue(new Error('legacy lease store unavailable'));
+
+    await expect(
+      prismaDiscoveryRunLeaseReader(prisma, { LEGACY_EXECUTION_BUDGET_MODE: 'bypass' })(BINDING),
+    ).resolves.toBe(180 * MINUTE);
+    expect(withWorkspace).not.toHaveBeenCalled();
+    expect(queryRaw).not.toHaveBeenCalled();
+  });
+
+  it('continues to check the stored lease on an unrecognized mode', async () => {
+    const { prisma, queryRaw } = prismaReturning([{ remaining_ms: -10 }]);
+
+    await expect(
+      prismaDiscoveryRunLeaseReader(prisma, { LEGACY_EXECUTION_BUDGET_MODE: 'unknown' })(BINDING),
+    ).resolves.toBe(-10);
+    expect(queryRaw).toHaveBeenCalledTimes(1);
   });
 });
 
