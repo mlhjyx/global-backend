@@ -123,6 +123,7 @@ export class PostgresSharedFactRepository implements SharedFactRepository {
   async upsert(fact: GreenCompanyFact): Promise<boolean> {
     assertGreenCompanyFactClean(fact);
     const writer = this.requireWriter();
+    const expiresAt = new Date(fact.expiresAt);
     const written = await writer.$executeRaw`
       INSERT INTO platform_shared.company_fact (
         domain, schema_version, homepage_url, legal_name, country, trade_role,
@@ -130,7 +131,7 @@ export class PostgresSharedFactRepository implements SharedFactRepository {
         contact_page_url, impressum_url, linkedin_company_url, product_categories,
         source_kind, observed_at, expires_at, ttl_days, updated_at
       )
-      VALUES (
+      SELECT
         ${fact.domain},
         ${fact.schemaVersion},
         ${fact.homepageUrl},
@@ -147,10 +148,10 @@ export class PostgresSharedFactRepository implements SharedFactRepository {
         ${JSON.stringify(fact.productCategories)}::jsonb,
         ${fact.sourceKind},
         ${new Date(fact.observedAt)},
-        ${new Date(fact.expiresAt)},
+        ${expiresAt},
         ${fact.ttlDays},
         now()
-      )
+      WHERE ${expiresAt} > now()
       ON CONFLICT (domain) DO UPDATE SET
         schema_version = EXCLUDED.schema_version,
         homepage_url = EXCLUDED.homepage_url,
@@ -170,8 +171,9 @@ export class PostgresSharedFactRepository implements SharedFactRepository {
         expires_at = EXCLUDED.expires_at,
         ttl_days = EXCLUDED.ttl_days,
         updated_at = now()
-      WHERE (EXCLUDED.source_kind IN ('public_web', 'public_web_streaming'), EXCLUDED.observed_at)
-        > (company_fact.source_kind IN ('public_web', 'public_web_streaming'), company_fact.observed_at)
+      WHERE company_fact.expires_at <= now()
+        OR (EXCLUDED.source_kind IN ('public_web', 'public_web_streaming'), EXCLUDED.observed_at)
+          > (company_fact.source_kind IN ('public_web', 'public_web_streaming'), company_fact.observed_at)
     `;
     return written > 0;
   }

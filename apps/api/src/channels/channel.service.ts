@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { formatChannelRecordListItem } from './channel-records';
+import { parseChannelRecordReview, writeChannelRecordReview, type ChannelRecordReviewInput } from './channel-record-review';
 // 必须是值导入：构造函数参数的类型元数据（design:paramtypes）据此生成 Nest 注入令牌；
 // `import type` 会在编译期被擦除，参数类型退化为 Function，@Optional() 将永远注入 undefined，
 // requestCrawl 在真实进程里恒返回 PLATFORM_TEMPORAL_UNAVAILABLE（单测直接 new 时无法暴露）。
@@ -888,25 +889,10 @@ export class ChannelService {
   async reviewChannelRecords(
     ctx: RequestContext,
     channelId: string,
-    input: { recordIds?: unknown; verdict?: unknown },
+    input: ChannelRecordReviewInput,
   ) {
-    const ids = Array.isArray(input.recordIds) ? input.recordIds : null;
-    if (
-      !ids ||
-      ids.length < 1 ||
-      ids.length > 200 ||
-      ids.some((id) => typeof id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(id))
-    ) {
-      throw new BadRequestException({
-        error: { code: 'VALIDATION_ERROR', message: 'recordIds must be 1–200 record UUIDs' },
-      });
-    }
-    if (input.verdict !== 'APPROVED' && input.verdict !== 'REJECTED') {
-      throw new BadRequestException({
-        error: { code: 'VALIDATION_ERROR', message: 'verdict must be APPROVED or REJECTED' },
-      });
-    }
-    const verdict = input.verdict;
+    const review = parseChannelRecordReview(input);
+    const { verdict, versions, recordIds } = review;
     const writer = await requireChannelPlatformWriter(this.platformWriter);
     const result = await writer.$transaction(async (tx) => {
       const channel = await tx.sourceChannel.findUnique({
@@ -914,19 +900,7 @@ export class ChannelService {
         select: { id: true, status: true },
       });
       if (!channel) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'channel not found' } });
-      const reviewedAt = new Date();
-      const updated = await tx.sourceChannelRecord.updateMany({
-        where: { channelId, id: { in: ids as string[] } },
-        data: { reviewStatus: verdict, reviewedBy: ctx.userId, reviewedAt },
-      });
-      if (updated.count !== ids.length) {
-        throw new BadRequestException({
-          error: {
-            code: 'CHANNEL_RECORD_IDS_INVALID',
-            message: `reviewed ${updated.count} of ${ids.length} recordIds (all must belong to this channel)`,
-          },
-        });
-      }
+      const reviewed = await writeChannelRecordReview(tx, { ...review, channelId, reviewedBy: ctx.userId });
       const counts = await this.channelRecordReviewCounts(tx, channelId);
       const totalReviewed = counts.APPROVED + counts.REJECTED;
       const autoDisabled =
@@ -953,10 +927,10 @@ export class ChannelService {
           });
         }
       }
-      return { channelId, reviewed: updated.count, verdict, counts, autoDisabled };
+      return { channelId, reviewed, verdict, counts, autoDisabled };
     });
-    if (verdict === 'APPROVED' && !result.autoDisabled) {
-      await projectApprovedChannelGreenFacts({ platformWriter: writer, channelId, recordIds: ids as string[] });
+    if (versions && verdict === 'APPROVED' && !result.autoDisabled) {
+      await projectApprovedChannelGreenFacts({ platformWriter: writer, channelId, recordIds });
     }
     return result;
   }

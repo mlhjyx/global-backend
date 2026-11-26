@@ -14,7 +14,7 @@ const MAX_IN_MEMORY_FACTS = 10_000;
 
 export interface SharedFactRepository {
   getByDomain(normalizedDomain: string, nowMs?: number): Promise<GreenCompanyFact | null>;
-  /** Return false when a newer or higher-priority fact was retained. */
+  /** Return false when the repository declines an expired or superseded observation. */
   upsert(fact: GreenCompanyFact, nowMs?: number): Promise<void | boolean>;
   deleteByDomain(normalizedDomain: string): Promise<boolean>;
 }
@@ -172,7 +172,7 @@ export class SharedGreenFactStore {
           stored: false,
           degraded: false,
           reason: 'PREFERRED_FACT_RETAINED',
-          details: 'The repository retained a newer or higher-priority fact.',
+          details: 'The repository declined an expired, older, or lower-priority observation.',
         };
       }
       return {

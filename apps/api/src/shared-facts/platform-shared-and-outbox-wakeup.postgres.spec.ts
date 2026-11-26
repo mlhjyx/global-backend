@@ -9,10 +9,12 @@ import {
 } from './index';
 import { projectApprovedChannelGreenFacts } from '../channels/channel-platform-writer';
 import { ChannelService } from '../channels/channel.service';
+import { ChannelsController } from '../channels/channels.controller';
 import { materializeChannelRecords } from '../channels/channel-records';
 import { createPrismaChannelRecordWriter } from '../channels/channel-records.prisma';
 import { ChannelCatalogDiscoveryProvider } from '../discovery/providers/channel-catalog.provider';
 import { createSharedFactsHookFromEnv } from '../discovery/streaming/shared-facts-hook';
+import { PrismaService } from '../prisma/prisma.service';
 import { PgNotifyListener } from '../relay/pg-notify-listener';
 
 const ADMIN_URL = process.env.TEST_M10_PG_ADMIN_URL?.trim();
@@ -50,14 +52,23 @@ describe.skipIf(!ENABLED)(
           where: { id: first.id },
           data: { reviewStatus: 'APPROVED', reviewedAt: new Date(), reviewedBy: randomUUID() },
         });
+        expect((await readBack()).reviewedContentHash).toBeNull();
+        await adminDb.sourceChannelRecord.update({
+          where: { id: first.id }, data: { reviewedContentHash: 'z'.repeat(64) },
+        });
+        expect((await readBack()).reviewedContentHash).toBeNull();
+        await adminDb.sourceChannelRecord.update({
+          where: { id: first.id }, data: { reviewedContentHash: first.contentHash },
+        });
         await materialize('industrial controls');
-        expect((await readBack()).reviewStatus).toBe('APPROVED');
+        expect(await readBack()).toMatchObject({ reviewStatus: 'APPROVED', reviewedContentHash: first.contentHash });
 
         await materialize('changed directory evidence');
         const changed = await readBack();
         expect(changed.id).toBe(first.id);
         expect(changed.contentHash).not.toBe(first.contentHash);
         expect(changed.reviewStatus).toBe('PENDING');
+        expect(changed.reviewedContentHash).toBeNull();
       } finally {
         await adminDb.sourceChannel.deleteMany({ where: { id: channelId } });
         await adminDb.$disconnect();
@@ -123,7 +134,7 @@ describe.skipIf(!ENABLED)(
       const appDb = new PrismaClient({ datasourceUrl: APP_USER_URL });
       const repository = new PostgresSharedFactRepository(appDb, writerDb);
       const store = new SharedGreenFactStore(repository);
-      const now = new Date('2026-11-27T00:00:00Z');
+      const now = new Date();
       const later = new Date(now.getTime() + 1000);
       try {
         await store.putFromRaw({
@@ -148,6 +159,50 @@ describe.skipIf(!ENABLED)(
       } finally {
         await repository.deleteByDomain('adr003-rich-website.example');
         await repository.deleteByDomain('adr003-directory-only.example');
+        await Promise.all([writerDb.$disconnect(), appDb.$disconnect()]);
+      }
+    });
+
+    it('can replace an expired website fact with a still-valid directory observation', async () => {
+      const writerDb = new PrismaClient({ datasourceUrl: WRITER_URL });
+      const appDb = new PrismaClient({ datasourceUrl: APP_USER_URL });
+      const repository = new PostgresSharedFactRepository(appDb, writerDb);
+      const store = new SharedGreenFactStore(repository);
+      const domain = 'adr003-expired-website.example';
+      const emptyDomain = 'adr003-expired-first-observation.example';
+      const dayMs = 86_400_000;
+      try {
+        const archivedAt = new Date(Date.now() - 30 * dayMs);
+        await writerDb.$executeRaw`
+          INSERT INTO platform_shared.company_fact
+            (domain, homepage_url, source_kind, observed_at, expires_at, ttl_days)
+          VALUES (${domain}, ${`https://${domain}/`}, 'public_web_streaming',
+            ${archivedAt}, ${new Date(archivedAt.getTime() + 21 * dayMs)}, 21)
+        `;
+        expect(await repository.getByDomain(domain)).toBeNull();
+
+        expect(await store.putFromRaw({
+          domain: emptyDomain, sourceKind: 'public_directory', legalName: 'Expired First Observation',
+        }, { now: new Date(Date.now() - 25 * dayMs), ttlDays: 21 })).toMatchObject({ stored: false });
+        expect(await appDb.$queryRaw`
+          SELECT domain FROM platform_shared.company_fact WHERE domain = ${emptyDomain}
+        `).toEqual([]);
+        expect(await store.putFromRaw({
+          domain, sourceKind: 'public_directory', legalName: 'Expired Directory Fixture',
+        }, { now: new Date(Date.now() - 25 * dayMs), ttlDays: 21 })).toMatchObject({ stored: false });
+        expect(await store.putFromRaw({
+          domain, sourceKind: 'public_directory', legalName: 'Current Directory Fixture',
+        }, { now: new Date(Date.now() - dayMs), ttlDays: 21 })).toMatchObject({ stored: true });
+        expect(await repository.getByDomain(domain)).toMatchObject({
+          sourceKind: 'public_directory', legalName: 'Current Directory Fixture',
+        });
+        expect(await store.putFromRaw({
+          domain, sourceKind: 'public_web_streaming', websiteSummary: 'Expired Website Fixture',
+        }, { now: new Date(Date.now() - 22 * dayMs), ttlDays: 21 })).toMatchObject({ stored: false });
+        expect(await repository.getByDomain(domain)).toMatchObject({ sourceKind: 'public_directory' });
+      } finally {
+        await repository.deleteByDomain(domain);
+        await repository.deleteByDomain(emptyDomain);
         await Promise.all([writerDb.$disconnect(), appDb.$disconnect()]);
       }
     });
@@ -459,6 +514,9 @@ describe.skipIf(!ENABLED)(
                 allowedPaths: ['/exhibitors/'], disallowedPaths: ['/exhibitors/private'],
                 retentionDays: 14,
               } });
+              vi.stubEnv('ADR003_SHARED_GREEN_FACTS', 'on');
+              vi.stubEnv('APP_DATABASE_URL', APP_USER_URL!);
+              const reviewDb = new PrismaService();
               try {
                 const recordWriter = createPrismaChannelRecordWriter(epwDb);
                 await materializeChannelRecords(recordWriter, {
@@ -472,35 +530,77 @@ describe.skipIf(!ENABLED)(
                 });
                 expect(await projectApprovedChannelGreenFacts(scope)).toEqual({ stored: 0, skipped: 0, rejected: 0 });
 
-                const recordIds = (await epwDb.sourceChannelRecord.findMany({
-                  where: { channelId: fixture.id },
-                  select: { id: true },
-                })).map(({ id }) => id);
-                const service = new ChannelService(appDb as never, undefined, undefined, epwDb);
-                vi.stubEnv('ADR003_SHARED_GREEN_FACTS', 'on');
+                const service = new ChannelService(reviewDb, undefined, undefined, epwDb);
+                const controller = new ChannelsController(service, undefined as never);
                 const reviewer = { workspaceId: randomUUID(), userId: randomUUID(), roles: [] };
-                await service.reviewChannelRecords(reviewer, fixture.id, { recordIds, verdict: 'APPROVED' });
+                const list = async () => (await controller.records(reviewer, fixture.id)).data.records;
+                const snapshot = await list();
+                const recordIds = snapshot.map(({ id }) => id);
+                const oldHashes = Object.fromEntries(snapshot.map(({ id, contentHash }) => [id, contentHash]));
+                const nextRunId = randomUUID();
+                await materializeChannelRecords(recordWriter, {
+                  channelId: fixture.id, crawlRunId: nextRunId,
+                  records: [{ ...approvedRecord, industry: 'Revised Photovoltaic' }],
+                });
+                const fresh = await list();
+                const freshHashes = Object.fromEntries(fresh.map(({ id, contentHash }) => [id, contentHash]));
+                expect(freshHashes).not.toEqual(oldHashes);
+                const body = { recordIds, verdict: 'APPROVED' };
+                await expect(controller.reviewRecords(reviewer, fixture.id, {
+                  ...body, expectedContentHashes: oldHashes,
+                })).rejects.toMatchObject({
+                  status: 409, response: { error: { code: 'CHANNEL_RECORD_VERSION_CONFLICT' } },
+                });
+                expect(await list()).toEqual(expect.arrayContaining(fresh));
 
                 const repository = new PostgresSharedFactRepository(appDb, epwDb);
+                await expect(controller.reviewRecords(reviewer, fixture.id, body)).resolves.toMatchObject({
+                  data: { reviewed: 2, verdict: 'APPROVED', counts: { APPROVED: 2 } },
+                });
+                const persisted = () => epwDb.sourceChannelRecord.findMany({ where: { channelId: fixture.id } });
+                for (const row of await persisted()) {
+                  expect(row).toMatchObject({
+                    reviewStatus: 'APPROVED', reviewedBy: reviewer.userId,
+                    reviewedAt: expect.any(Date), reviewedContentHash: null,
+                  });
+                }
+                for (const runId of [crawlRunId, nextRunId]) {
+                  expect(await projectApprovedChannelGreenFacts({ ...scope, crawlRunId: runId }))
+                    .toEqual({ stored: 0, skipped: 0, rejected: 0 });
+                }
+                expect(await repository.getByDomain(approvedDomain)).toBeNull();
+
+                await expect(controller.reviewRecords(reviewer, fixture.id, {
+                  ...body, expectedContentHashes: freshHashes,
+                })).resolves.toMatchObject({ data: { reviewed: 2, verdict: 'APPROVED' } });
+                for (const row of await persisted()) {
+                  expect(row.reviewedContentHash).toBe(freshHashes[row.id]);
+                }
                 const fact = await repository.getByDomain(approvedDomain);
                 expect(fact?.sourceKind).toBe('public_directory');
-                expect(fact?.websiteSummary).toBe('Synthetic Trade Fair: Photovoltaic');
+                expect(fact?.websiteSummary).toBe('Synthetic Trade Fair: Revised Photovoltaic');
                 expect(fact?.productCategories).toEqual(['HJT Module']);
                 expect(fact?.roleEmails).toEqual([]);
                 expect(fact?.switchboardPhones).toEqual([]);
                 expect(fact?.ttlDays).toBe(14);
                 expect(await repository.getByDomain(excludedDomain)).toBeNull();
 
-                const nextRunId = randomUUID();
+                await controller.reviewRecords(reviewer, fixture.id, body);
+                for (const row of await persisted()) expect(row.reviewedContentHash).toBeNull();
+                expect(await projectApprovedChannelGreenFacts({ ...scope, crawlRunId: nextRunId }))
+                  .toEqual({ stored: 0, skipped: 0, rejected: 0 });
+
+                const changedAgainRunId = randomUUID();
                 await materializeChannelRecords(recordWriter, {
-                  channelId: fixture.id, crawlRunId: nextRunId,
+                  channelId: fixture.id, crawlRunId: changedAgainRunId,
                   records: [{ ...approvedRecord, industry: 'Changed source content' }],
                 });
-                expect(await projectApprovedChannelGreenFacts({ ...scope, crawlRunId: nextRunId }))
+                expect(await projectApprovedChannelGreenFacts({ ...scope, crawlRunId: changedAgainRunId }))
                   .toEqual({ stored: 0, skipped: 0, rejected: 0 });
                 expect(await repository.getByDomain(approvedDomain)).toEqual(fact);
               } finally {
                 vi.unstubAllEnvs();
+                await reviewDb.$disconnect();
                 await new PostgresSharedFactRepository(appDb, epwDb).deleteByDomain(approvedDomain);
                 await adminDbForRoles.sourceChannel.delete({ where: { id: fixture.id } });
                 await adminDbForRoles.sourcePolicy.delete({ where: { domain: sourceDomain } });

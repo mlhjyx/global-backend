@@ -164,6 +164,23 @@ describe('CH-7 观察名单抽检', () => {
     expect(writes.reviews).toHaveLength(0);
   });
 
+  it('拒绝缺失、多余或格式错误的审核版本，且不写库', async () => {
+    const { service, writes } = makeService();
+    const hash = 'a'.repeat(64);
+    const extraId = '55555555-5555-4555-8555-555555555553';
+    for (const expectedContentHashes of [
+      null,
+      [hash, hash],
+      { [RECORD_A]: hash },
+      { [RECORD_A]: hash, [RECORD_B]: hash, [extraId]: hash },
+      { [RECORD_A]: hash, [RECORD_B]: 'invalid' },
+    ]) {
+      const payload = { recordIds: [RECORD_A, RECORD_B], verdict: 'APPROVED', expectedContentHashes };
+      await expect(service.reviewChannelRecords(CTX, CHANNEL_ID, payload)).rejects.toMatchObject({ status: 400 });
+    }
+    expect(writes.reviews).toHaveLength(0);
+  });
+
   it('list 支持 reviewStatus 过滤并返回计数与审计字段', async () => {
     const { service, tx } = makeService({
       found: [recordRow(RECORD_A, { reviewStatus: 'REJECTED', reviewedBy: 'op-1', reviewedAt: new Date('2026-11-09T01:00:00Z') })],
