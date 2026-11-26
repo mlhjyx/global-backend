@@ -96,6 +96,25 @@ test("uses selected worktrees for valid workspace and repository links", (t) => 
   assert.doesNotMatch(result.stdout, /WARN (?:BROKEN_(?:LINK|ANCHOR)|MISSING_(?:PNPM_)?SCRIPT)\b/);
 });
 
+test("uses visible heading text when an inline tag has a quoted angle bracket", (t) => {
+  const root = fixture(t);
+  write(root, "backend/docs/README.md", [
+    "# Docs",
+    '## <span title="A > B">Worker guide</span>',
+    '## <code>Worker guide</code>',
+    "",
+  ].join("\n"));
+  write(root, "backend/README.md", [
+    "# Backend",
+    "[first](docs/README.md#worker-guide)",
+    "[second](docs/README.md#worker-guide-1)",
+    "",
+  ].join("\n"));
+  const result = report(root);
+  assert.equal(result.status, 0, result.stderr);
+  assert.doesNotMatch(result.stdout, /WARN BROKEN_ANCHOR backend\/README\.md/);
+});
+
 test("reports a deleted reference definition and accepts normalized reference labels", (t) => {
   const root = fixture(t);
   write(root, "backend/README.md", [

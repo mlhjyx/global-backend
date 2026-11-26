@@ -12,14 +12,20 @@ export function withoutFencedCode(content) {
     .join("\n");
 }
 
+// Consume complete inline tags before deriving the anchor from visible text.
+const headingMarkup = /<(?:"[^"]*"|'[^']*'|[^"'<>])*>|([^<]+|<)/g;
+
 export function githubSlugs(content) {
   const occurrences = new Map();
   const slugs = new Set();
   for (const line of withoutFencedCode(content).split("\n")) {
     const match = line.match(/^#{1,6}\s+(.+?)\s*#*\s*$/);
     if (!match) continue;
-    const base = match[1]
-      .replace(/<[^>]+>/g, "")
+    const heading = Array.from(
+      match[1].matchAll(headingMarkup),
+      ([, visible]) => visible ?? "",
+    ).join("");
+    const base = heading
       .replace(/`([^`]*)`/g, "$1")
       .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
       .toLowerCase()
