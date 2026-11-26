@@ -5,8 +5,7 @@ import { isSiteBuilderEnabled } from "./site-builder-feature-flag";
  * Runtime-gated wrapper around the frozen `SiteBuilderModule`.
  *
  * Returns a lazy `PromiseLike<DynamicModule>` so merely importing `AppModule`
- * in metadata/unit specs never kicks off an unawaited background dynamic
- * `import()` before NestJS actually boots.
+ * in metadata/unit specs leaves Site Builder unloaded until NestJS boots.
  *
  * When NestJS awaits this module:
  * - `SITE_BUILDER_ENABLED=false` returns `{ imports: [] }` and never loads
@@ -29,6 +28,7 @@ export class SiteBuilderFeatureModule {
               imports: [],
             };
           }
+          // @dynamic-mechanism site-builder.runtime-module-gate
           const { SiteBuilderModule } = await import("../site-builder/site-builder.module");
           return {
             module: SiteBuilderFeatureModule,

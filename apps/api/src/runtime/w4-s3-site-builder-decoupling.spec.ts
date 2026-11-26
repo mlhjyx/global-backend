@@ -293,7 +293,9 @@ describe("Wave 4 S3: site-builder decoupling, neutral utilities, and SITE_BUILDE
     expect(workerSource).toContain("siteBuilderDependencyChecks(");
   });
 
-  it("allows workspace purge storage cleanup to succeed when siteBuilderStorage is omitted under SITE_BUILDER_ENABLED=false", async () => {
+  it("does not require Site Builder storage to purge an acquisition-only workspace", async () => {
+    vi.stubEnv("S3_ACCESS_KEY", undefined);
+    vi.stubEnv("S3_SECRET_KEY", undefined);
     const sellerDel = vi.fn(async () => 2);
     const eraseFinalObject = vi.fn(async () => "DELETED" as const);
     const acts = createWorkspacePurgeActivities({
@@ -305,16 +307,72 @@ describe("Wave 4 S3: site-builder decoupling, neutral utilities, and SITE_BUILDE
     });
     const counts = await acts.purgeWorkspaceStorage({
       workspaceId: "ws-1",
-      siteIds: ["site-1"],
-      legacyReleasePrefixes: ["releases/site-1/"],
+      siteIds: [],
+      legacyReleasePrefixes: [],
       personalObjects: [],
-    });
+    }).finally(() => vi.unstubAllEnvs());
     expect(counts).toEqual({
       sellerDocuments: 2,
       siteBuilder: 0,
       operationArtifacts: 0,
     });
     expect(sellerDel).toHaveBeenCalledWith("ws/ws-1/");
+  });
+
+  it("purges retained Site Builder objects even without the Site Builder runtime", async () => {
+    const init = vi.spyOn(NeutralStorageService.prototype, "onModuleInit").mockResolvedValue();
+    const assertReady = vi.spyOn(NeutralStorageService.prototype, "assertReady").mockImplementation(() => {});
+    const deletePrefix = vi.spyOn(NeutralStorageService.prototype, "deletePrefix").mockResolvedValue(1);
+    try {
+      const acts = createWorkspacePurgeActivities({
+        prisma: {} as never,
+        personalArtifactCleanupPort: { eraseFinalObject: vi.fn() },
+        sellerDocumentsStorage: { bucket: "seller-docs", deletePrefix: vi.fn(async () => 2) },
+        dataExportStorage: { bucket: "seller-docs", delete: vi.fn() },
+      });
+      expect(init).not.toHaveBeenCalled();
+
+      const counts = await acts.purgeWorkspaceStorage({
+        workspaceId: "ws-1",
+        siteIds: ["site-1"],
+        legacyReleasePrefixes: ["sites/site-1/releases/legacy"],
+        personalObjects: [],
+      });
+      expect(counts.siteBuilder).toBe(3);
+      expect(deletePrefix.mock.calls).toEqual([
+        ["ws/ws-1/"],
+        ["sites/site-1/"],
+        ["sites/site-1/releases/legacy/"],
+      ]);
+    } finally {
+      init.mockRestore();
+      assertReady.mockRestore();
+      deletePrefix.mockRestore();
+    }
+  });
+
+  it("requires retained site storage before the purge workflow can delete database rows", async () => {
+    const init = vi.spyOn(NeutralStorageService.prototype, "onModuleInit").mockResolvedValue();
+    const assertReady = vi.spyOn(NeutralStorageService.prototype, "assertReady").mockImplementation(() => {
+      throw new Error("OBJECT_STORAGE_CREDENTIALS_REQUIRED");
+    });
+    try {
+      const acts = createWorkspacePurgeActivities({
+        prisma: {
+          withWorkspace: async () => [{
+            site_ids: [],
+            legacy_release_prefixes: ["sites/old-site/releases/legacy/"],
+          }],
+        } as never,
+        personalArtifactCleanupPort: { eraseFinalObject: vi.fn() },
+      });
+      await expect(
+        acts.snapshotWorkspacePurgeTargets({ workspaceId: "ws-1" }),
+      ).rejects.toThrow("OBJECT_STORAGE_CREDENTIALS_REQUIRED");
+    } finally {
+      init.mockRestore();
+      assertReady.mockRestore();
+    }
   });
 
   it("preserves exact symbol identity through site-builder re-export shims", () => {

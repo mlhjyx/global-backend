@@ -4,7 +4,7 @@ import type { S3PersonalArtifactCleanupAdapter } from '../durable-results/artifa
 import type { PrismaService } from '../prisma/prisma.service';
 import { DataExportStorage } from '../data-exports/data-exports.storage';
 import { SellerDocumentsStorage } from '../seller-knowledge/seller-documents.storage';
-import type { StorageService } from '../infra-clients/storage.service';
+import { StorageService } from '../infra-clients/storage.service';
 import { purgeWorkspaceRedisKeys } from '../workspace/workspace-purge-redis';
 import type {
   WorkspacePurgePersonalObjectTarget,
@@ -157,6 +157,25 @@ export function createWorkspacePurgeActivities(deps: WorkspacePurgeActivityDeps)
     (process.env.SELLER_DOCUMENTS_S3_BUCKET?.trim() || 'global-seller-documents');
   const purgeRedis = deps.redisPurger ?? ((workspaceId: string) => purgeWorkspaceRedisKeys(workspaceId));
 
+  async function siteStorageForPurge(targets: {
+    siteIds: readonly string[];
+    legacyReleasePrefixes: readonly string[];
+  }): Promise<Pick<StorageService, 'deletePrefix'> | undefined> {
+    if (deps.siteBuilderStorage) return deps.siteBuilderStorage;
+    if (
+      targets.siteIds.length === 0 &&
+      targets.legacyReleasePrefixes.length === 0 &&
+      !process.env.S3_ACCESS_KEY &&
+      !process.env.S3_SECRET_KEY
+    ) {
+      return undefined;
+    }
+    const storage = new StorageService();
+    await storage.onModuleInit();
+    storage.assertReady();
+    return storage;
+  }
+
   return {
     async markWorkspacePurgeRunning(input: {
       workspaceId: string;
@@ -219,12 +238,15 @@ export function createWorkspacePurgeActivities(deps: WorkspacePurgeActivityDeps)
         ...(row?.workflow_ids ?? []),
         ...(input.campaignPlanJobIds ?? []).map((jobId) => `campaign-plan-${jobId}`),
       ];
-      return {
+      const targets: WorkspacePurgeTargets = {
         workflowIds: expandPurgeWorkflowIds(input.workspaceId, rawIds),
         siteIds: row?.site_ids ?? [],
         legacyReleasePrefixes: row?.legacy_release_prefixes ?? [],
         exportObjectKeys: row?.export_object_keys ?? [],
       };
+      // Verify access before removing database rows that locate retained objects.
+      await siteStorageForPurge(targets);
+      return targets;
     },
 
     async cancelWorkspaceWorkflows(input: {
@@ -293,6 +315,7 @@ export function createWorkspacePurgeActivities(deps: WorkspacePurgeActivityDeps)
       exportObjectKeys?: readonly string[];
       personalObjects: readonly WorkspacePurgePersonalObjectTarget[];
     }): Promise<WorkspacePurgeStorageCounts> {
+      const siteBuilderStorage = await siteStorageForPurge(input);
       const workspacePrefix = `ws/${input.workspaceId}/`;
       let sellerDocumentsDeleted = await sellerDocuments.deletePrefix(workspacePrefix);
 
@@ -324,9 +347,9 @@ export function createWorkspacePurgeActivities(deps: WorkspacePurgeActivityDeps)
         if (normalized) siteBuilderPrefixes.add(normalized);
       }
       let siteBuilderDeleted = 0;
-      if (deps.siteBuilderStorage) {
+      if (siteBuilderStorage) {
         for (const prefix of siteBuilderPrefixes) {
-          siteBuilderDeleted += await deps.siteBuilderStorage.deletePrefix(prefix);
+          siteBuilderDeleted += await siteBuilderStorage.deletePrefix(prefix);
         }
       }
 
