@@ -266,6 +266,22 @@
       }
     },
     {
+      "id": "vies.check",
+      "declarationPath": "apps/api/src/tools/vies-tools.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "vies-check/v1",
+      "operationIdentity": "tool:vies.check:<version>:<idempotencyKey>",
+      "privacyClass": "PUBLIC_ORGANIZATION",
+      "domainAck": {
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
+        "consumer": "VatRegistryEnrichment",
+        "domainAggregateType": "CanonicalCompany",
+        "identitySource": "eu-vat-id",
+        "subjectRefRequired": false,
+        "personalDataDsrCompatible": false
+      }
+    },
+    {
       "id": "ted.search",
       "declarationPath": "apps/api/src/tools/source-tools.ts",
       "resultStrategy": "typed_projection",

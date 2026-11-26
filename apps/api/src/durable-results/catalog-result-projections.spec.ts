@@ -537,6 +537,22 @@ const GOOGLE_PLACES_RAW: RawToolResult = {
   degraded: true,
 };
 
+const VIES_CHECK_RAW: RawToolResult = {
+  data: {
+    status: 'VALID',
+    countryCode: 'IT',
+    isoCountry: 'IT',
+    vatNumber: '04553650989',
+    vatId: 'IT04553650989',
+    requestDate: '2026-11-26',
+    legalName: 'EFFE ENERGY SRL',
+    registeredCity: 'GUSSAGO',
+    nameRedacted: false,
+  },
+  costCents: 0,
+  degraded: false,
+};
+
 const REPRESENTATIVE_LEGAL_BOUNDARY_FIXTURES: readonly ProjectionFixture[] = [
   { toolId: 'searxng.search', schema: 'searxng-search/v1', raw: SEARX_RAW },
   { toolId: 'social.search', schema: 'social-search/v1', raw: SEARX_RAW },
@@ -559,6 +575,7 @@ const REPRESENTATIVE_LEGAL_BOUNDARY_FIXTURES: readonly ProjectionFixture[] = [
   { toolId: 'brave.search', schema: 'brave-search/v1', raw: SERPER_SEARCH_RAW },
   { toolId: 'exa.search', schema: 'exa-search/v1', raw: EXA_SEARCH_RAW },
   { toolId: 'google_places.search', schema: 'google-places-search/v1', raw: GOOGLE_PLACES_RAW },
+  { toolId: 'vies.check', schema: 'vies-check/v1', raw: VIES_CHECK_RAW },
 ];
 
 function schemaTypes(node: JsonRecord): readonly string[] {
@@ -824,6 +841,17 @@ const EXPECTED_BOUNDS: Readonly<Record<string, JsonRecord>> = {
     '$.data.places[].websiteUri.maxLength': 2048,
     '$.data.places[].countryCode.maxLength': 16,
   },
+  'vies-check/v1': {
+    ...COMMON_RESULT_BOUNDS,
+    '$.data.status.maxLength': 16,
+    '$.data.countryCode.maxLength': 2,
+    '$.data.isoCountry.maxLength': 2,
+    '$.data.vatNumber.maxLength': 14,
+    '$.data.vatId.maxLength': 16,
+    '$.data.requestDate.maxLength': 32,
+    '$.data.legalName.maxLength': 300,
+    '$.data.registeredCity.maxLength': 120,
+  },
 };
 
 function selectedOneOfIndex(schema: JsonRecord, value: unknown): number {
@@ -931,7 +959,7 @@ describe('closed catalog Tool result projections', () => {
       'wikidata.entity', 'gleif.fetch', 'companies_house.search', 'inpi_rne.search',
       'google_patents.search', 'tradefair.algolia', 'mapyourshow.fetch',
       'deepseek.search', 'deepseek.fetch',
-      'serper.search', 'brave.search', 'exa.search', 'google_places.search',
+      'serper.search', 'brave.search', 'exa.search', 'google_places.search', 'vies.check',
     ]);
     expect(CATALOG_RESULT_PROJECTION_SCHEMAS).toEqual({
       'searxng.search': 'searxng-search/v1',
@@ -952,6 +980,7 @@ describe('closed catalog Tool result projections', () => {
       'brave.search': 'brave-search/v1',
       'exa.search': 'exa-search/v1',
       'google_places.search': 'google-places-search/v1',
+      'vies.check': 'vies-check/v1',
     });
     expect(CATALOG_RESULT_PROJECTION_DEFINITIONS.map((definition) => definition.schema))
       .toEqual(Object.values(CATALOG_RESULT_PROJECTION_SCHEMAS));

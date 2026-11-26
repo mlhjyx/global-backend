@@ -3,7 +3,9 @@ import type { DurableExecutionReceipt } from '../durable-results/durable-executi
 import type { ExecutionContext, EnrichmentResult } from '../discovery/provider-contract';
 import { BudgetStoreUnavailableError } from '../tools/budget-store';
 import { ToolPolicyDenied } from '../tools/tool-broker';
+import { ViesTransientError } from '../adapters/vies';
 import { currentEvidenceBundle } from '../discovery/evidence-bundle';
+import { websiteProfileFreshAndCurrent } from './discovery.activities';
 
 const mocks = vi.hoisted(() => ({ ack: vi.fn(), judge: vi.fn(async () => null) }));
 vi.mock('../durable-results/domain-ack-consumer-bindings', () => ({
@@ -217,6 +219,87 @@ describe('Run2 independent corroboration before fit', () => {
     const h = harness();
     await h.acts.profileCompanyOnce({ ...ARGS, enrichmentSlot });
     expect(h.enrichCompany).not.toHaveBeenCalled();
+  });
+
+  it('profiles uncached company BEFORE corroboration so extracted P.IVA feeds VIES in the same run', async () => {
+    const h = harness();
+    h.company.name = 'Effe Energy';
+    h.company.domain = 'effeenergy.it';
+    h.company.country = 'IT';
+    h.company.attributes = {};
+    h.websiteProfile.profile.mockResolvedValue({
+      homepageUrl: 'https://effeenergy.it/',
+      impressumUrl: null,
+      tradeRole: 'distributor',
+      tradeRoleSource: 'rules',
+      tradeRoleConfidence: 0.7,
+      ownManufacturing: false,
+      carriedBrands: [],
+      carriesChineseBrand: false,
+      carriesForeignBrand: false,
+      legalName: null,
+      register: null,
+      vatId: 'IT04553650989',
+      registeredAddress: null,
+      evidence: ['Distributore fotovoltaico autorizzato.'],
+    });
+    const viesReceipt: DurableExecutionReceipt = {
+      ...RECEIPT,
+      operationKey: 'vies-op',
+      resultSchema: 'vies-check/v1',
+    };
+    const viesEnrich = vi.fn(async (input: { vatId?: string }, ctx: ExecutionContext): Promise<EnrichmentResult> => {
+      expect(input.vatId).toBe('IT04553650989');
+      ctx.onDurableReceipt?.('vies.check', viesReceipt);
+      return {
+        matched: true,
+        confidence: 1,
+        costCents: 0,
+        attributes: {
+          vat_id: 'IT04553650989',
+          legal_name: 'EFFE ENERGY SRL',
+          registered_country: 'IT',
+          registered_city: 'GUSSAGO',
+          verified_status: 'VALID',
+          request_date: '2026-11-26',
+          match_confidence: 1,
+        },
+      };
+    });
+    h.routeEnrichment.mockResolvedValue([{ key: 'vies', enrichCompany: viesEnrich }]);
+
+    await h.acts.profileCompanyOnce(ARGS);
+    expect(h.websiteProfile.profile).toHaveBeenCalledOnce();
+    expect(viesEnrich).toHaveBeenCalledOnce();
+    expect((h.company.attributes as { website_profile?: { _parser_version?: string } }).website_profile?._parser_version)
+      .toBe('website-profile/v2');
+    expect(currentEvidenceBundle(h.company).coverage.tier_list).toEqual(['T1', 'T3']);
+    expect(currentEvidenceBundle(h.company).coverage.corroborated).toBe(true);
+  });
+
+  it.each([
+    [new ViesTransientError('VIES_RATE_LIMITED', 'IT'), 'rate_limited'],
+    [new ViesTransientError('VIES_RATE_LIMITED_COOLDOWN', 'IT'), 'not_executed_rate_limited'],
+    [new ViesTransientError('VIES_UNAVAILABLE', 'IT'), 'provider_unavailable'],
+  ])('maps ViesTransientError %s to structured observation status %s', async (error, status) => {
+    const h = harness();
+    h.enrichCompany.mockRejectedValue(error);
+    h.routeEnrichment.mockResolvedValue([{ key: 'vies', enrichCompany: h.enrichCompany }]);
+    await h.acts.profileCompanyOnce(ARGS);
+    expect(h.tx.runEvent.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
+      payload: expect.objectContaining({ provider: 'vies', status }),
+    }) }));
+  });
+
+  it('invalidates pre-v2 fresh website_profile missing vat_id only when forceRefreshIfMissingVat is set', () => {
+    const now = Date.parse('2026-11-26T00:00:00.000Z');
+    const v1MissingVat = { website_profile: { _ts: '2026-11-25T00:00:00.000Z', trade_role: 'distributor' } };
+    const v2MissingVat = { website_profile: { _ts: '2026-11-25T00:00:00.000Z', _parser_version: 'website-profile/v2', trade_role: 'distributor' } };
+    const v1WithVat = { website_profile: { _ts: '2026-11-25T00:00:00.000Z', vat_id: 'IT04553650989' } };
+    expect(websiteProfileFreshAndCurrent(v1MissingVat, false, now)).toBe(true);
+    expect(websiteProfileFreshAndCurrent(v1MissingVat, false, now, { forceRefreshIfMissingVat: true })).toBe(false);
+    expect(websiteProfileFreshAndCurrent(v2MissingVat, false, now, { forceRefreshIfMissingVat: true })).toBe(true);
+    expect(websiteProfileFreshAndCurrent(v1WithVat, false, now, { forceRefreshIfMissingVat: true })).toBe(true);
   });
 
   it('does not probe a company without a deep job in this run', async () => {

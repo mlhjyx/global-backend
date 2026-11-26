@@ -23,15 +23,15 @@ const modelResult = (overrides: Record<string, unknown> = {}) => ({
 });
 
 describe("execution receipt fact producers", () => {
-  it("locks explicit fact producers to 19 legacy plus five controlled contact Tools and 11 Model tasks", () => {
-    expect(RECEIPT_FACT_TOOL_IDS).toHaveLength(24);
+  it("locks explicit fact producers to 20 legacy plus five controlled contact Tools and 11 Model tasks", () => {
+    expect(RECEIPT_FACT_TOOL_IDS).toHaveLength(25);
     expect(
       RECEIPT_FACT_TOOL_IDS.filter(
         (id) => !CONTACT_RECEIPT_TOOL_IDS.some((contactId) => contactId === id),
       ),
-    ).toHaveLength(19);
+    ).toHaveLength(20);
     expect(RECEIPT_FACT_MODEL_TASK_IDS).toHaveLength(11);
-    expect(new Set(RECEIPT_FACT_TOOL_IDS).size).toBe(24);
+    expect(new Set(RECEIPT_FACT_TOOL_IDS).size).toBe(25);
     expect(new Set(RECEIPT_FACT_MODEL_TASK_IDS).size).toBe(11);
   });
 

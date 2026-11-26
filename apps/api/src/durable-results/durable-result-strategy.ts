@@ -37,6 +37,7 @@ const typedProjectionSchemaValues = [
   "osm-overpass/v1",
   "wikidata-entity/v1",
   "gleif-fetch/v1",
+  "vies-check/v1",
   "companies-house-search/v1",
   "opencorporates-search/v1",
   "inpi-rne-search/v1",

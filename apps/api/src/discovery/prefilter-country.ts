@@ -19,6 +19,7 @@ import { inferCountryFromAttributes, normalizeCountryValue } from './company-nor
 export type PrefilterCountrySource =
   | 'canonical_country'
   | 'gleif_registered_country'
+  | 'vies_registered_country'
   | 'vat_id'
   | 'cctld'
   | 'legal_suffix'

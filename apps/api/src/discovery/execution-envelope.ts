@@ -108,6 +108,8 @@ export const MAX_WEBSITE_PROFILE_RENDERS_PER_COMPANY = 1 as const;
 export const MAX_DISCOVERY_ENRICH_COMPANIES = 50 as const;
 /** GLEIF: country search, name-only retry, direct and ultimate parent. */
 export const MAX_GLEIF_FETCHES_PER_COMPANY = 4 as const;
+/** EU VIES: one VAT verification call per company with a validated EU VAT ID. */
+export const MAX_VIES_CHECKS_PER_COMPANY = 1 as const;
 /** Wikidata: entity search, candidate claims, referenced labels. */
 export const MAX_WIKIDATA_ENTITY_READS_PER_COMPANY = 3 as const;
 export const MAX_DISCOVERY_SIGNAL_COMPANIES = 12 as const;

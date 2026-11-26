@@ -26,6 +26,7 @@ import { CompaniesHouseContactProvider } from './providers/companies-house.provi
 import { InpiRneContactProvider } from './providers/inpi-rne.provider';
 import { GooglePatentsInventorProvider } from './providers/bigquery-patents.provider';
 import { GleifEnrichmentProvider } from './providers/gleif.provider';
+import { ViesEnrichmentProvider } from './providers/vies.provider';
 import { WikidataEnrichmentProvider } from './providers/wikidata-enrich.provider';
 import { DigitalFootprintProvider } from './providers/digital-footprint.provider';
 import { StructuredHarvestProvider } from './providers/structured-harvest.provider';
@@ -191,10 +192,12 @@ export class DiscoveryProviderRegistry {
     // scale-safe：PATENT_SOURCE_MODE=cache 时走 cacheReader（读 postgres 缓存，零 BQ 字节）+ miss enqueue；
     // =direct 走 broker（逐公司 BQ，仅 verify/调试，§8.8）；=off（默认）返空。缓存刷新由第 5 个 Temporal Schedule 驱动。
     this.contacts.push(new GooglePatentsInventorProvider({ broker, cacheReader: patentCacheReader, enqueue: patentEnqueue }));
-    // 富集源（对已归一公司补结构化事实）——互补并跑，均为 CC0 直连 API、零成本：
-    //  wikidata = 商业事实（行业/产品/财务/官网）；gleif = 法律身份（LEI/法人形式/母子关系）。
+    // 富集源（对已归一公司补结构化事实）——互补并跑，均为零成本开放官方 API：
+    //  wikidata = 商业事实（行业/产品/财务/官网）；gleif = 法律身份（LEI/法人形式/母子关系）；
+    //  vies = 欧盟官方免费 VIES 税号核验（仅法人 VAT 身份，回执与入库剥离街道地址）。
     this.enrichers.push(new WikidataEnrichmentProvider({ broker }));
     this.enrichers.push(new GleifEnrichmentProvider({ broker }));
+    this.enrichers.push(new ViesEnrichmentProvider({ broker }));
     this.enrichers.push(new ManufacturerNetworkProvider({ broker, ...(prisma ? { readIdentityAliases: async (subject,references)=>prisma.$transaction(async tx=>{
       await tx.$executeRaw`SELECT set_config('app.current_workspace_id',${subject.workspaceId},true)`;
       return loadReviewedManufacturerLegalNames(tx,subject,references);
@@ -289,6 +292,11 @@ export class DiscoveryProviderRegistry {
       where: { key: 'gleif' },
       update: {},
       create: { key: 'gleif', class: 'company_registry', status: 'ENABLED', costPerCallCents: 0 },
+    });
+    await db.dataProvider.upsert({
+      where: { key: 'vies' },
+      update: {},
+      create: { key: 'vies', class: 'company_registry', status: 'ENABLED', costPerCallCents: 0 },
     });
     await db.dataProvider.upsert({
       where: { key: 'directory' },
@@ -389,6 +397,7 @@ export class DiscoveryProviderRegistry {
         { domain: 'www.wikidata.org', sourceType: 'gov_registry', termsStatus: 'REVIEWED_OK', personalData: false, notes: 'Wikidata REST API（CC0）。wikidata.entity 工具治理域（富集）。' },
         { domain: 'overpass-api.de', sourceType: 'gov_registry', termsStatus: 'REVIEWED_OK', personalData: false, notes: 'OSM Overpass API（ODbL，需署名+同源共享）。osm.overpass 工具治理域（kumi 镜像同策略）。' },
         { domain: 'api.gleif.org', sourceType: 'gov_registry', termsStatus: 'REVIEWED_OK', personalData: false, notes: 'GLEIF LEI API（CC0）。gleif.fetch 工具治理域。' },
+        { domain: 'ec.europa.eu', sourceType: 'gov_registry', termsStatus: 'REVIEWED_OK', personalData: false, notes: 'EU VIES VAT 公开 REST API（Commission Reuse Notice 2011/833/EU）。vies.check 工具治理域；仅核验法人 VAT 身份，回执与入库均剥离原始街道地址。' },
         // 获客 vNext W4：OpenCorporates 聚合注册库。ODbL 1.0 开放数据＋商用 API 付费订阅（ToS 受限）；
         // 三重关闭保持默认不跑：OPENCORPORATES_PROVIDER=off、data_provider DISABLED、合规矩阵未批准
         // （SOURCE_COMPLIANCE_GATE=enforce 时 fail-closed）。adapter 只映射公司字段，不读高管个人数据。

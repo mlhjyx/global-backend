@@ -144,7 +144,7 @@ import {
   executeDiscoveryCompanyMaterialization,
 } from './discovery-company-materialization';
 import {
-  WEBSITE_PROFILE_PROVIDER_KEY,
+  WEBSITE_PROFILE_PARSER_MARKER, WEBSITE_PROFILE_PARSER_VERSION, WEBSITE_PROFILE_PROVIDER_KEY,
   WebsiteProfileProvider,
   type WebsiteProfile,
 } from '../discovery/providers/website-profile.provider';
@@ -693,13 +693,16 @@ export function icpProductContext(companyAttributes: unknown): string {
  * 画像在 30 天内、且（开关打开时）联系路径已按当前规则读过 → 这家不用再画像。
  * BI-14：开关打开时，30 天内的画像在联系路径按当前规则读过之前仍算过期（每家每个规则版本一次）。
  */
-export function websiteProfileFreshAndCurrent(attributes: unknown, contactPaths: boolean, nowMs: number): boolean {
+export function websiteProfileFreshAndCurrent(
+  attributes: unknown, contactPaths: boolean, nowMs: number, opts?: { forceRefreshIfMissingVat?: boolean },
+): boolean {
   const existing = ((attributes as Record<string, unknown> | null) ?? {})[WEBSITE_PROFILE_PROVIDER_KEY] as
-    | { _ts?: string; [COMPANY_CONTACT_PARSER_MARKER]?: string }
+    | { _ts?: string; vat_id?: string; [COMPANY_CONTACT_PARSER_MARKER]?: string; [WEBSITE_PROFILE_PARSER_MARKER]?: string }
     | undefined;
   const fresh = Boolean(existing?._ts) && nowMs - Date.parse(existing!._ts!) < WEBSITE_PROFILE_TTL_MS;
   const contactPathsCurrent = !contactPaths || existing?.[COMPANY_CONTACT_PARSER_MARKER] === COMPANY_CONTACT_PARSER_VERSION;
-  return fresh && contactPathsCurrent;
+  const vatCurrent = !opts?.forceRefreshIfMissingVat || existing?.[WEBSITE_PROFILE_PARSER_MARKER] === WEBSITE_PROFILE_PARSER_VERSION || existing?.vat_id != null;
+  return fresh && contactPathsCurrent && vatCurrent;
 }
 
 /** 官网画像 → 只含公司级事实的富集结果（命名空间 `website_profile`）。 */
@@ -762,7 +765,7 @@ const DISCOVERY_DOMAIN_ACK_PRODUCERS = new Set([
   'wikidata.entity', 'wikidata.sparql', 'discovery.extract_company',
   'discovery.extract_list', 'contact.find_decision_makers', 'registry.query',
   'deepseek.search', 'serper.search', 'brave.search', 'exa.search', 'google_places.search',
-  'channel_catalog.query', 'discovery.web_search_candidates',
+  'channel_catalog.query', 'discovery.web_search_candidates', 'vies.check',
 ]);
 
 /** Failure stages a run reaches only after canonicalization, with the fit stage started. */
@@ -2629,9 +2632,8 @@ export function createDiscoveryActivities(deps: {
                       companyId: c.id,
                       hits,
                       signalTimestamp: new Date(nowMs),
-                      ...(contactPaths
-                        ? { namespaceMarkers: { [COMPANY_CONTACT_PARSER_MARKER]: COMPANY_CONTACT_PARSER_VERSION } }
-                        : {}),
+                      namespaceMarkers: { [WEBSITE_PROFILE_PARSER_MARKER]: WEBSITE_PROFILE_PARSER_VERSION,
+                        ...(contactPaths ? { [COMPANY_CONTACT_PARSER_MARKER]: COMPANY_CONTACT_PARSER_VERSION } : {}) },
                     })
                   : Promise.resolve(false),
                 readback: async (transaction) => {

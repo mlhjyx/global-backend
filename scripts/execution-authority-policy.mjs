@@ -13,6 +13,7 @@ const DEFAULT_MANIFEST_PATH = 'docs/governance/durable-result-strategies.json';
 const TOOL_SOURCE_PATHS = Object.freeze([
   'apps/api/src/tools/builtin-tools.ts',
   'apps/api/src/tools/source-tools.ts',
+  'apps/api/src/tools/vies-tools.ts',
   'apps/api/src/tools/deepseek-tools.ts',
   'apps/api/src/tools/search-provider-tools.ts',
   'apps/api/src/tools/contact-enrichment-safety-tools.ts',
@@ -28,7 +29,7 @@ const DEFINITE_FAILURE_CLASSIFIER_PATH = 'apps/api/src/model-gateway/definite-mo
 export const EXPECTED_TOOL_IDS = Object.freeze([
   'searxng.search', 'social.search', 'social.fetch', 'crawl4ai.fetch', 'wikidata.sparql', 'osm.overpass',
   'smtp.rcpt_probe', 'crawl4ai.render', 'http.get', 'wikidata.entity',
-  'gleif.fetch', 'ted.search', 'openfda.search', 'companies_house.search',
+  'gleif.fetch', 'vies.check', 'ted.search', 'openfda.search', 'companies_house.search',
   'inpi_rne.search', 'google_patents.search', 'tradefair.algolia',
   'mapyourshow.fetch', 'samgov.search', 'opencorporates.search', 'sanctions.download',
   'deepseek.search', 'deepseek.fetch',
@@ -96,6 +97,7 @@ export const EXPECTED_TOOL_CALLSITES = Object.freeze([
   'apps/api/src/discovery/providers/email-verify.provider.ts#smtp.rcpt_probe#1',
   'apps/api/src/discovery/providers/gleif.provider.ts#gleif.fetch#1',
   'apps/api/src/discovery/providers/gleif.provider.ts#gleif.fetch#2',
+  'apps/api/src/discovery/providers/vies.provider.ts#vies.check#1',
   'apps/api/src/discovery/providers/inpi-rne.provider.ts#inpi_rne.search#1',
   'apps/api/src/discovery/providers/model-web-search.provider.ts#deepseek.search#1',
   'apps/api/src/discovery/providers/model-web-search.provider.ts#searxng.search#1',
@@ -854,6 +856,7 @@ async function scanCurrentSources(repoRoot, manifest, issues) {
   }
   const projectionSources = [
     await readResolved('apps/api/src/durable-results/catalog-result-projections.ts'),
+    await readResolved('apps/api/src/durable-results/vies-result-projection.ts'),
     await readResolved('apps/api/src/durable-results/source-result-projections.ts'),
     await readResolved('apps/api/src/durable-results/contact-email-verification-projections.ts'),
   ].join('\n');

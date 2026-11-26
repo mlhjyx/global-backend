@@ -60,6 +60,28 @@ describe('WebsiteProfileProvider (G3 5.4)', () => {
     expect(mocks.executeStructuredTaskWithRuntime).not.toHaveBeenCalled();
   });
 
+  it('keeps homepage P.IVA when fallback /impressum returns a soft 404 page and discovers Italian legal links', async () => {
+    const soft404Broker = broker({
+      'https://effeenergy.it/': 'Distributore fotovoltaico autorizzato. Stock immediato. P.IVA e C.F. 04553650989',
+      'https://effeenergy.it/impressum': '404 Pagina non trovata - Torna alla home',
+    });
+    mocks.executeStructuredTaskWithRuntime.mockResolvedValue({
+      data: { trade_role: 'distributor', confidence: 0.9, own_manufacturing: false, evidence: ['Distributore fotovoltaico'] },
+    });
+    const profile1 = await new WebsiteProfileProvider({ gateway: {} as never, broker: soft404Broker })
+      .profile({ domain: 'effeenergy.it', homeCountry: 'it', icpContext: 'solar pv' }, CTX);
+    expect(profile1?.vatId).toBe('IT04553650989');
+
+    const italianLinkBroker = broker({
+      'https://memodo.it/': 'Distributore fotovoltaico [Informazioni legali](https://memodo.it/informazioni-legali)',
+      'https://memodo.it/informazioni-legali': 'Memodo Italia S.r.l.\nPartita IVA: 02053810517',
+    });
+    const profile2 = await new WebsiteProfileProvider({ gateway: {} as never, broker: italianLinkBroker })
+      .profile({ domain: 'memodo.it', homeCountry: 'it', icpContext: 'solar pv' }, CTX);
+    expect(profile2?.impressumUrl).toBe('https://memodo.it/informazioni-legali');
+    expect(profile2?.vatId).toBe('IT02053810517');
+  });
+
   it('preserves a company profile when the same registration is printed repeatedly', async () => {
     const executionBroker = broker({
       'https://pumpen-handel.example/': 'Autorisierter Händler und Vertriebspartner, Lagerprogramm ab Lager.',

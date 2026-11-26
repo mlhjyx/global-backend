@@ -68,6 +68,40 @@ describe('entriesFromStoredAttributes', () => {
     expect(entries.find((entry) => entry.source_key === 'website_profile')!.facts.vat_id).toBeUndefined();
   });
 
+  it('projects vies as T1 vat_registry without numeric vat_id in facts and achieves T1+T3 corroboration', async () => {
+    const { sanitizeCanonicalCompanyAttributes } = await import('./canonical-company-attributes');
+    const attrs = {
+      vies: {
+        vat_id: 'IT04553650989',
+        legal_name: 'EFFE ENERGY SRL',
+        registered_country: 'IT',
+        registered_city: 'GUSSAGO',
+        verified_status: 'VALID',
+        request_date: '2026-11-26',
+        match_confidence: 1,
+      },
+      website_profile: ATTRIBUTES.website_profile,
+    };
+    const entries = entriesFromStoredAttributes(attrs);
+    const viesEntry = entries.find((entry) => entry.source_key === 'vies');
+    expect(viesEntry).toMatchObject({
+      tier: 'T1',
+      source_key: 'vies',
+      evidence_kind: 'vat_registry',
+      facts: {
+        legal_name: 'EFFE ENERGY SRL',
+        registered_country: 'IT',
+        registered_city: 'GUSSAGO',
+        verified_status: 'VALID',
+      },
+    });
+    expect(viesEntry!.facts).not.toHaveProperty('vat_id');
+    const bundle = assembleEvidenceBundle({ name: 'Effe Energy', domain: 'effeenergy.it', country: 'IT' }, entries);
+    expect(bundle.coverage.corroborated).toBe(true);
+    expect(bundle.coverage.tier_list).toEqual(['T1', 'T3']);
+    expect(sanitizeCanonicalCompanyAttributes({ evidence_bundle: bundle }).evidence_bundle).toEqual(bundle);
+  });
+
   it('extracts all four additional T1 sources (companies_house/ch_registry, inpi_rne, google_patents, samgov) and survives sanitizer round-trip', async () => {
     const { sanitizeCanonicalCompanyAttributes } = await import('./canonical-company-attributes');
     const extendedAttributes = {

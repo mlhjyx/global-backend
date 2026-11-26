@@ -1,7 +1,10 @@
 import countries from 'world-countries';
 import { normalizeCountryValue } from './company-normalization';
 import { normalizeDomain } from './identity';
+import { inferPrefilterCountry } from './prefilter-country';
 import { mapCountryToQid } from './vocab';
+
+const INDEPENDENT_SOURCES = ['gleif', 'wikidata', 'vies'] as const;
 
 function object(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -34,8 +37,11 @@ export function enrichmentIdentityConflicts(
 ): boolean {
   const facts = object(attributes);
   if (!facts) return false;
-  const expectedCountry = countryIso(company.country);
-  const actualCountry = countryIso(key === 'gleif' ? facts.registered_country : facts.country);
+  const expectedCountry =
+    countryIso(company.country) ?? inferPrefilterCountry({ domain: company.domain })?.iso ?? null;
+  const actualCountry = countryIso(
+    key === 'gleif' || key === 'vies' ? facts.registered_country : facts.country,
+  );
   if (countryQidUnconfirmed(expectedCountry, key, facts)) return true;
   if (expectedCountry && actualCountry && expectedCountry !== actualCountry) return true;
   const website = typeof facts.website === 'string' ? normalizeDomain(facts.website) : null;
@@ -49,8 +55,8 @@ export function scopeIndependentEnrichment(
 ): unknown {
   const attributes = object(company.attributes);
   if (!attributes) return company.attributes;
-  const conflicts = ['gleif', 'wikidata'].filter((key) =>
+  const conflicts = INDEPENDENT_SOURCES.filter((key) =>
     Object.hasOwn(attributes, key) && enrichmentIdentityConflicts(company, key, attributes[key]));
   if (!conflicts.length) return company.attributes;
-  return Object.fromEntries(Object.entries(attributes).filter(([key]) => !conflicts.includes(key)));
+  return Object.fromEntries(Object.entries(attributes).filter(([key]) => !conflicts.includes(key as (typeof INDEPENDENT_SOURCES)[number])));
 }

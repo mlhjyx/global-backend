@@ -35,6 +35,7 @@ export const EVIDENCE_TIERS: readonly EvidenceTier[] = Object.freeze(['T1', 'T2'
 /** 属性域 → 分层。未列出的域不进入证据包（搜索摘要 T4 尚无持久化面）。 */
 const SOURCE_TIERS: Readonly<Record<string, EvidenceTier>> = Object.freeze({
   gleif: 'T1',
+  vies: 'T1',
   ted: 'T1',
   fda: 'T1',
   companies_house: 'T1',
@@ -49,6 +50,7 @@ const SOURCE_TIERS: Readonly<Record<string, EvidenceTier>> = Object.freeze({
 
 const SOURCE_KINDS: Readonly<Record<string, string>> = Object.freeze({
   gleif: 'legal_identity',
+  vies: 'vat_registry',
   ted: 'procurement',
   fda: 'device_registration',
   companies_house: 'registry_entry',
@@ -205,6 +207,17 @@ const SOURCE_EXTRACTORS: Readonly<Record<string, (source: Record<string, unknown
         is_subsidiary: safeBool(source.is_subsidiary),
         parent_name: safeString(source.parent_name),
         ultimate_parent_name: safeString(source.ultimate_parent_name),
+      },
+    }),
+    vies: (source) => ({
+      source_page: 'https://ec.europa.eu/taxation_customs/vies/',
+      captured_at: safeString(source._ts),
+      confidence: safeNumber(source.match_confidence),
+      facts: {
+        legal_name: safeString(source.legal_name),
+        registered_country: safeString(source.registered_country),
+        registered_city: safeString(source.registered_city),
+        verified_status: safeString(source.verified_status),
       },
     }),
     ted: (source) => ({

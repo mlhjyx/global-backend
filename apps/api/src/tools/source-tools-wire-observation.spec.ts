@@ -13,6 +13,7 @@ import {
   sanctionsDownloadTool,
   tradeFairAlgoliaTool,
 } from "./source-tools";
+import { viesCheckTool } from "./vies-tools";
 import { ToolRegistry } from "./tool-registry";
 import type { ToolContext } from "./tool-contract";
 
@@ -52,6 +53,7 @@ const DECLARED = [
   "serper.search",
   "social.fetch",
   "tradefair.algolia",
+  "vies.check",
   "wikidata.entity",
 ];
 
@@ -129,5 +131,27 @@ describe("Tools that declare their physical wires to ToolBroker (D13)", () => {
       expect(call[2]).toMatchObject({ beforePhysicalWire });
     }
     expect(requestPublicHttp).toHaveBeenCalledTimes(2);
+  });
+
+  it("vies.check hands the Broker's hook to its one guarded request", async () => {
+    const body = JSON.stringify({
+      isValid: true,
+      requestDate: "2026-11-26T05:10:00.000Z",
+      userError: "VALID",
+      name: "EFFE ENERGY SRL",
+      address: "VIA BENEDETTO CASTELLI 9/11 \n25064 GUSSAGO BS\n",
+      vatNumber: "04553650989",
+    });
+    vi.mocked(requestPublicHttp).mockResolvedValueOnce(
+      response({ body: Buffer.from(body), text: body }),
+    );
+    await viesCheckTool.execute(
+      { countryCode: "IT", vatNumber: "04553650989" },
+      context,
+    );
+    expect(requestPublicHttp).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(requestPublicHttp).mock.calls[0]![2]).toMatchObject({
+      beforePhysicalWire,
+    });
   });
 });
