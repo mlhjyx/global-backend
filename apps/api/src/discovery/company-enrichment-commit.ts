@@ -6,7 +6,7 @@ import {
   sanitizeCanonicalCompanyAttributes,
   sanitizeStoredCompanyFieldEvidence,
 } from './canonical-company-attributes';
-import { resolveCompanyJurisdiction } from './jurisdiction-resolver';
+import { loadCompanyPhoneChannels, resolveCompanyJurisdiction } from './jurisdiction-resolver';
 
 export interface CompanyEnrichmentHit {
   key: string;
@@ -97,6 +97,7 @@ export async function commitCompanyEnrichmentResults(
     });
   }
   if (governedHits.length === 0) return false;
+  const phoneChannels = current.country ? [] : await loadCompanyPhoneChannels(tx, current.id);
   const backfilledCountry = current.country
     ? null
     : resolveCompanyJurisdiction({
@@ -104,6 +105,7 @@ export async function commitCompanyEnrichmentResults(
         domain: current.domain,
         country: current.country,
         attributes: merged,
+        contactChannels: phoneChannels,
       });
   const updated = await tx.canonicalCompany.updateMany({
     where: { id: current.id, status: { not: 'SUPPRESSED' } },

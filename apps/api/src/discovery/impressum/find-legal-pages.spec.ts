@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { legalPageCandidates, rankLegalPageLinks } from './find-legal-pages';
+import { isStrictContactPageUrl, legalPageCandidates, rankLegalPageLinks } from './find-legal-pages';
 
 /**
  * A1：法律页发现的确定性规则（链接评分 + 固定路径探测）。DE/AT/CH 公司站点的
@@ -58,5 +58,24 @@ describe('legalPageCandidates（首页链接 + 固定路径探测）', () => {
     const candidates = legalPageCandidates('https://a.de/', [], { maxPages: 3 });
     expect(candidates[0]!.kind).toBe('impressum');
     expect(candidates[0]!.url).toBe('https://a.de/impressum');
+  });
+
+  it('#96-2 回归：严格按完整路径段匹配联系页，拒绝 phoenix-contact 等商品/品牌路径', () => {
+    const ranked = rankLegalPageLinks([
+      'https://memodo.it/fotovoltaico/accessori/phoenix-contact/',
+      'https://memodo.it/prodotti/contatti-elettrici',
+      'https://memodo.it/shop/contact-kit',
+      'https://memodo.it/it/contatti/',
+      'https://memodo.it/contatti',
+    ]);
+    expect(ranked.map((r) => r.url)).toEqual([
+      'https://memodo.it/contatti',
+      'https://memodo.it/it/contatti/',
+    ]);
+    expect(isStrictContactPageUrl('https://memodo.it/fotovoltaico/accessori/phoenix-contact/')).toBe(false);
+    expect(isStrictContactPageUrl('https://memodo.it/products/phoenix-contact')).toBe(false);
+    expect(isStrictContactPageUrl('https://memodo.it/contatti')).toBe(true);
+    expect(isStrictContactPageUrl('https://memodo.it/en/contact-us.html')).toBe(true);
+    expect(isStrictContactPageUrl('https://memodo.it/contact/form')).toBe(true);
   });
 });

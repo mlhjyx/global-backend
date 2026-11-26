@@ -350,22 +350,79 @@ export function classifyBuyingCommitteeTrack(title?: string | null): TrackClassi
   return { track: 'other', priority: 9, label: '其他岗位' };
 }
 
+/** 按目标语种映射部门称呼（零汉字，供外语转介请求信与同事内推转介包使用）。 */
+const LOCALIZED_DEPARTMENT_LABELS: Readonly<
+  Record<string, Readonly<Record<BuyingCommitteeTrack, string>>>
+> = Object.freeze({
+  it: Object.freeze({
+    sourcing: 'Ufficio Acquisti',
+    technical: 'Ufficio Tecnico',
+    executive: 'Direzione Generale',
+    assistant: 'Ufficio Acquisti',
+    other: 'Ufficio Acquisti',
+  }),
+  de: Object.freeze({
+    sourcing: 'Einkauf / Beschaffung',
+    technical: 'Technik / Engineering',
+    executive: 'Geschäftsführung',
+    assistant: 'Einkaufsleitung',
+    other: 'Einkauf / Beschaffung',
+  }),
+  es: Object.freeze({
+    sourcing: 'Departamento de Compras',
+    technical: 'Dirección Técnica',
+    executive: 'Dirección General',
+    assistant: 'Departamento de Compras',
+    other: 'Departamento de Compras',
+  }),
+  fr: Object.freeze({
+    sourcing: 'Service Achats',
+    technical: 'Direction Technique',
+    executive: 'Direction Générale',
+    assistant: 'Service Achats',
+    other: 'Service Achats',
+  }),
+  pt: Object.freeze({
+    sourcing: 'Departamento de Compras',
+    technical: 'Diretoria Técnica',
+    executive: 'Diretoria Geral',
+    assistant: 'Departamento de Compras',
+    other: 'Departamento de Compras',
+  }),
+  en: Object.freeze({
+    sourcing: 'Procurement / Purchasing',
+    technical: 'Technical / Engineering',
+    executive: 'Management / Executive',
+    assistant: 'Procurement / Purchasing',
+    other: 'Procurement / Purchasing',
+  }),
+});
+
+export function localizedDepartmentLabel(
+  track: BuyingCommitteeTrack,
+  language: string,
+): string {
+  const lang = (language || 'en').trim().toLowerCase().slice(0, 2);
+  const table = LOCALIZED_DEPARTMENT_LABELS[lang] ?? LOCALIZED_DEPARTMENT_LABELS.en!;
+  return table[track] ?? table.other;
+}
+
 /** 按 S > A > B > C 4 级通道分层，彻底把具名直邮/部门直达箱与 info@ 剥离。 */
 export function classifyContactChannelTier(input: ContactChannelInput): ContactChannelTier {
   const email = (input.email ?? '').trim().toLowerCase();
   const hasNamedPerson = Boolean((input.fullName ?? '').trim());
   const classified = email ? classifyContactEmail(email) : null;
+  const isPersonalEmail = classified?.emailType === 'personal' || classified?.emailType === 'other';
 
-  if (
-    email &&
-    hasNamedPerson &&
-    input.emailVerificationState === 'VALID' &&
-    (classified?.emailType === 'personal' || classified?.emailType === 'other')
-  ) {
+  if (email && hasNamedPerson && input.emailVerificationState === 'VALID' && isPersonalEmail) {
     return 'S';
   }
   if (email && classified && FUNCTIONAL_A_TIER_TYPES.has(classified.emailType)) {
     return 'A';
+  }
+  // #96-1：具名决策人 + 非 INVALID 个人邮箱（CATCH_ALL_RISKY / UNKNOWN）归入 B 级，绝不与纯 info@ 同落 C 级。
+  if (email && hasNamedPerson && input.emailVerificationState !== 'INVALID' && isPersonalEmail) {
+    return 'B';
   }
   if (
     (input.linkedinUrl && input.linkedinUrl.trim()) ||
@@ -525,4 +582,92 @@ export function buildReferralFirstInfoDraft(input: {
       `Thank you for your help — ${seller}.`,
     ].join('\n\n'),
   };
+}
+
+/**
+ * 武器 10：<=60 词同事内推转介包（Forwardable Blurb），便于前台/销售/工程师一键转发给内部采购或技术决策人。
+ */
+export function buildForwardableBlurb(input: {
+  language: string;
+  buyerCompanyName: string;
+  targetDept: string;
+  sellerProductSummary: string;
+  sellerLegalName: string;
+}): string {
+  const lang = (input.language || 'en').trim().toLowerCase().slice(0, 2);
+  const buyer = input.buyerCompanyName.trim();
+  const dept = input.targetDept.trim();
+  const prod = input.sellerProductSummary.trim();
+  const seller = input.sellerLegalName.trim();
+
+  let raw: string;
+  if (lang === 'it') {
+    raw = `Nota inoltrabile (${dept} – ${buyer}): ${seller} produce direttamente ${prod}. Possiamo inviare schede tecniche, certificazioni e tempi di consegna per valutare un secondo fornitore affidabile.`;
+  } else if (lang === 'de') {
+    raw = `Weiterleitbare Kurzinfo (${dept} – ${buyer}): ${seller} fertigt ${prod} direkt im eigenen Werk. Gern teilen wir Datenblätter, Zertifikate und Lieferzeiten für eine Zweitlieferanten-Prüfung.`;
+  } else if (lang === 'es') {
+    raw = `Nota reenviable (${dept} – ${buyer}): ${seller} fabrica directamente ${prod}. Podemos compartir fichas técnicas, certificaciones y plazos de entrega para evaluar un proveedor alternativo.`;
+  } else if (lang === 'fr') {
+    raw = `Note transférable (${dept} – ${buyer}) : ${seller} fabrique directement ${prod}. Nous pouvons transmettre fiches techniques, certifications et délais pour évaluer une seconde source fiable.`;
+  } else if (lang === 'pt') {
+    raw = `Nota encaminhável (${dept} – ${buyer}): a ${seller} fabrica diretamente ${prod}. Podemos enviar fichas técnicas, certificações e prazos de entrega para avaliação de fornecedor alternativo.`;
+  } else {
+    raw = `Forwardable note (${dept} – ${buyer}): ${seller} manufactures ${prod} directly in-house. Happy to share technical datasheets, certifications, and standard lead times as a qualified backup source.`;
+  }
+  const words = raw.trim().split(/\s+/u);
+  return words.length <= 60 ? raw.trim() : `${words.slice(0, 59).join(' ')}…`;
+}
+
+/** 35+ 出口国当地工作时区与国际拨号提示静态表（零外部依赖、零瞎猜）。 */
+const OUTREACH_WINDOW_BY_COUNTRY: Readonly<Record<string, string>> = Object.freeze({
+  DE: 'CET(UTC+1/+2) 08:30-17:00 | Dial:+49',
+  AT: 'CET(UTC+1/+2) 08:30-17:00 | Dial:+43',
+  CH: 'CET(UTC+1/+2) 08:30-17:00 | Dial:+41',
+  IT: 'CET(UTC+1/+2) 09:00-17:30 | Dial:+39',
+  FR: 'CET(UTC+1/+2) 09:00-17:30 | Dial:+33',
+  ES: 'CET(UTC+1/+2) 09:30-18:00 | Dial:+34',
+  NL: 'CET(UTC+1/+2) 09:00-17:00 | Dial:+31',
+  BE: 'CET(UTC+1/+2) 09:00-17:30 | Dial:+32',
+  PL: 'CET(UTC+1/+2) 08:30-16:30 | Dial:+48',
+  CZ: 'CET(UTC+1/+2) 08:30-16:30 | Dial:+420',
+  SK: 'CET(UTC+1/+2) 08:30-16:30 | Dial:+421',
+  HU: 'CET(UTC+1/+2) 08:30-17:00 | Dial:+36',
+  SE: 'CET(UTC+1/+2) 08:30-16:30 | Dial:+46',
+  DK: 'CET(UTC+1/+2) 08:30-16:30 | Dial:+45',
+  NO: 'CET(UTC+1/+2) 08:30-16:30 | Dial:+47',
+  GB: 'GMT(UTC+0/+1) 09:00-17:30 | Dial:+44',
+  UK: 'GMT(UTC+0/+1) 09:00-17:30 | Dial:+44',
+  IE: 'GMT(UTC+0/+1) 09:00-17:30 | Dial:+353',
+  PT: 'WET(UTC+0/+1) 09:00-17:30 | Dial:+351',
+  FI: 'EET(UTC+2/+3) 08:30-16:30 | Dial:+358',
+  RO: 'EET(UTC+2/+3) 09:00-17:30 | Dial:+40',
+  GR: 'EET(UTC+2/+3) 09:00-17:30 | Dial:+30',
+  TR: 'TRT(UTC+3) 09:00-17:30 | Dial:+90',
+  AE: 'GST(UTC+4) 09:00-17:30(Mon-Fri) | Dial:+971',
+  SA: 'AST(UTC+3) 09:00-17:00(Sun-Thu) | Dial:+966',
+  QA: 'AST(UTC+3) 08:30-16:30(Sun-Thu) | Dial:+974',
+  ZA: 'SAST(UTC+2) 08:30-17:00 | Dial:+27',
+  US: 'EST/PST(UTC-5/-8) 09:00-17:00 | Dial:+1',
+  CA: 'EST/PST(UTC-5/-8) 09:00-17:00 | Dial:+1',
+  MX: 'CST(UTC-6) 09:00-18:00 | Dial:+52',
+  BR: 'BRT(UTC-3) 09:00-17:30 | Dial:+55',
+  CL: 'CLT(UTC-4/-3) 09:00-17:30 | Dial:+56',
+  CO: 'COT(UTC-5) 08:30-17:30 | Dial:+57',
+  AR: 'ART(UTC-3) 09:00-18:00 | Dial:+54',
+  AU: 'AEST(UTC+10/+11) 09:00-17:00 | Dial:+61',
+  NZ: 'NZST(UTC+12/+13) 09:00-17:00 | Dial:+64',
+  JP: 'JST(UTC+9) 09:00-17:30 | Dial:+81',
+  KR: 'KST(UTC+9) 09:00-18:00 | Dial:+82',
+  SG: 'SGT(UTC+8) 09:00-17:30 | Dial:+65',
+  MY: 'MYT(UTC+8) 09:00-17:30 | Dial:+60',
+  TH: 'ICT(UTC+7) 09:00-17:30 | Dial:+66',
+  VN: 'ICT(UTC+7) 08:30-17:30 | Dial:+84',
+  ID: 'WIB(UTC+7) 09:00-17:00 | Dial:+62',
+  PH: 'PHT(UTC+8) 09:00-17:30 | Dial:+63',
+  IN: 'IST(UTC+5:30) 09:30-18:00 | Dial:+91',
+});
+
+export function countryOutreachWindow(countryCode: string | null | undefined): string | null {
+  const cc = (countryCode ?? '').trim().toUpperCase();
+  return cc ? (OUTREACH_WINDOW_BY_COUNTRY[cc] ?? null) : null;
 }

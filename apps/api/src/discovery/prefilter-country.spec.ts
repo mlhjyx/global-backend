@@ -86,4 +86,38 @@ describe('L1 deterministic pre-country inference (prefilter-country)', () => {
       }),
     ).toMatchObject({ iso: 'IT', source: 'vies_registered_country' });
   });
+
+  it('#96-5 回归：支持 companyContactChannels / phones 国际区号推断，且多国冲突时不盲猜', () => {
+    expect(
+      inferPrefilterCountry({
+        name: 'IO Solar',
+        domain: 'iosolar.com',
+        country: null,
+        attributes: {},
+        contactChannels: [{ channel: 'phone', value: '+390543097431', status: 'UNVERIFIED' }],
+      }),
+    ).toMatchObject({ iso: 'IT', source: 'dial_code', evidence: '+39' });
+
+    expect(
+      inferPrefilterCountry({
+        name: 'AEG Market',
+        domain: 'aegmarket.com',
+        country: null,
+        phones: ['+3901631740830'],
+      }),
+    ).toMatchObject({ iso: 'IT', source: 'dial_code', evidence: '+39' });
+
+    // 多国单国区号冲突时保守返回 null，不瞎猜
+    expect(
+      inferPrefilterCountry({
+        name: 'Cross Border Solar',
+        domain: 'crossbordersolar.com',
+        country: null,
+        contactChannels: [
+          { channel: 'phone', value: '+390543097431', status: 'UNVERIFIED' },
+          { channel: 'phone', value: '+49891234567', status: 'UNVERIFIED' },
+        ],
+      }),
+    ).toBeNull();
+  });
 });

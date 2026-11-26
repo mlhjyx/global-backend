@@ -4,6 +4,7 @@ import {
   MAX_COMPANIES_HOUSE_CONTACT_CALLS,
   MAX_COMPANY_DISCOVERY_ADAPTERS,
   MAX_CONTACT_DISCOVERY_ADAPTERS,
+  MAX_CONTACT_DISCOVERY_COMPANIES,
   MAX_CONTACTS_PER_DISCOVERY_ADAPTER,
   MAX_DECISION_MAKER_PAGES,
   MAX_DIGITAL_FOOTPRINT_RENDERS,
@@ -38,8 +39,10 @@ import {
   MAX_SINGLE_SEARCH_WIRES_PER_QUERY,
   MAX_SITEMAP_HTTP_GETS,
   MAX_SOCIAL_DORKS,
+  MAX_SOCIAL_EXA_PEOPLE_QUERIES,
   MAX_SOCIAL_FETCHES_PER_CANDIDATE,
   MAX_SOCIAL_PROFILE_FETCHES,
+  MAX_SOCIAL_SERPER_QUERIES,
   MAX_STRUCTURED_HARVEST_HTTP_GETS,
   MAX_STRUCTURED_HARVEST_RENDERS,
   MAX_UNDERSTANDING_SUBPAGES,
@@ -69,6 +72,8 @@ import {
   exaSearchTool,
   googlePlacesSearchTool,
   serperSearchTool,
+  socialExaPeopleTool,
+  socialSerperSearchTool,
 } from '../tools/search-provider-tools';
 import {
   crawl4aiFetchTool,
@@ -302,6 +307,15 @@ function discoveryRunEnvelope(
         MAX_DISCOVERY_SIGNAL_COMPANIES * MAX_STRUCTURED_HARVEST_HTTP_GETS +
           MAX_DISCOVERY_WATCH_COMPANIES * MAX_SITEMAP_HTTP_GETS,
       ),
+      // 联系人阶段（Batch 1.8A）：4 轨社媒商业搜人（每公司 ≤2 次 Serper X-Ray + 1 次 Exa People）。
+      tool(
+        contract(socialSerperSearchTool),
+        MAX_CONTACT_DISCOVERY_COMPANIES * MAX_SOCIAL_SERPER_QUERIES,
+      ),
+      tool(
+        contract(socialExaPeopleTool),
+        MAX_CONTACT_DISCOVERY_COMPANIES * MAX_SOCIAL_EXA_PEOPLE_QUERIES,
+      ),
     ],
     {
       ...(extra ? { manufacturerNetworkCompanies: extra, manufacturerNetworkLookups: extra, manufacturerNetworkFetches: extra } : {}),
@@ -358,6 +372,8 @@ function contactDiscoveryEnvelope(
       tool(contract(crawl4aiFetchTool), decisionMakerFetches + publicWebFetches),
       tool(contract(crawl4aiRenderTool), publicWebRenders),
       tool(contract(socialSearchTool), MAX_SOCIAL_DORKS),
+      tool(contract(socialSerperSearchTool), MAX_SOCIAL_SERPER_QUERIES),
+      tool(contract(socialExaPeopleTool), MAX_SOCIAL_EXA_PEOPLE_QUERIES),
       tool(contract(socialFetchTool), socialFetches),
       tool(contract(companiesHouseSearchTool), MAX_COMPANIES_HOUSE_CONTACT_CALLS),
       tool(contract(inpiRneSearchTool), 1),
@@ -369,6 +385,8 @@ function contactDiscoveryEnvelope(
       decisionMakerPages: MAX_DECISION_MAKER_PAGES,
       publicWebLinkedPages: MAX_PUBLIC_WEB_CONTACT_LINKED_PAGES,
       socialDorks: MAX_SOCIAL_DORKS,
+      socialSerperQueries: MAX_SOCIAL_SERPER_QUERIES,
+      socialExaPeopleQueries: MAX_SOCIAL_EXA_PEOPLE_QUERIES,
       socialProfileFetches: MAX_SOCIAL_PROFILE_FETCHES,
       socialFetchesPerCandidate: MAX_SOCIAL_FETCHES_PER_CANDIDATE,
       modelLogicalInvocations: extractInvocations,

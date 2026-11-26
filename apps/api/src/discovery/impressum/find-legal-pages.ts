@@ -13,16 +13,86 @@ export interface LegalPageCandidate {
   score: number;
 }
 
-const PATH_RULES: { kind: LegalPageKind; pattern: RegExp; score: number }[] = [
-  // 法定出版信息：Impressum（DE/AT/CH）/ imprint / legal notice / mentions légales。
-  { kind: 'impressum', pattern: /impressum|imprint|legal-?notice|mentions-?l[ée]gales|rechtliches?/iu, score: 100 },
-  { kind: 'contact', pattern: /kontakt|contact|contatti|contacto/iu, score: 80 },
-  // about 只作兜底（有的小站把联系方式放在团队/公司页）。
-  { kind: 'about', pattern: /ueber-uns|über-uns|about|unternehmen/iu, score: 40 },
-];
+const IMPRESSUM_SEGMENT_RE =
+  /^(?:impressum|imprint|legal[-_]?notice|site[-_]?notice|mentions[-_]?l[ée]gales|rechtliches?|anbieterkennzeichnung|note[-_]?legali|dati[-_]?societari|aviso[-_]?legal)$/iu;
 
-/** 资产与低价值页面（隐私/条款页几乎没有联系方式，且不在 A1 口径内）。 */
-const EXCLUDE = /\.(pdf|jpe?g|png|gif|svg|webp|css|js)([?#]|$)|\/(privacy|datenschutz|cookie|terms|agb|blog|news|search|tag)\b/iu;
+const CONTACT_SEGMENT_RE =
+  /^(?:kontakt|kontakte|kontaktformular|kontaktseite|kontaktaufnahme|kontaktieren|contact|contacts|contact[-_]?us|contactus|contact[-_]?form|get[-_]?in[-_]?touch|contatti|contatto|contattaci|contacto|contactenos|cont[áa]ctenos|contactez[-_]?nous|nous[-_]?contacter|contato|contatos|fale[-_]?conosco|contacteer[-_]?ons|iletisim|iletişim|anfrage|anfragen|anfrageformular)$/iu;
+
+const CONTACT_FORM_CHILD_RE = /^(?:form|formular|inquiry|anfrage|message|send)$/iu;
+
+const ABOUT_SEGMENT_RE =
+  /^(?:ueber[-_]?uns|über[-_]?uns|uber[-_]?uns|about|about[-_]?us|unternehmen|company|chi[-_]?siamo|azienda|quienes[-_]?somos|qui[-_]?sommes[-_]?nous|sobre[-_]?nos|over[-_]?ons)$/iu;
+
+const PAGE_EXT_RE = /\.(?:html?|php|aspx?|jsp|shtml)$/iu;
+
+/** 资产、电商商品页与低价值页面（严格按路径段/扩展名排除，杜绝 phoenix-contact 等商品页误判为联系页）。 */
+const EXCLUDE_ASSET_RE = /\.(?:pdf|jpe?g|png|gif|svg|webp|css|js|xml|json|zip)([?#]|$)/iu;
+const EXCLUDE_SEGMENT_RE =
+  /^(?:privacy|privacy[-_]?policy|datenschutz|cookie|cookies|terms|terms[-_]?of[-_]?use|agb|blog|news|search|suche|tag|tags|product|products|prodotti|prodotto|produkte|produkt|shop|store|catalog|catalogo|katalog|accessori|accessories|brand|brands|marchi|category|categorie|kategorie|cart|warenkorb|checkout|login|signin|account|register)$/iu;
+
+function decodePathSegments(pathname: string): string[] | null {
+  const rawSegments = pathname.split('/').filter((segment) => segment.length > 0);
+  const decoded: string[] = [];
+  for (const segment of rawSegments) {
+    try {
+      decoded.push(decodeURIComponent(segment).trim());
+    } catch {
+      return null;
+    }
+  }
+  return decoded;
+}
+
+function stripPageExt(segment: string): string {
+  return segment.replace(PAGE_EXT_RE, '').toLowerCase();
+}
+
+function classifyLegalSegments(segments: readonly string[]): { kind: LegalPageKind; score: number } | null {
+  if (segments.length === 0) return null;
+  const cleaned = segments.map(stripPageExt);
+  if (cleaned.some((seg) => EXCLUDE_SEGMENT_RE.test(seg))) return null;
+  const last = cleaned.at(-1)!;
+  const prev = cleaned.length >= 2 ? cleaned.at(-2)! : '';
+
+  if (IMPRESSUM_SEGMENT_RE.test(last) || (cleaned.length <= 3 && cleaned.some((seg) => IMPRESSUM_SEGMENT_RE.test(seg)))) {
+    return { kind: 'impressum', score: 100 };
+  }
+  if (
+    cleaned.length <= 4 &&
+    (CONTACT_SEGMENT_RE.test(last) || (CONTACT_FORM_CHILD_RE.test(last) && CONTACT_SEGMENT_RE.test(prev)))
+  ) {
+    return { kind: 'contact', score: 80 };
+  }
+  if (cleaned.length <= 3 && ABOUT_SEGMENT_RE.test(last)) {
+    return { kind: 'about', score: 40 };
+  }
+  return null;
+}
+
+/** 严格校验 URL 是否为真正的站点联系页（完整路径段匹配 + 排除商品/分类/品牌路径）。 */
+export function isStrictContactPageUrl(rawUrl: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return false;
+  if (EXCLUDE_ASSET_RE.test(url.pathname)) return false;
+  const segments = decodePathSegments(url.pathname);
+  if (!segments || segments.length === 0 || segments.length > 4) return false;
+  const classified = classifyLegalSegments(segments);
+  return classified?.kind === 'contact';
+}
+
+function pathDepth(rawUrl: string): number {
+  try {
+    return new URL(rawUrl).pathname.split('/').filter(Boolean).length;
+  } catch {
+    return 99;
+  }
+}
 
 /**
  * 固定路径探测候选；仅当首页链接没有对应 kind 时使用。两种 kind 交替排列——
@@ -52,13 +122,10 @@ export function rankLegalPageLinks(links: readonly string[]): LegalPageCandidate
       continue;
     }
     if (url.protocol !== 'https:' && url.protocol !== 'http:') continue;
-    if (EXCLUDE.test(url.pathname)) continue;
-    let best: { kind: LegalPageKind; score: number } | undefined;
-    for (const rule of PATH_RULES) {
-      if (rule.pattern.test(url.pathname)) {
-        if (!best || rule.score > best.score) best = { kind: rule.kind, score: rule.score };
-      }
-    }
+    if (EXCLUDE_ASSET_RE.test(url.pathname)) continue;
+    const segments = decodePathSegments(url.pathname);
+    if (!segments) continue;
+    const best = classifyLegalSegments(segments);
     if (!best) continue;
     url.hash = '';
     url.search = '';
@@ -71,7 +138,7 @@ export function rankLegalPageLinks(links: readonly string[]): LegalPageCandidate
     }
   }
   return [...byKey.values()].sort(
-    (a, b) => b.score - a.score || a.url.localeCompare(b.url),
+    (a, b) => b.score - a.score || pathDepth(a.url) - pathDepth(b.url) || a.url.localeCompare(b.url),
   );
 }
 

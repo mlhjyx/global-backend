@@ -34,6 +34,7 @@ export const EXPECTED_TOOL_IDS = Object.freeze([
   'mapyourshow.fetch', 'samgov.search', 'opencorporates.search', 'sanctions.download',
   'deepseek.search', 'deepseek.fetch',
   'serper.search', 'brave.search', 'exa.search', 'google_places.search',
+  'social.search_serper', 'social.search_exa_people',
   'contact_email.find.hunter', 'contact_email.find.prospeo', 'contact_email.verify.millionverifier',
   'contact_email.verify.emailable', 'contact_email.verify.zerobounce',
 ]);
@@ -107,6 +108,8 @@ export const EXPECTED_TOOL_CALLSITES = Object.freeze([
   'apps/api/src/discovery/providers/public-web.provider.ts#crawl4ai.fetch#1',
   'apps/api/src/discovery/providers/public-web.provider.ts#crawl4ai.render#1',
   'apps/api/src/discovery/providers/social-presence.provider.ts#social.search#1',
+  'apps/api/src/discovery/providers/social-presence.provider.ts#social.search_serper#1',
+  'apps/api/src/discovery/providers/social-presence.provider.ts#social.search_exa_people#1',
   'apps/api/src/discovery/providers/social-presence.provider.ts#social.fetch#1',
   'apps/api/src/discovery/providers/social-presence.provider.ts#social.fetch#2',
   'apps/api/src/discovery/providers/social-presence.provider.ts#social.fetch#3',

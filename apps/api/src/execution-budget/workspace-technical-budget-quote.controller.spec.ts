@@ -116,8 +116,8 @@ describe('WorkspaceTechnicalBudgetQuoteController', () => {
       data: expect.objectContaining({
         purpose: 'discovery.run',
         subjectType: 'discovery_run',
-        // Capped-mode fit ceiling aligned with Run 2 pool cap (500) + right-sized Flash task ceilings + Batch 1.4-B L0 search tools (self-hosted crawl4ai priced at 0c).
-        requiredCapMicrousd: '573380000',
+        // Capped-mode fit ceiling aligned with Run 2 pool cap (500) + right-sized Flash task ceilings + Batch 1.4-B L0 + Batch 1.8A social people tools (+75c).
+        requiredCapMicrousd: '574130000',
       }),
     });
   });
@@ -148,7 +148,7 @@ describe('WorkspaceTechnicalBudgetQuoteController', () => {
         purpose: 'discovery.run',
         subjectType: 'company',
         subjectId: '30000000-0000-4000-8000-000000000003',
-        requiredCapMicrousd: '2400000',
+        requiredCapMicrousd: '2430000',
       }),
     });
   });
@@ -165,7 +165,7 @@ describe('WorkspaceTechnicalBudgetQuoteController', () => {
         purpose: 'discovery.run',
         subjectType: 'company',
         subjectId: '30000000-0000-4000-8000-000000000003',
-        requiredCapMicrousd: '2400000',
+        requiredCapMicrousd: '2430000',
         requestSha256:
           'dc8a43b2754f37639a57df618ab09e857364052abd7f1eca46b06da212ea18c6',
       }),

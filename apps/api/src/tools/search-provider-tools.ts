@@ -73,6 +73,19 @@ export interface ExaSearchToolInput {
   category?: 'company';
 }
 
+export interface SocialSerperSearchToolInput {
+  query: string;
+  num?: number;
+  gl?: string;
+  hl?: string;
+}
+
+export interface SocialExaPeopleToolInput {
+  query: string;
+  numResults?: number;
+  includeDomains?: string[];
+}
+
 export interface GooglePlacesToolInput {
   textQuery: string;
   maxResultCount?: number;
@@ -504,11 +517,181 @@ export function createBraveSearchTool(
 
 export const braveSearchTool = createBraveSearchTool();
 
-/** 注册 L0 实时付费搜索/地点工具（由 registerBuiltinTools 调用）。 */
+function durablePersonSearchHits(hits: readonly SearchProviderHit[]): SearchProviderResultItem[] {
+  return hits
+    .flatMap((hit): SearchProviderResultItem[] => {
+      const url = sanitizeSearchProviderUrl(hit.url);
+      if (
+        !url ||
+        url.length > URL_MAX_CHARS ||
+        !isDurableText(url) ||
+        !isPersonProfileUrl(url)
+      ) {
+        return [];
+      }
+      const title =
+        typeof hit.title === 'string' ? durableTitle(hit.title, TITLE_MAX_CHARS) : null;
+      return [title === null ? { url } : { url, title }];
+    })
+    .slice(0, SEARCH_PROVIDER_MAX_RESULTS);
+}
+
+function replayPersonSearchResult(result: {
+  data: SearchProviderOutput;
+  costCents: number;
+  degraded?: boolean;
+}) {
+  return {
+    data: {
+      results: result.data.results.map((item) =>
+        typeof item.title === 'string' && item.title.length > 0
+          ? { url: item.url, title: item.title }
+          : { url: item.url },
+      ),
+    },
+    costCents: result.costCents,
+    ...(result.degraded === undefined ? {} : { degraded: result.degraded }),
+  };
+}
+
+export function createSocialSerperSearchTool(
+  dependencies: SerperSearchToolDependencies = { serperSearch },
+): Tool<SocialSerperSearchToolInput, SearchProviderOutput> {
+  const getKey = dependencies.resolveApiKey ?? resolveSerperApiKey;
+  return {
+    id: "social.search_serper",
+    version: '1.0.0',
+    category: 'search',
+    sourceClass: 'public_intelligence',
+    cost: { unit: 'request', estimatedCents: SERPER_REQUEST_COST_CENTS, external: true },
+    rateLimit: { rps: 5, concurrency: 5 },
+    compliance: {
+      sourcePolicy: 'none',
+      respectsRobots: false,
+      personalData: true,
+      allowedPurpose: ['discovery', 'enrichment'],
+      reversible: true,
+      authRequired: true,
+      risk: 'medium',
+    },
+    capabilities: { produces: ['contact'], accepts: ['keywords'] },
+    idempotencyKey: (input) => `social.search_serper:${stableKey(input)}`,
+    durableResultStrategy: {
+      kind: "typed_projection",
+      schema: CATALOG_RESULT_PROJECTION_SCHEMAS["social.search_serper"],
+    },
+    durableReplayResult: replayPersonSearchResult,
+    healthCheck: async () =>
+      getKey()
+        ? { healthy: true, detail: 'serper-people' }
+        : { healthy: false, detail: 'SERPER_API_KEY not configured' },
+    physicalWireObservation: 'before_each_wire',
+    execute: async (input, ctx) => {
+      if (!input || typeof input !== 'object') {
+        throw new Error('SOCIAL_SERPER_INPUT_INVALID: input must be an object');
+      }
+      const query = normalizeQueryString(input.query, 'SOCIAL_SERPER_INPUT_INVALID');
+      const num = normalizeBoundedCount(input.num, 10, 'SOCIAL_SERPER_INPUT_INVALID');
+      const apiKey = getKey();
+      if (!apiKey) {
+        return { data: { results: [] }, costCents: 0, degraded: true };
+      }
+      await assertToolExternalActionAuthorized(ctx);
+      const response = await dependencies.serperSearch(
+        { query, num, gl: input.gl, hl: input.hl },
+        {
+          apiKey,
+          beforeRequest: async () => {
+            await assertToolExternalActionAuthorized(ctx);
+            await ctx.beforePhysicalWire?.();
+          },
+        },
+      );
+      return {
+        data: { results: durablePersonSearchHits(response.hits) },
+        costCents: response.billed ? SERPER_REQUEST_COST_CENTS : 0,
+      };
+    },
+  };
+}
+
+export const socialSerperSearchTool = createSocialSerperSearchTool();
+
+export interface SocialExaPeopleToolDependencies {
+  exaSearch: typeof exaSearch;
+  resolveApiKey?: typeof resolveExaApiKey;
+}
+
+export function createSocialExaPeopleTool(
+  dependencies: SocialExaPeopleToolDependencies = { exaSearch },
+): Tool<SocialExaPeopleToolInput, SearchProviderOutput> {
+  const getKey = dependencies.resolveApiKey ?? resolveExaApiKey;
+  return {
+    id: "social.search_exa_people",
+    version: '1.0.0',
+    category: 'search',
+    sourceClass: 'public_intelligence',
+    cost: { unit: 'request', estimatedCents: EXA_REQUEST_COST_CENTS, external: true },
+    rateLimit: { rps: 5, concurrency: 5 },
+    compliance: {
+      sourcePolicy: 'none',
+      respectsRobots: false,
+      personalData: true,
+      allowedPurpose: ['discovery', 'enrichment'],
+      reversible: true,
+      authRequired: true,
+      risk: 'medium',
+    },
+    capabilities: { produces: ['contact'], accepts: ['keywords'] },
+    idempotencyKey: (input) => `social.search_exa_people:${stableKey(input)}`,
+    durableResultStrategy: {
+      kind: "typed_projection",
+      schema: CATALOG_RESULT_PROJECTION_SCHEMAS["social.search_exa_people"],
+    },
+    durableReplayResult: replayPersonSearchResult,
+    healthCheck: async () =>
+      getKey()
+        ? { healthy: true, detail: 'exa-people' }
+        : { healthy: false, detail: 'EXA_API_KEY not configured' },
+    physicalWireObservation: 'before_each_wire',
+    execute: async (input, ctx) => {
+      if (!input || typeof input !== 'object') {
+        throw new Error('SOCIAL_EXA_PEOPLE_INPUT_INVALID: input must be an object');
+      }
+      const query = normalizeQueryString(input.query, 'SOCIAL_EXA_PEOPLE_INPUT_INVALID');
+      const numResults = normalizeBoundedCount(input.numResults, 10, 'SOCIAL_EXA_PEOPLE_INPUT_INVALID');
+      const apiKey = getKey();
+      if (!apiKey) {
+        return { data: { results: [] }, costCents: 0, degraded: true };
+      }
+      await assertToolExternalActionAuthorized(ctx);
+      const response = await dependencies.exaSearch(
+        { query, numResults, includeDomains: input.includeDomains, category: 'people' },
+        {
+          apiKey,
+          beforeRequest: async () => {
+            await assertToolExternalActionAuthorized(ctx);
+            await ctx.beforePhysicalWire?.();
+          },
+        },
+      );
+      return {
+        data: { results: durablePersonSearchHits(response.hits) },
+        costCents: response.billed ? EXA_REQUEST_COST_CENTS : 0,
+      };
+    },
+  };
+}
+
+export const socialExaPeopleTool = createSocialExaPeopleTool();
+
+/** 注册 L0 实时付费搜索/地点工具及受治理个人搜人工具（由 registerBuiltinTools 调用）。 */
 export function registerSearchProviderTools(registry: ToolRegistry): ToolRegistry {
   registry.register(serperSearchTool as Tool);
   registry.register(braveSearchTool as Tool);
   registry.register(exaSearchTool as Tool);
   registry.register(googlePlacesSearchTool as Tool);
+  registry.register(socialSerperSearchTool as Tool);
+  registry.register(socialExaPeopleTool as Tool);
   return registry;
 }

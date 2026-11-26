@@ -9,21 +9,24 @@ import {
 describe('lead-channels', () => {
   const company = { id: 'co-1', name: 'Coenergia srl', domain: 'coenergia.com', status: 'ENRICHED' };
 
-  it('filters invalid and suppressed company contact channels', () => {
+  it('filters invalid, suppressed, and non-contact historical dirty form_url channels (#96-2)', () => {
     const out = filterReachableCompanyChannels(
       [
         { channel: 'email', value: 'info@coenergia.com', emailType: 'role', status: 'UNVERIFIED', sourceType: 'homepage', sourceUrl: 'https://coenergia.com/' },
         { channel: 'email', value: 'blocked@coenergia.com', emailType: 'role', status: 'UNVERIFIED', sourceType: 'homepage', sourceUrl: null },
         { channel: 'phone', value: '+39 0386 734092', emailType: null, status: 'UNVERIFIED', sourceType: 'contact_page', sourceUrl: null },
         { channel: 'form_url', value: 'https://coenergia.com/contatti', emailType: null, status: 'INVALID', sourceType: 'contact_page', sourceUrl: null },
+        { channel: 'form_url', value: 'https://memodo.it/fotovoltaico/accessori/phoenix-contact/', emailType: null, status: 'UNVERIFIED', sourceType: 'contact_page', sourceUrl: null },
+        { channel: 'form_url', value: 'https://coenergia.com/it/contatti/', emailType: null, status: 'UNVERIFIED', sourceType: 'contact_page', sourceUrl: null },
       ],
       [{ type: 'email', value: 'blocked@coenergia.com' }],
       company,
     );
-    expect(out).toHaveLength(2);
+    expect(out).toHaveLength(3);
     expect(out.map((c) => [c.channel, c.value])).toEqual([
       ['email', 'info@coenergia.com'],
       ['phone', '+39 0386 734092'],
+      ['form_url', 'https://coenergia.com/it/contatti/'],
     ]);
   });
 

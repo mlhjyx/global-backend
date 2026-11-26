@@ -576,6 +576,8 @@ const REPRESENTATIVE_LEGAL_BOUNDARY_FIXTURES: readonly ProjectionFixture[] = [
   { toolId: 'exa.search', schema: 'exa-search/v1', raw: EXA_SEARCH_RAW },
   { toolId: 'google_places.search', schema: 'google-places-search/v1', raw: GOOGLE_PLACES_RAW },
   { toolId: 'vies.check', schema: 'vies-check/v1', raw: VIES_CHECK_RAW },
+  { toolId: 'social.search_serper', schema: 'social-search-serper/v1', raw: SEARX_RAW },
+  { toolId: 'social.search_exa_people', schema: 'social-search-exa-people/v1', raw: SEARX_RAW },
 ];
 
 function schemaTypes(node: JsonRecord): readonly string[] {
@@ -852,6 +854,18 @@ const EXPECTED_BOUNDS: Readonly<Record<string, JsonRecord>> = {
     '$.data.legalName.maxLength': 300,
     '$.data.registeredCity.maxLength': 120,
   },
+  'social-search-serper/v1': {
+    ...COMMON_RESULT_BOUNDS,
+    '$.data.results.maxItems': 20,
+    '$.data.results[].url.maxLength': 2048,
+    '$.data.results[].title.maxLength': 2000,
+  },
+  'social-search-exa-people/v1': {
+    ...COMMON_RESULT_BOUNDS,
+    '$.data.results.maxItems': 20,
+    '$.data.results[].url.maxLength': 2048,
+    '$.data.results[].title.maxLength': 2000,
+  },
 };
 
 function selectedOneOfIndex(schema: JsonRecord, value: unknown): number {
@@ -960,6 +974,7 @@ describe('closed catalog Tool result projections', () => {
       'google_patents.search', 'tradefair.algolia', 'mapyourshow.fetch',
       'deepseek.search', 'deepseek.fetch',
       'serper.search', 'brave.search', 'exa.search', 'google_places.search', 'vies.check',
+      'social.search_serper', 'social.search_exa_people',
     ]);
     expect(CATALOG_RESULT_PROJECTION_SCHEMAS).toEqual({
       'searxng.search': 'searxng-search/v1',
@@ -981,6 +996,8 @@ describe('closed catalog Tool result projections', () => {
       'exa.search': 'exa-search/v1',
       'google_places.search': 'google-places-search/v1',
       'vies.check': 'vies-check/v1',
+      'social.search_serper': 'social-search-serper/v1',
+      'social.search_exa_people': 'social-search-exa-people/v1',
     });
     expect(CATALOG_RESULT_PROJECTION_DEFINITIONS.map((definition) => definition.schema))
       .toEqual(Object.values(CATALOG_RESULT_PROJECTION_SCHEMAS));

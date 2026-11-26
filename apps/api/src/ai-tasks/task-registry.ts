@@ -459,7 +459,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     // crawl4ai.render：A1 Impressum 挖掘取渲染后原始 HTML（JSON-LD contactPoint / cfemail
     // 只在 HTML 面可见）——不在白名单时 ToolPolicyDenied 会被当 control error 把整次
     // 联系人发现打成失败（#748 同类事故），故显式放行。
-    allowedTools: ['social.search', 'social.fetch', 'crawl4ai.fetch', 'http.get', 'crawl4ai.render'],
+    allowedTools: ['social.search', 'social.search_serper', 'social.search_exa_people', 'social.fetch', 'crawl4ai.fetch', 'http.get', 'crawl4ai.render'],
     maxCostCents: 15,
     maxOutputTokens: REASONING_TASK_MAX_OUTPUT_TOKENS,
     timeoutMs: 120000,

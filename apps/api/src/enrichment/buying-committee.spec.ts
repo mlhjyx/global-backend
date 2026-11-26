@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildBuyingCommitteeQueries,
+  buildForwardableBlurb,
   buildLinkedInCoPilotPlaybook,
   buildReferralFirstInfoDraft,
   classifyBuyingCommitteeTrack,
   classifyContactChannelTier,
+  countryOutreachWindow,
   localizedCommitteeXrayQuery,
+  localizedDepartmentLabel,
   prioritizeBuyingCommitteeContacts,
   validateLinkedInConnectionNote,
 } from './buying-committee';
@@ -189,5 +192,71 @@ describe('Batch 1.3-A Anti-info@ 4-track Buying Committee engine', () => {
       'sales-legacy-valid-unknown',
       'proc-reverified-risky',
     ]);
+  });
+
+  it('localizes department labels for all target languages without leaking CJK characters (#96-1)', () => {
+    const languages = ['it', 'de', 'es', 'fr', 'pt', 'en', 'unknown'];
+    const tracks = ['sourcing', 'technical', 'executive', 'assistant', 'other'] as const;
+    for (const lang of languages) {
+      for (const track of tracks) {
+        const label = localizedDepartmentLabel(track, lang);
+        expect(label.length).toBeGreaterThan(2);
+        expect(label).not.toMatch(/[\p{Script=Han}]/u);
+      }
+    }
+    expect(localizedDepartmentLabel('sourcing', 'it')).toBe('Ufficio Acquisti');
+    expect(localizedDepartmentLabel('executive', 'it')).toBe('Direzione Generale');
+    expect(localizedDepartmentLabel('executive', 'de')).toBe('Geschäftsführung');
+  });
+
+  it('classifies named decision makers with CATCH_ALL_RISKY or UNKNOWN personal email as B-tier instead of C-tier (#96-1)', () => {
+    expect(
+      classifyContactChannelTier({
+        fullName: 'Marco Rossi',
+        email: 'm.rossi@iosolar.it',
+        emailVerificationState: 'CATCH_ALL_RISKY',
+      }),
+    ).toBe('B');
+    expect(
+      classifyContactChannelTier({
+        fullName: 'Marco Rossi',
+        email: 'm.rossi@iosolar.it',
+        emailVerificationState: 'UNKNOWN',
+      }),
+    ).toBe('B');
+    expect(
+      classifyContactChannelTier({
+        fullName: 'Marco Rossi',
+        email: 'm.rossi@iosolar.it',
+        emailVerificationState: 'INVALID',
+      }),
+    ).toBe('C');
+    expect(
+      classifyContactChannelTier({
+        fullName: null,
+        email: 'info@iosolar.it',
+        emailVerificationState: 'UNKNOWN',
+      }),
+    ).toBe('C');
+  });
+
+  it('builds <=60-word multilingual forwardable blurbs and maps export country outreach windows', () => {
+    for (const lang of ['it', 'de', 'es', 'fr', 'pt', 'en']) {
+      const blurb = buildForwardableBlurb({
+        language: lang,
+        buyerCompanyName: 'ReFeel EPC S.r.l.',
+        targetDept: localizedDepartmentLabel('sourcing', lang),
+        sellerProductSummary: '600-720W HJT bifacial solar modules',
+        sellerLegalName: 'Liansheng PV Co., Ltd.',
+      });
+      expect(blurb.split(/\s+/u).length).toBeLessThanOrEqual(60);
+      expect(blurb).not.toMatch(/[\p{Script=Han}]/u);
+      expect(blurb).toContain('ReFeel EPC S.r.l.');
+    }
+    expect(countryOutreachWindow('IT')).toBe('CET(UTC+1/+2) 09:00-17:30 | Dial:+39');
+    expect(countryOutreachWindow('de')).toBe('CET(UTC+1/+2) 08:30-17:00 | Dial:+49');
+    expect(countryOutreachWindow('US')).toBe('EST/PST(UTC-5/-8) 09:00-17:00 | Dial:+1');
+    expect(countryOutreachWindow('ZZ')).toBeNull();
+    expect(countryOutreachWindow(null)).toBeNull();
   });
 });

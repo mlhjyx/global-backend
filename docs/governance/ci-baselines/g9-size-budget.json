@@ -37,12 +37,6 @@
       "expiresAt": "2027-01-31",
       "reason": "存量超标文件（棘轮：只许缩小）；site-builder 相关文件随 SUB-02/03 退役后删除条目"
     },
-    "apps/api/src/discovery/providers/social-presence.provider.ts": {
-      "maxLines": 859,
-      "owner": "P6-CI-10",
-      "expiresAt": "2027-01-31",
-      "reason": "存量超标文件（棘轮：只许缩小）；site-builder 相关文件随 SUB-02/03 退役后删除条目"
-    },
     "apps/api/src/discovery/raw-source-ingestion.ts": {
       "maxLines": 812,
       "owner": "P6-CI-10",
@@ -692,15 +686,6 @@
       "name": "pickWaybackSnapshot",
       "line": 393,
       "complexity": 23,
-      "owner": "P6-CI-10",
-      "expiresAt": "2027-01-31",
-      "reason": "存量高复杂度函数（棘轮：只许降低）"
-    },
-    "apps/api/src/discovery/providers/social-presence.provider.ts#discoverContacts": {
-      "file": "apps/api/src/discovery/providers/social-presence.provider.ts",
-      "name": "discoverContacts",
-      "line": 669,
-      "complexity": 29,
       "owner": "P6-CI-10",
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"

@@ -3,6 +3,7 @@ import {
   exaFindSimilar,
   exaSearch,
   googlePlacesSearchText,
+  parseExaPeopleHit,
   sanitizeSearchProviderUrl,
   serperSearch,
 } from './search-providers';
@@ -151,5 +152,72 @@ describe('search-providers adapters (Serper / Exa / Google Places)', () => {
       serperSearch({ query: 'solar' }, { apiKey: 'bad-key', fetchImpl }),
     ).rejects.toThrow('SERPER_SEARCH_API_KEY_REJECTED');
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('exaSearch in people mode omits excludeDomains (avoiding HTTP 400) and parses entities/author hits', async () => {
+    const fetchImpl = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      const sent = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      expect(sent.category).toBe('people');
+      expect(sent).not.toHaveProperty('excludeDomains');
+      return jsonResponse({
+        results: [
+          {
+            url: 'https://exa.ai/library/person/abc-123',
+            title: 'Marco Rossi | Exa',
+            entities: [
+              {
+                properties: {
+                  name: 'Marco Rossi',
+                  role: 'Responsabile Acquisti',
+                  company: 'Coenergia Srl',
+                  linkedinUrl: 'https://it.linkedin.com/in/marco-rossi-pv',
+                },
+              },
+            ],
+          },
+          {
+            url: 'https://www.linkedin.com/in/elena-conti',
+            title: 'Elena Conti - Exa',
+            author: 'Elena Conti',
+            entities: [{ properties: { title: 'Direttore Tecnico', organization: { name: 'ReFeel EPC' } } }],
+          },
+          {
+            url: 'https://www.linkedin.com/in/luca-bianchi',
+            title: 'Luca Bianchi - Head of Purchasing - Memodo GmbH | LinkedIn',
+          },
+        ],
+      });
+    }) as unknown as typeof fetch;
+
+    const result = await exaSearch(
+      {
+        query: 'Coenergia Srl Responsabile Acquisti',
+        category: 'people',
+        excludeDomains: ['facebook.com'],
+        numResults: 5,
+      },
+      { apiKey: 'test-exa-key', fetchImpl },
+    );
+
+    expect(result).toEqual({
+      billed: true,
+      hits: [
+        {
+          url: 'https://it.linkedin.com/in/marco-rossi-pv',
+          title: 'Marco Rossi - Responsabile Acquisti - Coenergia Srl',
+        },
+        {
+          url: 'https://www.linkedin.com/in/elena-conti',
+          title: 'Elena Conti - Direttore Tecnico - ReFeel EPC',
+        },
+        {
+          url: 'https://www.linkedin.com/in/luca-bianchi',
+          title: 'Luca Bianchi - Head of Purchasing - Memodo GmbH | LinkedIn',
+        },
+      ],
+    });
+    expect(
+      parseExaPeopleHit({ url: 'https://www.linkedin.com/in/paolo', author: 'Paolo Verdi' }),
+    ).toEqual({ url: 'https://www.linkedin.com/in/paolo', title: 'Paolo Verdi' });
   });
 });

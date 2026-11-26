@@ -32,6 +32,8 @@ const typedProjectionSchemaValues = [
   "smtp-probe-verdict/v1",
   "searxng-search/v1",
   "social-search/v1",
+  "social-search-serper/v1",
+  "social-search-exa-people/v1",
   "social-fetch/v1",
   "wikidata-sparql/v1",
   "osm-overpass/v1",

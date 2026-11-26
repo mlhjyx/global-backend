@@ -746,6 +746,84 @@ describe('WeeklyReportService (BI-22)', () => {
     expect(rows[0]!['触达邮箱']).toBe('m.delloglio@memodo.it');
     expect(rows[0]!['触达通道分级(S/A/B/C)']).toBe('S');
   });
+
+  it('battleCsv outputs 21 columns wired with judgmentRecord, companySignal trigger, and foreign seller context (Batch 1.8A)', async () => {
+    const companyId = '44444444-4444-4444-8444-444444444401';
+    const fixture = baseFixture({
+      icp: { id: ICP, companyId: 'seller-co-1', name: '意大利光伏', valueProps: ['Direct EU stock'] } as never,
+      companies: [
+        company(companyId, {
+          name: 'IO Solar',
+          domain: 'iosolar.com',
+          country: null,
+          attributes: { website_profile: { trade_role: 'distributor', carried_brands: ['Longi', 'JA Solar'] } },
+        }),
+      ],
+      contactPoints: [{ companyId, kind: 'email', value: 'info@iosolar.com', status: 'UNVERIFIED' }],
+    });
+    const h = harness(fixture);
+    Object.assign(h.tx, {
+      companyContactChannel: {
+        findMany: vi.fn(async () => [{ companyId, channel: 'phone', value: '+39 0543 097431', status: 'UNVERIFIED' }]),
+      },
+      judgmentRecord: {
+        findMany: vi.fn(async () => [
+          {
+            canonicalCompanyId: companyId,
+            verdict: 'match',
+            criteria: [{ label: '意大利分销', applicable: true, score: 0.92, rationale: '深耕意大利工商业光伏批发' }],
+          },
+        ]),
+      },
+      companySignal: {
+        findMany: vi.fn(async () => [
+          {
+            companyId,
+            providerKey: 'structured_harvest',
+            signalKind: 'page_change',
+            sourceUrl: 'https://iosolar.com/careers',
+            title: 'Hiring PV Procurement Manager in Milan',
+            excerpt: 'Growing solar module sourcing team',
+            observedAt: new Date('2026-11-21T08:00:00.000Z'),
+          },
+        ]),
+      },
+      companyProfile: {
+        findUnique: vi.fn(async () => ({
+          name: '琏升科技股份有限公司',
+          website: 'https://www.liansheng-pv.com',
+          summary: '中文光伏厂商',
+          industry: '光伏制造',
+          businessEmail: 'export@liansheng-pv.com',
+          publicContacts: [{ type: 'whatsapp', value: '+8613800138000' }],
+        })),
+      },
+      site: {
+        findFirst: vi.fn(async () => ({ name: 'Liansheng PV Co., Ltd.', profile: {} })),
+      },
+      offering: {
+        findMany: vi.fn(async () => [{ name: 'N-type HJT 700W Bifacial Module', description: null, attributes: {} }]),
+      },
+      claim: { findMany: vi.fn(async () => []) },
+    });
+
+    const report = await h.service.battleCsv(ctx, { icpId: ICP, maskEmails: false });
+    const rawRows = parse(report.csv, { bom: true }) as string[][];
+    expect(rawRows[0]).toHaveLength(21);
+    const rows = parse(report.csv, { bom: true, columns: true }) as Array<Record<string, string>>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!['国家/地区']).toBe('IT');
+    expect(rows[0]!['关键证据摘要(C1-C5)']).toContain('意大利分销:');
+    expect(rows[0]!['关键证据摘要(C1-C5)']).toContain('brands=Longi, JA Solar');
+    expect(rows[0]!['近期破冰钩子(Trigger)']).toContain('[HIRING_BUYING_ROLE]');
+    expect(rows[0]!['C级info@转交请求信']).toContain('Liansheng PV Co., Ltd.');
+    expect(rows[0]!['C级info@转交请求信']).not.toMatch(/[\p{Script=Han}]/u);
+    expect(rows[0]!['卖方入站回复页脚']).toBe(
+      'Liansheng PV Co., Ltd. | https://www.liansheng-pv.com | export@liansheng-pv.com | https://wa.me/8613800138000',
+    );
+    expect(rows[0]!['同事内推转介包(<=60词)']).toContain('Ufficio Acquisti');
+    expect(rows[0]!['当地工作时区与拨号提示']).toBe('CET(UTC+1/+2) 09:00-17:30 | Dial:+39');
+  });
 });
 
 describe('sanctionsDelivery — 与 qualify、accept 同一张真值表（#665）', () => {

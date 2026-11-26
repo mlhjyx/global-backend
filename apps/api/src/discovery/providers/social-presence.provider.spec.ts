@@ -149,8 +149,11 @@ describe('social presence contact adapter (M2a: search index only)', () => {
     expect(looksLikeOrganizationName('Jose Co')).toBe(false);
   });
 
-  it('queries social.search through the broker and tolerates a failing dork', async () => {
-    const invoke = vi.fn(async (tool: string, input: { q?: string }) => {
+  it('queries multi-track social tools through the broker and tolerates failing tracks', async () => {
+    const invoke = vi.fn(async (tool: string, input: { q?: string; query?: string }) => {
+      if (tool === 'social.search_exa_people' || tool === 'social.search_serper') {
+        return { data: { results: [] }, costCents: 0, degraded: true };
+      }
       expect(tool).toBe('social.search');
       if (input.q?.startsWith('site:xing.com/profile')) throw new Error('search down');
       return {
@@ -182,14 +185,19 @@ describe('social presence contact adapter (M2a: search index only)', () => {
   });
 
   it('counts company-only headlines in diagnostics (social_uninformative_dropped)', async () => {
-    const invoke = vi.fn(async () => ({
-      data: {
-        results: [
-          { url: 'https://www.linkedin.com/in/jane-doe-123456789', title: 'Jane Doe - Abendi | LinkedIn' },
-        ],
-      },
-      costCents: 0,
-    }));
+    const invoke = vi.fn(async (tool: string) => {
+      if (tool !== 'social.search') {
+        return { data: { results: [] }, costCents: 0, degraded: true };
+      }
+      return {
+        data: {
+          results: [
+            { url: 'https://www.linkedin.com/in/jane-doe-123456789', title: 'Jane Doe - Abendi | LinkedIn' },
+          ],
+        },
+        costCents: 0,
+      };
+    });
     const adapter = new SocialPresenceContactAdapter({ broker: { invoke } as never });
 
     const result = await adapter.discoverContacts(
@@ -198,28 +206,31 @@ describe('social presence contact adapter (M2a: search index only)', () => {
     );
 
     expect(result.contacts).toEqual([]);
-    // 计数发生在索引层去重之前：3 条 dork（linkedin/xing/域名锚定）各回同一结果 → 计 3 次（与既有
-    // namesake/organisation 计数同口径）。
+    // 商业轨降级后落回 SearXNG 3 条 dork 各回同一结果 → 计 3 次。
     expect(result.diagnostics).toMatchObject({ social_uninformative_dropped: 3 });
   });
 
   it('skips the archive/live layers entirely when no extractor is wired (no wasted egress)', async () => {
-    const invoke = vi.fn(async () => ({
+    const invoke = vi.fn(async (tool: string) => ({
       data: {
-        results: [
-          {
-            url: 'https://www.linkedin.com/in/max-mustermann',
-            title: 'Max Mustermann – Einkaufsleiter – Pumpen Schmid GmbH | LinkedIn',
-          },
-        ],
+        results:
+          tool === 'social.search'
+            ? [
+                {
+                  url: 'https://www.linkedin.com/in/max-mustermann',
+                  title: 'Max Mustermann – Einkaufsleiter – Pumpen Schmid GmbH | LinkedIn',
+                },
+              ]
+            : [],
       },
       costCents: 0,
+      ...(tool === 'social.search' ? {} : { degraded: true }),
     }));
     const adapter = new SocialPresenceContactAdapter({ broker: { invoke } as never });
 
     await adapter.discoverContacts(COMPANY, { workspaceId: 'ws-1', runId: 'run-1' } as never);
 
-    expect(invoke.mock.calls.every(([tool]) => tool === 'social.search')).toBe(true);
+    expect(invoke.mock.calls.some(([tool]) => tool === 'social.fetch')).toBe(false);
   });
 });
 
@@ -306,21 +317,99 @@ describe('social presence M5 round 4: generic company names (r14 replay)', () =>
   });
 
   it('counts generic-name drops in diagnostics (social_generic_name_dropped)', async () => {
-    const invoke = vi.fn(async () => ({
-      data: {
-        results: [
-          { url: 'https://www.linkedin.com/in/jane-doe-treefrog', title: 'Jane Doe - Technical Director at Treefrog Cinegraphix | LinkedIn' },
-        ],
-      },
-      costCents: 0,
-    }));
+    const invoke = vi.fn(async (tool: string) => {
+      if (tool !== 'social.search') {
+        return { data: { results: [] }, costCents: 0, degraded: true };
+      }
+      return {
+        data: {
+          results: [
+            { url: 'https://www.linkedin.com/in/jane-doe-treefrog', title: 'Jane Doe - Technical Director at Treefrog Cinegraphix | LinkedIn' },
+          ],
+        },
+        costCents: 0,
+      };
+    });
     const adapter = new SocialPresenceContactAdapter({ broker: { invoke } as never });
 
     const result = await adapter.discoverContacts(TECHNICAL, { workspaceId: 'ws-1', runId: 'run-1' } as never);
 
     expect(result.contacts).toEqual([]);
-    // 与既有 namesake/uninformative 同口径：3 条 dork 各回同一结果 → 计 3 次。
+    // 商业轨降级后落回 SearXNG 3 条 dork 各回同一结果 → 计 3 次。
     expect(result.diagnostics).toMatchObject({ social_generic_name_dropped: 3 });
+  });
+});
+
+describe('Batch 1.8A: 4-track commercial social search & multilingual role/legal lexicon', () => {
+  it('accepts IT/ES/FR/PT/NL procurement/technical/executive titles and rejects Italian legal-form/generic-solar false positives', () => {
+    const italianHits = parseSocialResults(
+      [
+        { url: 'https://it.linkedin.com/in/marco-rossi', title: 'Marco Rossi - Responsabile Acquisti - Coenergia srl | LinkedIn' },
+        { url: 'https://it.linkedin.com/in/elena-bianchi', title: 'Elena Bianchi - Amministratore Delegato - Coenergia srl | LinkedIn' },
+        { url: 'https://it.linkedin.com/in/luca-conti', title: 'Luca Conti - Direttore Tecnico - Coenergia srl | LinkedIn' },
+        { url: 'https://it.linkedin.com/in/paolo-stranger', title: 'Paolo Verdi - Responsabile Acquisti - Other srl | LinkedIn' },
+      ],
+      { name: 'Coenergia srl', domain: 'coenergia.com', country: 'IT' },
+    );
+    expect(italianHits.map((c) => c.fullName)).toEqual(['Marco Rossi', 'Elena Bianchi', 'Luca Conti']);
+
+    const frHit = parseSocialResults(
+      [{ url: 'https://fr.linkedin.com/in/jean-dupont', title: 'Jean Dupont - PDG - Heliosun SAS | LinkedIn' }],
+      { name: 'Heliosun SAS', domain: 'heliosun.fr', country: 'FR' },
+    );
+    expect(frHit.map((c) => c.fullName)).toEqual(['Jean Dupont']);
+
+    const genericSolarDropped: string[] = [];
+    const solarPoint = parseSocialResults(
+      [
+        { url: 'https://it.linkedin.com/in/unrelated-solar', title: 'Mario Neri - Ingegnere - Enel Energia Solare | LinkedIn' },
+        { url: 'https://it.linkedin.com/in/real-solar-point', title: 'Giulia Ferri - Responsabile Acquisti - Solar Energy Point | LinkedIn' },
+      ],
+      { name: 'Solar Energy Point S.r.l.', domain: 'solarenergypoint.it', country: 'IT' },
+      (reason) => genericSolarDropped.push(reason),
+    );
+    expect(solarPoint.map((c) => c.fullName)).toEqual(['Giulia Ferri']);
+    expect(genericSolarDropped).toEqual(['generic_name']);
+  });
+
+  it('runs Exa People -> Serper X-Ray, converges early at >=8 hits without SearXNG fallback, and sums real costCents', async () => {
+    const calls: string[] = [];
+    const invoke = vi.fn(async (tool: string) => {
+      calls.push(tool);
+      if (tool === 'social.search_exa_people') {
+        return {
+          data: {
+            results: Array.from({ length: 4 }, (_, idx) => ({
+              url: `https://it.linkedin.com/in/exa-person-${idx}`,
+              title: `Mario Exa${idx} - Responsabile Acquisti - Coenergia Srl | LinkedIn`,
+            })),
+          },
+          costCents: 1,
+        };
+      }
+      if (tool === 'social.search_serper') {
+        return {
+          data: {
+            results: Array.from({ length: 5 }, (_, idx) => ({
+              url: `https://it.linkedin.com/in/serper-person-${idx}`,
+              title: `Elena Serper${idx} - Direttore Tecnico - Coenergia Srl | LinkedIn`,
+            })),
+          },
+          costCents: 1,
+        };
+      }
+      throw new Error(`unexpected fallback tool ${tool}`);
+    });
+    const adapter = new SocialPresenceContactAdapter({ broker: { invoke } as never });
+    const result = await adapter.discoverContacts(
+      { name: 'Coenergia Srl', domain: 'coenergia.com', country: 'IT' },
+      { workspaceId: 'ws-1', runId: 'run-1' } as never,
+    );
+
+    // 4 (Exa) + 5 (Serper #1) = 9 >= 8 -> stops before Serper #2 AND skips SearXNG fallback!
+    expect(calls).toEqual(['social.search_exa_people', 'social.search_serper']);
+    expect(result.contacts).toHaveLength(9);
+    expect(result.costCents).toBe(2);
   });
 });
 
@@ -598,6 +687,9 @@ describe('social presence M2b: archive copies and live public pages (D1)', () =>
 
     let liveCalls = 0;
     const invoke = vi.fn(async (tool: string, input: { q?: string; url?: string }) => {
+      if (tool === 'social.search_exa_people' || tool === 'social.search_serper') {
+        return { data: { results: [] }, costCents: 0, degraded: true };
+      }
       if (tool === 'social.search') {
         return {
           data: {
@@ -625,7 +717,7 @@ describe('social presence M2b: archive copies and live public pages (D1)', () =>
       if (input.url?.startsWith('https://web.archive.org/')) {
         return { data: { status: 200, ok: true, text: `<html><body>${PROFILE_TEXT}</body></html>` }, costCents: 0 };
       }
-      liveCalls += 1;
+      if (tool === 'social.fetch') liveCalls += 1;
       return { data: { status: 200, ok: true, text: `<html><body>${PROFILE_TEXT}</body></html>` }, costCents: 0 };
     });
     const adapter = new SocialPresenceContactAdapter({

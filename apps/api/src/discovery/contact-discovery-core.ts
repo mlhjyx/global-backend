@@ -6,6 +6,7 @@ import { assertContactDiscoveryAdapterFanout, assertContactDiscoveryResultBound 
 import { LawfulBasis, ProviderContactRecord } from './provider-contract';
 import { canonicalizeSuppressionValue, canonicalizeSuppressionValues, companyMatchesSuppression } from './suppression-value';
 import { upsertCompanyContactChannels, type CompanyChannelInput } from './company-contact-channel';
+import { backfillCompanyCountryFromChannels } from './jurisdiction-resolver';
 import { companyMayUseExternalProcessing } from './company-suppression-gate';
 import { BudgetOperationReplayError, type BudgetStore } from '../tools/budget-store';
 import { isSyntheticDiscoveryProvenance } from './evidence-license';
@@ -29,9 +30,11 @@ const CONTACT_DISCOVERY_RECEIPT_PRODUCERS = Object.freeze([
   'inpi_rne.search',
   'google_patents.search',
   'contact.find_decision_makers',
-  // M2b：社媒适配器的出网工具回执（此前这些生产者不在名单 → 回执回调会在
+  // M2b + Batch 1.8A：社媒适配器的出网工具回执（此前这些生产者不在名单 → 回执回调会在
   // 真实 Broker 下抛 DOMAIN_ACK_CONSUMER_BINDING_MISSING，被 adapter catch 吞成静默空结果）。
   'social.search',
+  'social.search_serper',
+  'social.search_exa_people',
   'social.fetch',
   'searxng.search',
   'http.get',
@@ -313,6 +316,19 @@ export async function discoverContactsCore(
               companyId: loaded.company.id,
               channels,
             });
+            if (!loaded.company.country) {
+              await backfillCompanyCountryFromChannels(transaction, {
+                workspaceId: input.workspaceId,
+                company: {
+                  id: loaded.company.id,
+                  name: loaded.company.name,
+                  domain: loaded.company.domain,
+                  country: loaded.company.country,
+                  attributes: loaded.company.attributes,
+                },
+                extraChannels: channels.filter((c) => c.channel === 'phone'),
+              });
+            }
           }
         }
         if (pa.costCents > 0) {
@@ -349,6 +365,16 @@ export async function discoverContactsCore(
           onMixed: 'apply',
           apply: (transaction) => persistAdapter(transaction, pa),
           readback: async () => null,
+        });
+      }
+      if (
+        !budgetTruncated &&
+        perAdapter.length > 0 &&
+        typeof (tx.canonicalCompany as { updateMany?: unknown }).updateMany === 'function'
+      ) {
+        await tx.canonicalCompany.updateMany({
+          where: { id: loaded.company.id, status: { not: 'SUPPRESSED' } },
+          data: { contactDiscoveryAttemptedAt: new Date() },
         });
       }
       const contacts = await tx.canonicalContact.findMany({

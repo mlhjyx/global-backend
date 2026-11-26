@@ -76,8 +76,8 @@ describe('AI task registry model execution policy invariants', () => {
       },
       'contact.find_decision_makers': {
         model: 'deepseek-flash', risk: 'medium', humanGate: false,
-        // A1: Impressum pages render to raw HTML for JSON-LD/cfemail (whitelisted tool).
-        allowedTools: ['social.search', 'social.fetch', 'crawl4ai.fetch', 'http.get', 'crawl4ai.render'],
+        // A1 + Batch 1.8A: Impressum HTML render + governed personal-data social people search.
+        allowedTools: ['social.search', 'social.search_serper', 'social.search_exa_people', 'social.fetch', 'crawl4ai.fetch', 'http.get', 'crawl4ai.render'],
         maxCostCents: 15,
         timeoutMs: 120000,
       },
@@ -330,7 +330,7 @@ const B2_LEGACY_SCHEMA_BYTES = {
   },
   "contact.find_decision_makers": {
     "output": "946b9114a0d3997f6cff641e19bf155421f1b856dbaefdc2fe9e55a506d61ec2",
-    "contract": "f7aaf258fe812d6a2a1d6d28a6cf3cd7554ae132bf29c353a79e10be9e178c38"
+    "contract": "e153d86e3850d649ab13406122d136308c1c54b9fbef38581d417c4f1a546567"
   },
   "discovery.extract_list": {
     "output": "518011f7bbf4096c36a8891cbd2459196b9d2fae0fb2c65f62ed84e4f462fa8b",

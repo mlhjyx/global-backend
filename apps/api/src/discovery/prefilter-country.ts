@@ -36,6 +36,14 @@ export interface PrefilterCountryInput {
   readonly domain?: string | null;
   readonly country?: string | null;
   readonly attributes?: unknown;
+  /** 外部来源收集到的公司电话列表（如 company_contact_channel.channel='phone'）。 */
+  readonly phones?: readonly (string | null | undefined)[];
+  /** 公司渠道行，自动提取有效 `channel='phone'` 参与第 5 级国际区号推断。 */
+  readonly contactChannels?: readonly {
+    readonly channel?: string | null;
+    readonly value?: string | null;
+    readonly status?: string | null;
+  }[];
 }
 
 /** 商业化/泛用 ccTLD 黑名单：绝不据此推断公司注册国。 */
@@ -196,8 +204,22 @@ export function inferCountryFromDialCode(phone: string | null | undefined): Pref
   return null;
 }
 
+function collectAllPhoneStrings(input: PrefilterCountryInput): string[] {
+  const out = collectPhoneStrings(input.attributes);
+  for (const phone of input.phones ?? []) {
+    if (typeof phone === 'string' && phone.trim()) out.push(phone.trim());
+  }
+  for (const ch of input.contactChannels ?? []) {
+    if (ch?.channel === 'phone' && ch.status !== 'INVALID' && typeof ch.value === 'string' && ch.value.trim()) {
+      out.push(ch.value.trim());
+    }
+  }
+  return out;
+}
+
 /**
  * L1 预筛前确定性国家解析：优先权威列与注册库，再按 ccTLD → 单国法定后缀 → 国际区号回退。
+ * 当多条电话指向不同单国区号时保守返回 null，不盲猜。
  */
 export function inferPrefilterCountry(
   input: PrefilterCountryInput,
@@ -218,9 +240,15 @@ export function inferPrefilterCountry(
   const fromSuffix = inferCountryFromLegalSuffix(input.name);
   if (fromSuffix) return fromSuffix;
 
-  for (const phone of collectPhoneStrings(input.attributes)) {
+  const dialHits = new Map<string, PrefilterCountryInference>();
+  for (const phone of collectAllPhoneStrings(input)) {
     const fromDial = inferCountryFromDialCode(phone);
-    if (fromDial) return fromDial;
+    if (fromDial && !dialHits.has(fromDial.iso)) {
+      dialHits.set(fromDial.iso, fromDial);
+    }
+  }
+  if (dialHits.size === 1) {
+    return [...dialHits.values()][0]!;
   }
   return null;
 }

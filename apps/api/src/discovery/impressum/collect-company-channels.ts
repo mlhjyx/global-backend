@@ -9,7 +9,8 @@ import {
   extractJsonLdContacts,
   normalizePhone,
 } from './impressum-extract';
-import type { LegalPageKind } from './find-legal-pages';
+import { hasContactForm } from '../website-profile/contact-paths';
+import { isStrictContactPageUrl, type LegalPageKind } from './find-legal-pages';
 
 /**
  * A1（2026-11-08）：把已抓取的 Impressum/联系页装配成**公司级**联系方式（A4 写入器的输入）。
@@ -215,9 +216,15 @@ export function collectCompanyChannels(args: CollectCompanyChannelsArgs): Compan
     for (const found of textFound) {
       if (found.type === 'phone') pushPhone(page, found.value);
     }
-    // 联系表单：contact 页的干净 URL（green 公司事实）。与 DB CHECK 同源（https、无查询串/
-    // 锚点/空白、≤512）；不合规的页面 URL 直接放弃，绝不让网页可控值 throw 落库事务。
-    if (page.kind === 'contact' && page.html && /<form[\s>]/iu.test(page.html) && out.length < cap) {
+    // 联系表单：严格校验联系页路径 + 真实联系表单语义（hasContactForm 排除搜索/购物车/登录表单），
+    // 并与 DB CHECK 同源（https、无查询串/锚点/空白、≤512）。
+    if (
+      page.kind === 'contact' &&
+      isStrictContactPageUrl(page.url) &&
+      page.html &&
+      hasContactForm(page.html) &&
+      out.length < cap
+    ) {
       const safe = safePageUrl(page.url);
       const clean = safe ? safe.split('?')[0]!.split('#')[0]! : undefined;
       if (clean && clean.length <= 512 && !seen.has(`form_url:${clean}`)) {

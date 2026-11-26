@@ -240,7 +240,17 @@ describe('DomainAckService', () => {
     const service = new DomainAckService(repository);
     const apply = vi.fn(async () => ({ status: 'verified' }));
 
-    expect(DOMAIN_ACK_PRODUCT_CONSUMER_BINDINGS).toHaveLength(46);
+    expect(DOMAIN_ACK_PRODUCT_CONSUMER_BINDINGS).toHaveLength(48);
+    expect(getDomainAckProductConsumerBinding('social.search_serper')).toMatchObject({
+      consumer: 'SocialPresenceContactAdapter',
+      resultStrategy: 'typed_projection',
+      resultSchema: 'social-search-serper/v1',
+    });
+    expect(getDomainAckProductConsumerBinding('social.search_exa_people')).toMatchObject({
+      consumer: 'SocialPresenceContactAdapter',
+      resultStrategy: 'typed_projection',
+      resultSchema: 'social-search-exa-people/v1',
+    });
     expect(getDomainAckProductConsumerBinding('smtp.rcpt_probe')).toEqual({
       producerId: 'smtp.rcpt_probe',
       consumer: 'EmailVerificationProvider',

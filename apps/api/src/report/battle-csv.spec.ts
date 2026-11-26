@@ -26,15 +26,24 @@ describe('Gate 1 Multi-Channel Battle CSV exporter (CWE-1236 safe)', () => {
           complianceTag: 'IT:GDPR_LI+ART14',
           legalNoticeStatus: 'ART14_SCHEDULED_30D',
           sellerInboundFooter: 'Liansheng PV Co., Ltd. | https://wa.me/8613800000000',
+          forwardableBlurb: '=CMD("evil")',
+          outreachWindow: 'CET(UTC+1/+2) 09:00-17:30 | Dial:+39',
         },
       ],
       { maskEmails: true },
     );
 
+    expect(BATTLE_CSV_HEADERS).toHaveLength(21);
+    expect(BATTLE_CSV_HEADERS.slice(19)).toEqual([
+      '同事内推转介包(<=60词)',
+      '当地工作时区与拨号提示',
+    ]);
     expect(csv.startsWith(UTF8_BOM)).toBe(true);
     expect(csv).toContain(BATTLE_CSV_HEADERS.join(','));
     expect(csv).toContain(`"'=HYPERLINK(""https://evil.example"",""ReFeel EPC"")"`);
     expect(csv).toContain(`"'+CMD(""hiring solar PM"")"`);
+    expect(csv).toContain(`"'=CMD(""evil"")"`);
+    expect(csv).toContain('CET(UTC+1/+2) 09:00-17:30 | Dial:+39');
     expect(csv).toContain('m.***@refeel-epc.it');
     expect(csv).not.toContain('m.masotti@refeel-epc.it');
   });

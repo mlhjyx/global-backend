@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
+  backfillCompanyCountryFromChannels,
   conservativeCountryCodeForFallback,
   inferConservativeEuUkFallback,
   resolveCompanyJurisdiction,
@@ -50,5 +51,45 @@ describe('jurisdiction-resolver (Batch 1.5-A entity country hub + GDPR fail-clos
     expect(inferConservativeEuUkFallback({ name: 'SunPower Inc.', domain: 'sunpower.com' }, ['美国'])).toBeNull();
     expect(inferConservativeEuUkFallback({ name: 'Global Solar Ltd', domain: 'globalsolar.com' }, ['意大利', '美国'])).toBeNull();
     expect(inferConservativeEuUkFallback({ name: 'Global Solar Ltd', domain: 'globalsolar.com' })).toBeNull();
+  });
+
+  it('infers country from contactChannels phone dial code and backfills canonicalCompany.country + field_evidence (#96-5)', async () => {
+    expect(
+      resolveCompanyJurisdiction({
+        name: 'IO Solar',
+        domain: 'iosolar.com',
+        contactChannels: [{ channel: 'phone', value: '+390543097431' }],
+      }),
+    ).toMatchObject({ iso: 'IT', source: 'dial_code' });
+
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const fieldEvidenceCreate = vi.fn(async () => ({}));
+    const tx = {
+      companyContactChannel: {
+        findMany: vi.fn(async () => [{ channel: 'phone', value: '+39 0543 097431' }]),
+      },
+      canonicalCompany: { updateMany },
+      fieldEvidence: { create: fieldEvidenceCreate },
+    };
+
+    const resolved = await backfillCompanyCountryFromChannels(tx as never, {
+      workspaceId: 'ws-1',
+      company: { id: 'co-iosolar', name: 'IO Solar', domain: 'iosolar.com', country: null, attributes: {} },
+    });
+    expect(resolved).toMatchObject({ iso: 'IT', source: 'dial_code' });
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { id: 'co-iosolar', country: null, status: { not: 'SUPPRESSED' } },
+      data: { country: 'IT', version: { increment: 1 } },
+    });
+    expect(fieldEvidenceCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          entityId: 'co-iosolar',
+          field: 'country',
+          value: { iso: 'IT', source: 'dial_code', evidence: '+39' },
+          providerKey: 'jurisdiction_resolver',
+        }),
+      }),
+    );
   });
 });
