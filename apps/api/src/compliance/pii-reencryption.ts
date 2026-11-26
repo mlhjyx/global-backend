@@ -6,6 +6,7 @@ import {
   decryptPii,
   decryptPlatformPii,
   encryptPii,
+  encryptPlatformPii,
   getActivePiiKeyId,
   isBlindedContactKey,
   needsBlindReindex,
@@ -27,12 +28,57 @@ import {
 } from '../runtime/scoped-database-principal';
 
 const PII_TYPES = ['email', 'phone', 'linkedin'];
+const VERIFICATION_STATE_RANK: Record<string, number> = {
+  VALID: 3,
+  CATCH_ALL_RISKY: 2,
+  INVALID: 1,
+  UNKNOWN: 0,
+};
 const STATUS_RANK: Record<string, number> = {
   VALID: 3,
   RISKY: 2,
   INVALID: 1,
+  BLOCKED: 1,
   UNVERIFIED: 0,
 };
+
+interface ContactPointStrengthRow {
+  status: string;
+  verifiedAt: Date | null;
+  verificationState?: string | null;
+  validSince?: Date | null;
+  confidence?: number | null;
+  lastVerificationEventId?: string | null;
+}
+
+function isStrongerContactPoint(
+  candidate: ContactPointStrengthRow,
+  incumbent: ContactPointStrengthRow,
+): boolean {
+  const cState = VERIFICATION_STATE_RANK[candidate.verificationState ?? 'UNKNOWN'] ?? 0;
+  const iState = VERIFICATION_STATE_RANK[incumbent.verificationState ?? 'UNKNOWN'] ?? 0;
+  if (cState !== iState) return cState > iState;
+
+  const cStatus = STATUS_RANK[candidate.status] ?? 0;
+  const iStatus = STATUS_RANK[incumbent.status] ?? 0;
+  if (cStatus !== iStatus) return cStatus > iStatus;
+
+  const cHasEvent = candidate.lastVerificationEventId ? 1 : 0;
+  const iHasEvent = incumbent.lastVerificationEventId ? 1 : 0;
+  if (cHasEvent !== iHasEvent) return cHasEvent > iHasEvent;
+
+  const cVerified = candidate.verifiedAt?.getTime() ?? -1;
+  const iVerified = incumbent.verifiedAt?.getTime() ?? -1;
+  if (cVerified !== iVerified) return cVerified > iVerified;
+
+  const cConfidence = candidate.confidence ?? -1;
+  const iConfidence = incumbent.confidence ?? -1;
+  if (cConfidence !== iConfidence) return cConfidence > iConfidence;
+
+  const cValidSince = candidate.validSince?.getTime() ?? -1;
+  const iValidSince = incumbent.validSince?.getTime() ?? -1;
+  return cValidSince > iValidSince;
+}
 
 export interface WorkspaceReencryptionCounts {
   workspaceId: string;
@@ -59,21 +105,6 @@ export interface ReencryptionRunSummary {
   workspacesScanned: number;
   workspaceCounts: WorkspaceReencryptionCounts[];
   platformCounts: PlatformReencryptionCounts;
-}
-
-function strongerVerification(
-  kept: { status: string; verifiedAt: Date | null },
-  incoming: { status: string; verifiedAt: Date | null },
-): { status: string; verifiedAt: Date | null } | null {
-  const rk = STATUS_RANK[kept.status] ?? 0;
-  const ri = STATUS_RANK[incoming.status] ?? 0;
-  if (ri > rk) return { status: incoming.status, verifiedAt: incoming.verifiedAt };
-  if (ri === rk) {
-    const iv = incoming.verifiedAt?.getTime() ?? -1;
-    const kv = kept.verifiedAt?.getTime() ?? -1;
-    if (iv > kv) return { status: kept.status, verifiedAt: incoming.verifiedAt };
-  }
-  return null;
 }
 
 function pointNormKey(
@@ -116,15 +147,19 @@ async function mergeContactInto(
     const key = pointNormKey(fp, workspaceId);
     const match = toByKey.get(key);
     if (match) {
-      const upd = strongerVerification(match, fp);
-      await mergeOrReparentContactPoint(tx, {
-        kind: 'deduplicate',
-        survivorPointId: match.id,
-        duplicatePointId: fp.id,
-        promotedVerification: upd,
-      });
-      if (upd) {
-        toByKey.set(key, { ...match, status: upd.status, verifiedAt: upd.verifiedAt });
+      if (isStrongerContactPoint(fp, match)) {
+        await mergeOrReparentContactPoint(tx, {
+          kind: 'replace_weaker_and_reparent',
+          weakerPointId: match.id,
+          survivorPointId: fp.id,
+          targetContactId: toId,
+        });
+        toByKey.set(key, { ...fp, contactId: toId });
+      } else {
+        await mergeOrReparentContactPoint(tx, {
+          kind: 'delete_duplicate',
+          duplicatePointId: fp.id,
+        });
       }
     } else {
       await mergeOrReparentContactPoint(tx, {
@@ -359,12 +394,18 @@ export async function reencryptWorkspacePiiBatch(
           value: true,
           status: true,
           verifiedAt: true,
+          verificationState: true,
+          validSince: true,
+          confidence: true,
+          lastVerificationEventId: true,
           domainBlindKey: true,
         },
         orderBy: { id: 'asc' },
       });
 
+      const deletedPointIds = new Set<string>();
       for (const p of points) {
+        if (deletedPointIds.has(p.id)) continue;
         const needValue = needsPiiReencryption(p.value, activeKeyId);
         const needDomainBlind =
           p.type === 'email' &&
@@ -403,17 +444,63 @@ export async function reencryptWorkspacePiiBatch(
               value: targetValue,
               NOT: { id: p.id },
             },
-            select: { id: true, status: true, verifiedAt: true },
+            select: {
+              id: true,
+              status: true,
+              verifiedAt: true,
+              verificationState: true,
+              validSince: true,
+              confidence: true,
+              lastVerificationEventId: true,
+              domainBlindKey: true,
+            },
           });
           if (existing) {
-            if (!dryRun) {
-              const upd = strongerVerification(existing, p);
-              await mergeOrReparentContactPoint(tx, {
-                kind: 'deduplicate',
-                survivorPointId: existing.id,
-                duplicatePointId: p.id,
-                promotedVerification: upd,
-              });
+            const pStronger = isStrongerContactPoint(p, existing);
+            const fallbackDomainBlind = (): string | undefined => {
+              if (targetDomainBlind !== undefined) return targetDomainBlind;
+              if (p.type !== 'email') return undefined;
+              const domain = emailDomainOfAddress(plaintext);
+              return domain
+                ? blindContactKey(`domain:${domain}`, {
+                    workspaceId,
+                    purpose: PII_PURPOSE.DOMAIN_BLIND_KEY,
+                  })
+                : undefined;
+            };
+            if (pStronger) {
+              const survivorDomainBlind =
+                p.domainBlindKey === null && existing.domainBlindKey !== null
+                  ? fallbackDomainBlind()
+                  : targetDomainBlind;
+              if (!dryRun) {
+                await mergeOrReparentContactPoint(tx, {
+                  kind: 'replace_weaker_and_rekey',
+                  weakerPointId: existing.id,
+                  survivorPointId: p.id,
+                  value: targetValue,
+                  ...(survivorDomainBlind !== undefined
+                    ? { domainBlindKey: survivorDomainBlind }
+                    : {}),
+                });
+              }
+              deletedPointIds.add(existing.id);
+            } else {
+              if (!dryRun) {
+                await mergeOrReparentContactPoint(tx, {
+                  kind: 'delete_duplicate',
+                  duplicatePointId: p.id,
+                });
+                if (existing.domainBlindKey === null && p.domainBlindKey !== null) {
+                  const carriedDomainBlind = fallbackDomainBlind();
+                  if (carriedDomainBlind !== undefined) {
+                    await rekeyContactPointPii(tx, {
+                      pointId: existing.id,
+                      domainBlindKey: carriedDomainBlind,
+                    });
+                  }
+                }
+              }
             }
             counts.dedup += 1;
             continue;
@@ -438,7 +525,7 @@ export async function reencryptWorkspacePiiBatch(
       }
 
       const scalars = await tx.fieldEvidence.findMany({
-        where: { field: { in: PII_TYPES } },
+        where: { entityType: 'contact', field: { in: PII_TYPES } },
         select: { id: true, value: true },
       });
       for (const e of scalars) {
@@ -459,7 +546,7 @@ export async function reencryptWorkspacePiiBatch(
       }
 
       const guesses = await tx.fieldEvidence.findMany({
-        where: { field: 'email.guess' },
+        where: { entityType: 'contact', field: 'email.guess' },
         select: { id: true, value: true },
       });
       for (const g of guesses) {
@@ -531,10 +618,9 @@ export async function reencryptPlatformPiiBatch(
       allowLegacyPlaintext: true,
     });
     const nextName = needName
-      ? reencryptPlatformPii(plainName, {
+      ? encryptPlatformPii(plainName, {
           scope: 'patent_inventor_cache',
           purpose: PII_PURPOSE.PATENT_INVENTOR_NAME,
-          allowLegacyPlaintext: true,
         })
       : row.inventorName;
 

@@ -236,6 +236,60 @@ describe('email-guess-persist · authoritative replay readback', () => {
     })).resolves.toEqual({ persisted: false, reason: 'suppressed' });
     expect(tx.contactPoint.findUnique).not.toHaveBeenCalled();
   });
+
+  it('finds old-key VALID point via value IN candidates during keyring rotation window', async () => {
+    const { PII_PURPOSE, encryptPiiCandidates } = await import('../compliance/pii-crypto');
+    const { runWithWorkspacePiiContext } = await import('../compliance/pii-crypto.extension');
+    vi.stubEnv(
+      'PII_KEYRING_JSON',
+      JSON.stringify({ activeKeyId: 'k2', keys: { k1: '0'.repeat(64), k2: '2'.repeat(64) } }),
+    );
+    vi.stubEnv('PII_ENCRYPTION_KEY', '');
+    try {
+      const expectedCandidates = encryptPiiCandidates('h.herold@acme.de', {
+        workspaceId: WS,
+        purpose: PII_PURPOSE.CONTACT_POINT_VALUE,
+      });
+      const findFirst = vi.fn().mockResolvedValue({ status: 'VALID' });
+      const findUnique = vi.fn().mockResolvedValue(null);
+      const tx = { contactPoint: { findFirst, findUnique } } as never;
+
+      await expect(
+        readbackGuessedEmail(tx, { workspaceId: WS, contactId: 'c1', result: verifiedResult }),
+      ).resolves.toEqual({
+        persisted: true,
+        email: 'h.herold@acme.de',
+        status: 'VALID',
+        reason: verifiedResult.reason,
+      });
+      expect(findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            contactId: 'c1',
+            type: 'email',
+            value: { in: expectedCandidates },
+          },
+          select: { status: true },
+        }),
+      );
+      expect(findUnique).not.toHaveBeenCalled();
+
+      findFirst.mockClear();
+      await expect(
+        runWithWorkspacePiiContext(WS, () =>
+          readbackGuessedEmail(tx, { contactId: 'c1', result: verifiedResult }),
+        ),
+      ).resolves.toEqual({
+        persisted: true,
+        email: 'h.herold@acme.de',
+        status: 'VALID',
+        reason: verifiedResult.reason,
+      });
+      expect(findFirst).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
 });
 
 describe('A4：分类/验证元数据落库', () => {

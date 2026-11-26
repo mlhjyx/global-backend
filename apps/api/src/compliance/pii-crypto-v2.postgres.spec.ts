@@ -4,6 +4,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ChannelService } from '../channels/channel.service';
 import { buildChannelRecordRows, recordContentHash } from '../channels/channel-records';
 import { createPrismaChannelRecordWriter } from '../channels/channel-records.prisma';
+import {
+  upsertGuessedEmailPoint,
+  upsertObservedContactPoint,
+  upsertProviderEmailPoint,
+} from '../discovery/contact-point-writer';
+import { readbackGuessedEmail } from '../discovery/email-guess-persist';
 import { OutreachDncService } from '../outreach/outreach-dnc.service';
 import { rehashOutreachGlobalSuppression } from '../../scripts/rehash-outreach-global-suppression.mts';
 import {
@@ -12,6 +18,7 @@ import {
   blindPlatformKey,
   decryptPii,
   decryptPlatformPii,
+  encryptPii,
   encryptPlatformPii,
 } from './pii-crypto';
 import { piiExtension } from './pii-crypto.extension';
@@ -163,6 +170,7 @@ describe.skipIf(!enabled)('MT-P2 PII crypto v2 on disposable PostgreSQL', () => 
         where: { emailHash: { in: [sha, h1, h2] } },
       });
       await owner.$executeRaw`DELETE FROM field_evidence WHERE workspace_id IN (${wsA}::uuid, ${wsB}::uuid)`;
+      await owner.$executeRaw`DELETE FROM contact_point_verification_event WHERE workspace_id IN (${wsA}::uuid, ${wsB}::uuid)`;
       await owner.$executeRaw`DELETE FROM contact_point WHERE workspace_id IN (${wsA}::uuid, ${wsB}::uuid)`;
       await owner.$executeRaw`DELETE FROM canonical_contact WHERE workspace_id IN (${wsA}::uuid, ${wsB}::uuid)`;
       await owner.$executeRaw`DELETE FROM canonical_company WHERE workspace_id IN (${wsA}::uuid, ${wsB}::uuid)`;
@@ -548,5 +556,214 @@ describe.skipIf(!enabled)('MT-P2 PII crypto v2 on disposable PostgreSQL', () => 
     expect(
       await owner.outreachGlobalSuppression.findUnique({ where: { emailHash: hmac1 } }),
     ).toBeNull();
+  });
+
+  it('preserves stronger four-state contact_point and verification event ledger on reencryption collision, and prevents rotation-window duplicates across writers/readback', async () => {
+    const extClient = appExt as unknown as {
+      withWorkspace: <T>(
+        workspaceId: string,
+        fn: (tx: PrismaClient) => Promise<T>,
+      ) => Promise<T>;
+    };
+    const withWs = <T>(workspaceId: string, fn: (tx: PrismaClient) => Promise<T>) =>
+      extClient.withWorkspace(workspaceId, fn);
+
+    // 1. Seed a k1-encrypted VALID contact_point with full P1-02 four-state columns & verification event
+    process.env.PII_KEYRING_JSON = JSON.stringify({ activeKeyId: 'k1', keys: { k1: K1 } });
+    const collisionContactId = randomUUID();
+    const strongK1PointId = randomUUID();
+    const strongEventId = randomUUID();
+    const weakK2PointId = randomUUID();
+    const validSince = new Date('2026-10-01T00:00:00.000Z');
+    const nextReverifyAt = new Date('2026-12-30T00:00:00.000Z');
+    const collisionEmail = 'strong-valid@m8-probe.example';
+    const k1Cipher = encryptPii(collisionEmail, {
+      workspaceId: wsA,
+      purpose: PII_PURPOSE.CONTACT_POINT_VALUE,
+    });
+    const k1Domain = blindContactKey('domain:m8-probe.example', {
+      workspaceId: wsA,
+      purpose: PII_PURPOSE.DOMAIN_BLIND_KEY,
+    });
+
+    await owner.canonicalContact.create({
+      data: {
+        id: collisionContactId,
+        workspaceId: wsA,
+        companyId: companyA,
+        fullName: encryptPii('Maria Kollision', {
+          workspaceId: wsA,
+          purpose: PII_PURPOSE.CANONICAL_CONTACT_FULL_NAME,
+        }),
+        dedupeKey: blindContactKey(`e:${collisionEmail}`, {
+          workspaceId: wsA,
+          purpose: PII_PURPOSE.CONTACT_DEDUPE_KEY,
+        }),
+      },
+    });
+    await owner.contactPoint.create({
+      data: {
+        id: strongK1PointId,
+        workspaceId: wsA,
+        contactId: collisionContactId,
+        type: 'email',
+        value: k1Cipher,
+        status: 'VALID',
+        verifiedAt: validSince,
+        sourceType: 'contact_page',
+        emailType: 'personal',
+        verificationState: 'VALID',
+        verificationProvider: 'smtp_self',
+        verificationMethod: 'smtp_rcpt',
+        catchAll: 'not_catch_all',
+        catchAllClass: 'not_catch_all',
+        confidence: 95,
+        validSince,
+        nextReverifyAt,
+        domainBlindKey: k1Domain,
+      },
+    });
+    await owner.contactPointVerificationEvent.create({
+      data: {
+        id: strongEventId,
+        workspaceId: wsA,
+        contactPointId: strongK1PointId,
+        attemptNo: 1,
+        providerKey: 'smtp_self',
+        method: 'smtp_rcpt',
+        verdict: 'valid',
+        detail: 'smtp_accepted:250',
+        catchAll: 'not_catch_all',
+        catchAllClass: 'not_catch_all',
+        score: 95,
+        actorId: 'm8-pg-test',
+        requestHash: `m8-collision-${strongEventId}`,
+      },
+    });
+    await owner.contactPoint.update({
+      where: { id: strongK1PointId },
+      data: { lastVerificationEventId: strongEventId },
+    });
+
+    // Switch keyring to k2 (keeping k1) and verify rotation-window writers/readback hit the existing k1 row
+    process.env.PII_KEYRING_JSON = JSON.stringify({
+      activeKeyId: 'k2',
+      keys: { k1: K1, k2: K2 },
+    });
+
+    await withWs(wsA, async (tx) => {
+      await upsertObservedContactPoint(tx, {
+        workspaceId: wsA,
+        contactId: collisionContactId,
+        type: 'email',
+        value: collisionEmail,
+        sourceType: 'homepage',
+      });
+      const providerSnap = await upsertProviderEmailPoint(tx, {
+        workspaceId: wsA,
+        contactId: collisionContactId,
+        email: collisionEmail,
+        emailType: 'personal',
+      });
+      expect(providerSnap).toEqual({
+        id: strongK1PointId,
+        verificationState: 'VALID',
+        validSince,
+        nextReverifyAt,
+      });
+
+      const readback = await readbackGuessedEmail(tx, {
+        workspaceId: wsA,
+        contactId: collisionContactId,
+        result: {
+          status: 'verified',
+          best: {
+            email: collisionEmail,
+            pattern: 'first',
+            prior: 0.9,
+            verdict: { status: 'VALID', detail: 'smtp_accepted:250', costCents: 0 },
+            confidence: 0.95,
+          },
+          triedCount: 1,
+          candidates: [],
+          reason: 'smtp_verified:first',
+        },
+      });
+      expect(readback).toEqual({
+        persisted: true,
+        email: collisionEmail,
+        status: 'VALID',
+        reason: 'smtp_verified:first',
+      });
+
+      const guessed = await upsertGuessedEmailPoint(tx, {
+        workspaceId: wsA,
+        contactId: collisionContactId,
+        email: collisionEmail,
+        status: 'VALID',
+        verifiedAt: validSince,
+        emailType: 'personal',
+        sourceType: 'pattern_guess',
+        verificationMethod: 'smtp_rcpt',
+        catchAll: 'not_catch_all',
+        verificationState: 'VALID',
+        catchAllClass: 'not_catch_all',
+        verificationProvider: 'smtp_self',
+        confidence: 95,
+        validSince,
+        nextReverifyAt,
+      });
+      expect(guessed.id).toBe(strongK1PointId);
+    });
+
+    const pointsBeforeDup = await owner.contactPoint.findMany({
+      where: { contactId: collisionContactId, type: 'email' },
+    });
+    expect(pointsBeforeDup).toHaveLength(1);
+
+    // 2. Seed a pre-existing weaker k2 UNKNOWN duplicate directly via owner and verify reencryptWorkspacePiiBatch
+    // deletes the weaker k2 row first, rekeys the stronger k1 row in place, and preserves all four-state columns & events.
+    const k2Cipher = encryptPii(collisionEmail, {
+      workspaceId: wsA,
+      purpose: PII_PURPOSE.CONTACT_POINT_VALUE,
+    });
+    await owner.contactPoint.create({
+      data: {
+        id: weakK2PointId,
+        workspaceId: wsA,
+        contactId: collisionContactId,
+        type: 'email',
+        value: k2Cipher,
+        status: 'UNVERIFIED',
+        sourceType: 'homepage',
+        verificationState: 'UNKNOWN',
+        domainBlindKey: k1Domain,
+      },
+    });
+
+    const dedupCounts = await reencryptWorkspacePiiBatch(appRaw, wsA, { activeKeyId: 'k2' });
+    expect(dedupCounts.dedup).toBe(1);
+
+    const survivingPoints = await owner.contactPoint.findMany({
+      where: { contactId: collisionContactId, type: 'email' },
+    });
+    expect(survivingPoints).toHaveLength(1);
+    const survivor = survivingPoints[0]!;
+    expect(survivor.id).toBe(strongK1PointId);
+    expect(survivor.value.startsWith('enc:v2:k2:')).toBe(true);
+    expect(survivor.domainBlindKey?.startsWith('bi:v2:k2:')).toBe(true);
+    expect(survivor.status).toBe('VALID');
+    expect(survivor.verificationState).toBe('VALID');
+    expect(survivor.validSince?.toISOString()).toBe(validSince.toISOString());
+    expect(survivor.verificationProvider).toBe('smtp_self');
+    expect(survivor.verificationMethod).toBe('smtp_rcpt');
+    expect(survivor.confidence).toBe(95);
+    expect(survivor.lastVerificationEventId).toBe(strongEventId);
+
+    const events = await owner.contactPointVerificationEvent.findMany({
+      where: { contactPointId: strongK1PointId },
+    });
+    expect(events).toHaveLength(1);
+    expect(events[0]?.id).toBe(strongEventId);
   });
 });

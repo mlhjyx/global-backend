@@ -204,6 +204,7 @@ export async function guessEmailsForRunCompany(
           }),
         readback: (transaction) =>
           readbackGuessedEmail(transaction, {
+            workspaceId: input.workspaceId,
             contactId: entry.contactId,
             result: entry.result,
           }),

@@ -4,8 +4,11 @@ import { LawfulBasis } from './provider-contract';
 import {
   blindContactKeyCandidates,
   encryptPii,
+  encryptPiiCandidates,
   PII_PURPOSE,
+  piiKeyConfigured,
 } from '../compliance/pii-crypto';
+import { currentWorkspacePiiContext } from '../compliance/pii-crypto.extension';
 import { companyMatchesSuppression, canonicalizeSuppressionValue, canonicalizeSuppressionValues,
 } from './suppression-value';
 import { lockWorkspaceSuppressionPolicy } from './suppression-policy-lock';
@@ -84,22 +87,53 @@ export interface PersistGuessOutcome {
 
 export async function readbackGuessedEmail(
   tx: Prisma.TransactionClient,
-  args: { contactId: string; result: GuessResult },
+  args: { workspaceId?: string; contactId: string; result: GuessResult },
 ): Promise<PersistGuessOutcome> {
   const plan = guessedEmailWritePlan(args.result);
   if (!plan) return { persisted: false, reason: args.result.reason };
   const email = canonicalizeSuppressionValue('email', plan.email);
   if (!email) return { persisted: false, reason: 'suppressed' };
-  const point = await tx.contactPoint.findUnique({
-    where: {
-      contactId_type_value: {
-        contactId: args.contactId,
-        type: 'email',
-        value: email,
+  const workspaceId = args.workspaceId ?? currentWorkspacePiiContext();
+  let point: { status: string } | null = null;
+  if (workspaceId && typeof tx.contactPoint.findFirst === 'function' && piiKeyConfigured()) {
+    const candidates = encryptPiiCandidates(email, {
+      workspaceId,
+      purpose: PII_PURPOSE.CONTACT_POINT_VALUE,
+    });
+    if (candidates.length > 1) {
+      point = await tx.contactPoint.findFirst({
+        where: {
+          contactId: args.contactId,
+          type: 'email',
+          value: { in: candidates },
+        },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        select: { status: true },
+      });
+    } else {
+      point = await tx.contactPoint.findUnique({
+        where: {
+          contactId_type_value: {
+            contactId: args.contactId,
+            type: 'email',
+            value: email,
+          },
+        },
+        select: { status: true },
+      });
+    }
+  } else {
+    point = await tx.contactPoint.findUnique({
+      where: {
+        contactId_type_value: {
+          contactId: args.contactId,
+          type: 'email',
+          value: email,
+        },
       },
-    },
-    select: { status: true },
-  });
+      select: { status: true },
+    });
+  }
   if (!point || (point.status !== 'VALID' && point.status !== 'RISKY')) {
     return { persisted: false, reason: 'authoritative_readback_missing' };
   }
