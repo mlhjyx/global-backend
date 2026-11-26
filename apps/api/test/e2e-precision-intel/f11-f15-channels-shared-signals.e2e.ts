@@ -19,7 +19,7 @@ import {
   sanitizeToGreenCompanyFact,
   type PlatformSharedSqlClient,
 } from "../../src/shared-facts";
-import { createSharedFactsHookFromEnv } from "../../src/discovery/streaming/shared-facts-hook";
+import type { SharedFactsStreamingHook } from "../../src/discovery/streaming/shared-facts-hook";
 import { GooglePatentsInventorProvider } from "../../src/discovery/providers/bigquery-patents.provider";
 import { CompaniesHouseContactProvider } from "../../src/discovery/providers/companies-house.provider";
 import { GleifEnrichmentProvider } from "../../src/discovery/providers/gleif.provider";
@@ -405,10 +405,17 @@ describe("Mainline A channels, shared facts and design examples", () => {
       const executeWritePort = vi.fn(async (_sql: TemplateStringsArray, ..._parameters: unknown[]) => 1);
       const reader: PlatformSharedSqlClient = { $queryRaw: async <T>() => [] as T, $executeRaw: executeReadPort };
       const writer: PlatformSharedSqlClient = { $queryRaw: async <T>() => [] as T, $executeRaw: executeWritePort };
-      const hook = Reflect.apply(createSharedFactsHookFromEnv, undefined, [
+      type CreateHook = (
+        env: NodeJS.ProcessEnv,
+        options: { pgReader: PlatformSharedSqlClient; pgWriter: PlatformSharedSqlClient },
+      ) => SharedFactsStreamingHook;
+      const createHook = await loadProductExport<CreateHook>(
+        "F12", "src/discovery/streaming/shared-facts-hook.ts", "createSharedFactsHookFromEnv",
+      );
+      const hook = createHook(
         { ADR003_SHARED_GREEN_FACTS: "on", ADR003_DOMAIN_COOLDOWN_PEPPER: "1".repeat(64) },
         { pgReader: reader, pgWriter: writer },
-      ]) as ReturnType<typeof createSharedFactsHookFromEnv>;
+      );
       try {
         const result = await hook.writeBackFromStreamingExtraction({
           domain: "buyer.example",
@@ -756,11 +763,7 @@ describe("Mainline A channels, shared facts and design examples", () => {
     }
 
     it("T1-F14-01: synthetic change-watch endpoint accepts a fixture request", async () => {
-      upstreams.setRoute("/changedetection", (_req, res) => {
-        res.statusCode = 201;
-        res.setHeader("Content-Type", "application/json");
-        res.end(JSON.stringify({ uuid: "watch-s-tier-1" }));
-      });
+      upstreams.setResponse("/changedetection", { status: 201, json: { uuid: "watch-s-tier-1" } });
       const res = await fetch(upstreams.urlFor("/changedetection") + "/api/v1/watch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -779,10 +782,9 @@ describe("Mainline A channels, shared facts and design examples", () => {
     });
 
     it("T1-F14-03: rsshub feed XML parses into signalKind='rss_item'", async () => {
-      upstreams.setRoute("/rsshub", (_req, res) => {
-        res.statusCode = 200;
-        res.setHeader("Content-Type", "application/rss+xml");
-        res.end(SIGNALS_AND_DOCLING_FIXTURES.rssFeedXml);
+      upstreams.setResponse("/rsshub", {
+        contentType: "application/rss+xml",
+        text: SIGNALS_AND_DOCLING_FIXTURES.rssFeedXml,
       });
       const resp = await fetch(`${upstreams.urlFor("/rsshub")}/solar/italsol`);
       const xml = await resp.text();
@@ -910,11 +912,7 @@ describe("Mainline A channels, shared facts and design examples", () => {
   // ---------------------------------------------------------------------------
   designSuite("Design examples F15: global-docling buyer PDF parsing & SearXNG grey-zone re-verify", () => {
     it("T1-F15-01: DoclingClient parses buyer PDF catalog into contacts, VAT, and product specs", async () => {
-      upstreams.setRoute("/docling", (_req, res) => {
-        res.statusCode = 200;
-        res.setHeader("Content-Type", "application/json");
-        res.end(JSON.stringify(SIGNALS_AND_DOCLING_FIXTURES.doclingBuyerCatalogResponse));
-      });
+      upstreams.setResponse("/docling", { json: SIGNALS_AND_DOCLING_FIXTURES.doclingBuyerCatalogResponse });
       const client = new DoclingClient();
       const out = await client.convertToMarkdown(
         "italsol-catalog.pdf",
@@ -926,11 +924,7 @@ describe("Mainline A channels, shared facts and design examples", () => {
     });
 
     it("T1-F15-02: DoclingClient parses TED tender PDF into procurement officer & contact", async () => {
-      upstreams.setRoute("/docling", (_req, res) => {
-        res.statusCode = 200;
-        res.setHeader("Content-Type", "application/json");
-        res.end(JSON.stringify(SIGNALS_AND_DOCLING_FIXTURES.doclingTedTenderResponse));
-      });
+      upstreams.setResponse("/docling", { json: SIGNALS_AND_DOCLING_FIXTURES.doclingTedTenderResponse });
       const client = new DoclingClient();
       const out = await client.convertToMarkdown(
         "ted-2026-045.pdf",
@@ -943,11 +937,7 @@ describe("Mainline A channels, shared facts and design examples", () => {
     it.todo("T1-F15-03: buyer PDF client composition independently of Site Builder");
 
     it("T1-F15-04: SearXNG grey-zone (0.45..0.74) candidate confirmed on company site promotes to >=0.75 at $0", async () => {
-      upstreams.setRoute("/searxng", (_req, res) => {
-        res.statusCode = 200;
-        res.setHeader("Content-Type", "application/json");
-        res.end(JSON.stringify(SIGNALS_AND_DOCLING_FIXTURES.searxGreyZoneConfirm));
-      });
+      upstreams.setResponse("/searxng", { json: SIGNALS_AND_DOCLING_FIXTURES.searxGreyZoneConfirm });
       const res = await searxSearch(
         { q: "\"Giulia Bianchi\" \"Italsol\" site:italsol.example" },
         5_000,
@@ -959,17 +949,12 @@ describe("Mainline A channels, shared facts and design examples", () => {
     });
 
     it("T1-F15-05: Docling health check & bounded timeout succeed cleanly against mock server", async () => {
-      upstreams.setRoute("/docling", (req, res) => {
-        res.statusCode = 200;
-        res.setHeader("Content-Type", "application/json");
-        if (req.path === "/health") {
-          res.end(JSON.stringify({ status: "ok" }));
-          return;
-        }
-        res.end(JSON.stringify(SIGNALS_AND_DOCLING_FIXTURES.doclingBuyerCatalogResponse));
-      });
+      const healthReply = { status: "ok", service: "docling-fixture" };
+      upstreams.setResponse("/docling", { json: healthReply }, "/health");
+      upstreams.setResponse("/docling", { json: SIGNALS_AND_DOCLING_FIXTURES.doclingBuyerCatalogResponse });
       const health = await fetch(`${upstreams.urlFor("/docling")}/health`);
       expect(health.status).toBe(200);
+      expect(await health.json()).toEqual(healthReply);
       const client = new DoclingClient();
       const out = await client.convertToMarkdown(
         "health-test.pdf",
@@ -981,14 +966,11 @@ describe("Mainline A channels, shared facts and design examples", () => {
     it.todo("T2-F15-01: buyer PDF URL checks through the proposed adapter");
 
     it("T2-F15-02: Corrupt / unreadable PDF sent to Docling returns bounded KB_DOCUMENT_INVALID error", async () => {
-      upstreams.setRoute("/docling", (_req, res) => {
-        res.statusCode = 422;
-        res.setHeader("Content-Type", "application/json");
-        res.end(
-          JSON.stringify({
-            detail: { component_type: "user_input", message: "invalid document data format" },
-          }),
-        );
+      upstreams.setResponse("/docling", {
+        status: 422,
+        json: {
+          detail: { component_type: "user_input", message: "invalid document data format" },
+        },
       });
       const client = new DoclingClient();
       await expect(
@@ -997,11 +979,7 @@ describe("Mainline A channels, shared facts and design examples", () => {
     });
 
     it("T2-F15-03: Docling HTTP 503 degrades with retryable KB_DOCLING_UNAVAILABLE", async () => {
-      upstreams.setRoute("/docling", (_req, res) => {
-        res.statusCode = 503;
-        res.setHeader("Content-Type", "application/json");
-        res.end(JSON.stringify({ detail: "service busy" }));
-      });
+      upstreams.setResponse("/docling", { status: 503, json: { detail: "service busy" } });
       const client = new DoclingClient();
       await expect(
         client.convertToMarkdown("catalog.pdf", SIGNALS_AND_DOCLING_FIXTURES.syntheticPdfBytes),
@@ -1009,23 +987,19 @@ describe("Mainline A channels, shared facts and design examples", () => {
     });
 
     it("T2-F15-04: SearXNG grey-zone query returning unrelated namesakes keeps score <0.75 (not promoted)", async () => {
-      upstreams.setRoute("/searxng", (_req, res) => {
-        res.statusCode = 200;
-        res.setHeader("Content-Type", "application/json");
-        res.end(
-          JSON.stringify({
-            results: [
-              {
-                url: "https://unrelated-valves.example/about",
-                title: "Giulia Bianchi - Valve Sales",
-                content: "Industrial valve sales unrelated to Italsol.",
-              },
-            ],
-            suggestions: [],
-            infoboxes: [],
-            number_of_results: 1,
-          }),
-        );
+      upstreams.setResponse("/searxng", {
+        json: {
+          results: [
+            {
+              url: "https://unrelated-valves.example/about",
+              title: "Giulia Bianchi - Valve Sales",
+              content: "Industrial valve sales unrelated to Italsol.",
+            },
+          ],
+          suggestions: [],
+          infoboxes: [],
+          number_of_results: 1,
+        },
       });
       const res = await searxSearch({ q: "\"Giulia Bianchi\" \"Italsol\"" }, 5_000, MAINLINE_A_TENANT_A);
       expect(res.results).toHaveLength(1);

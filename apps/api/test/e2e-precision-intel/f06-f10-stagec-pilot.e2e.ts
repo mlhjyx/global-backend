@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { EventEmitter } from "node:events";
 import { Module, Controller, Get, Logger } from "@nestjs/common";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthModule } from "../../src/auth/auth.module";
@@ -920,22 +921,19 @@ describe("F06–F10 Wave 1 Stage C, Worker, Battle CSV & Pilot Cleanup (E2E Tier
 
     it("T1-F09-05 and T2-F09-04: duplicate process signals drain once before early exit", async () => {
       vi.useFakeTimers();
-      const handlers = new Map<NodeJS.Signals, () => void>();
+      const signals = new EventEmitter();
       const heartbeat = vi.fn(async () => undefined);
       const onEarlyExit = vi.fn();
       const coordinator = startWorkerProcessSignalCoordinator({
         leases: { heartbeat },
         taskQueue: "precision-intel-test",
-        signals: {
-          on: (sig, fn) => handlers.set(sig, fn),
-          off: (sig) => handlers.delete(sig),
-        },
+        signals,
         onEarlyExit,
       });
       try {
         await coordinator.registered;
-        handlers.get("SIGTERM")!();
-        handlers.get("SIGINT")?.();
+        expect(signals.emit("SIGTERM")).toBe(true);
+        signals.emit("SIGINT");
         await vi.advanceTimersByTimeAsync(1);
         expect(heartbeat.mock.calls).toEqual([
           ["WORKER", "STARTING", "precision-intel-test"],

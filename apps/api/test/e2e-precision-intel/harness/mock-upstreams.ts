@@ -11,10 +11,10 @@ export interface RecordedUpstreamCall {
   readonly bodyJson: unknown;
 }
 
-export type UpstreamRouteHandler = (
-  req: RecordedUpstreamCall,
-  res: ServerResponse,
-) => void | Promise<void>;
+type MockUpstreamResponse = { readonly status?: number } & (
+  | { readonly json: unknown }
+  | { readonly text: string; readonly contentType: string }
+);
 
 export const MOCK_UPSTREAM_PREFIXES = [
   "/serper",
@@ -51,7 +51,7 @@ export interface MockUpstreamsServer {
   readonly baseUrl: string;
   readonly calls: readonly RecordedUpstreamCall[];
   urlFor(prefix: MockUpstreamPrefix): string;
-  setRoute(prefix: string, handler: UpstreamRouteHandler): void;
+  setResponse(prefix: MockUpstreamPrefix, response: MockUpstreamResponse, subPath?: string): void;
   getCalls(prefix?: string): readonly RecordedUpstreamCall[];
   reset(): void;
   applyEnv(overrides?: Readonly<Record<string, string | undefined>>): void;
@@ -74,14 +74,8 @@ function sendJson(res: ServerResponse, status: number, payload: unknown): void {
   res.end(JSON.stringify(payload));
 }
 
-function matchPrefix(pathname: string, handlers: ReadonlyMap<string, UpstreamRouteHandler>): string {
+function matchPrefix(pathname: string): string {
   let matched = "";
-  for (const key of handlers.keys()) {
-    if ((pathname === key || pathname.startsWith(`${key}/`)) && key.length > matched.length) {
-      matched = key;
-    }
-  }
-  if (matched) return matched;
   for (const prefix of MOCK_UPSTREAM_PREFIXES) {
     if ((pathname === prefix || pathname.startsWith(`${prefix}/`)) && prefix.length > matched.length) {
       matched = prefix;
@@ -91,11 +85,11 @@ function matchPrefix(pathname: string, handlers: ReadonlyMap<string, UpstreamRou
 }
 
 export async function startMockUpstreamsServer(): Promise<MockUpstreamsServer> {
-  const customRoutes = new Map<string, UpstreamRouteHandler>();
+  const responses = new Map<string, MockUpstreamResponse>();
   const recordedCalls: RecordedUpstreamCall[] = [];
   const savedEnv = new Map<string, string | undefined>();
 
-  const defaultRouteHandler: UpstreamRouteHandler = (call, res) => {
+  const sendDefaultResponse = (call: RecordedUpstreamCall, res: ServerResponse): void => {
     switch (call.prefix) {
       case "/serper":
         return sendJson(res, 200, { organic: [] });
@@ -153,7 +147,7 @@ export async function startMockUpstreamsServer(): Promise<MockUpstreamsServer> {
           bodyJson = undefined;
         }
       }
-      const prefix = matchPrefix(parsed.pathname, customRoutes);
+      const prefix = matchPrefix(parsed.pathname);
       const subPath = prefix !== "/" && parsed.pathname.startsWith(prefix)
         ? parsed.pathname.slice(prefix.length) || "/"
         : parsed.pathname;
@@ -174,8 +168,16 @@ export async function startMockUpstreamsServer(): Promise<MockUpstreamsServer> {
       };
       recordedCalls.push(recorded);
 
-      const handler = customRoutes.get(prefix) ?? defaultRouteHandler;
-      await handler(recorded, res);
+      const response = responses.get(prefix + subPath) ?? responses.get(prefix);
+      if (!response) {
+        sendDefaultResponse(recorded, res);
+      } else if ("json" in response) {
+        sendJson(res, response.status ?? 200, response.json);
+      } else {
+        res.statusCode = response.status ?? 200;
+        res.setHeader("Content-Type", response.contentType);
+        res.end(response.text);
+      }
     } catch (err) {
       if (!res.writableEnded) {
         sendJson(res, 500, { error: err instanceof Error ? err.message : "mock error" });
@@ -199,15 +201,15 @@ export async function startMockUpstreamsServer(): Promise<MockUpstreamsServer> {
     urlFor(prefix: MockUpstreamPrefix): string {
       return `${baseUrl}${prefix}`;
     },
-    setRoute(prefix: string, handler: UpstreamRouteHandler): void {
-      customRoutes.set(prefix, handler);
+    setResponse(prefix, response, subPath = ""): void {
+      responses.set(prefix + subPath, response);
     },
     getCalls(prefix?: string): readonly RecordedUpstreamCall[] {
       if (!prefix) return [...recordedCalls];
       return recordedCalls.filter((c) => c.prefix === prefix);
     },
     reset(): void {
-      customRoutes.clear();
+      responses.clear();
       recordedCalls.length = 0;
     },
     applyEnv(overrides: Readonly<Record<string, string | undefined>> = {}): void {

@@ -96,20 +96,16 @@ describe("F01–F05 Wave 1 Social Intelligence & Zero-Cost OSINT (E2E Tiers 1–
   // ---------------------------------------------------------------------------
   describe("F1: Social search snippet & highlights restoration", () => {
     it("T1-F01-01: Serper social search preserves <=240-char snippet", async () => {
-      upstreams.setRoute("/serper", (_req, res) => {
-        res.statusCode = 200;
-        res.setHeader("Content-Type", "application/json");
-        res.end(
-          JSON.stringify({
-            organic: [
-              {
-                link: WAVE1_SOCIAL_FIXTURES.italsolDirectorHit.url,
-                title: WAVE1_SOCIAL_FIXTURES.italsolDirectorHit.title,
-                snippet: WAVE1_SOCIAL_FIXTURES.italsolDirectorHit.snippet,
-              },
-            ],
-          }),
-        );
+      upstreams.setResponse("/serper", {
+        json: {
+          organic: [
+            {
+              link: WAVE1_SOCIAL_FIXTURES.italsolDirectorHit.url,
+              title: WAVE1_SOCIAL_FIXTURES.italsolDirectorHit.title,
+              snippet: WAVE1_SOCIAL_FIXTURES.italsolDirectorHit.snippet,
+            },
+          ],
+        },
       });
 
       const tool = createSocialSerperSearchTool();
@@ -138,20 +134,16 @@ describe("F01–F05 Wave 1 Social Intelligence & Zero-Cost OSINT (E2E Tiers 1–
     });
 
     it("T1-F01-02: Exa people search preserves bounded highlights (<=3 x <=240 chars)", async () => {
-      upstreams.setRoute("/exa", (_req, res) => {
-        res.statusCode = 200;
-        res.setHeader("Content-Type", "application/json");
-        res.end(
-          JSON.stringify({
-            results: [
-              {
-                url: WAVE1_SOCIAL_FIXTURES.effeDirectorHit.url,
-                title: WAVE1_SOCIAL_FIXTURES.effeDirectorHit.title,
-                highlights: [...WAVE1_SOCIAL_FIXTURES.effeDirectorHit.highlights],
-              },
-            ],
-          }),
-        );
+      upstreams.setResponse("/exa", {
+        json: {
+          results: [
+            {
+              url: WAVE1_SOCIAL_FIXTURES.effeDirectorHit.url,
+              title: WAVE1_SOCIAL_FIXTURES.effeDirectorHit.title,
+              highlights: [...WAVE1_SOCIAL_FIXTURES.effeDirectorHit.highlights],
+            },
+          ],
+        },
       });
 
       const tool = createSocialExaPeopleTool();
@@ -280,20 +272,16 @@ describe("F01–F05 Wave 1 Social Intelligence & Zero-Cost OSINT (E2E Tiers 1–
 
     it("T2-F01-01: 500-char Serper snippet with surrogate pairs is capped <=240 without splitting pairs", async () => {
       const longWithEmoji = `${"A".repeat(239)}🛰${"B".repeat(260)}`;
-      upstreams.setRoute("/serper", (_req, res) => {
-        res.statusCode = 200;
-        res.setHeader("Content-Type", "application/json");
-        res.end(
-          JSON.stringify({
-            organic: [
-              {
-                link: WAVE1_SOCIAL_FIXTURES.italsolDirectorHit.url,
-                title: WAVE1_SOCIAL_FIXTURES.italsolDirectorHit.title,
-                snippet: longWithEmoji,
-              },
-            ],
-          }),
-        );
+      upstreams.setResponse("/serper", {
+        json: {
+          organic: [
+            {
+              link: WAVE1_SOCIAL_FIXTURES.italsolDirectorHit.url,
+              title: WAVE1_SOCIAL_FIXTURES.italsolDirectorHit.title,
+              snippet: longWithEmoji,
+            },
+          ],
+        },
       });
       const tool = createSocialSerperSearchTool();
       const out = await tool.execute({ query: "Italsol Srl", num: 5 }, TOOL_CTX);
@@ -316,20 +304,16 @@ describe("F01–F05 Wave 1 Social Intelligence & Zero-Cost OSINT (E2E Tiers 1–
 
     it("T2-F01-02: Serper snippet containing raw personal email and phone is redacted", async () => {
       const dirtySnippet = "Contact jane.doe@acme.example or call +39 02 1234567 for solar orders.";
-      upstreams.setRoute("/serper", (_req, res) => {
-        res.statusCode = 200;
-        res.setHeader("Content-Type", "application/json");
-        res.end(
-          JSON.stringify({
-            organic: [
-              {
-                link: WAVE1_SOCIAL_FIXTURES.italsolDirectorHit.url,
-                title: WAVE1_SOCIAL_FIXTURES.italsolDirectorHit.title,
-                snippet: dirtySnippet,
-              },
-            ],
-          }),
-        );
+      upstreams.setResponse("/serper", {
+        json: {
+          organic: [
+            {
+              link: WAVE1_SOCIAL_FIXTURES.italsolDirectorHit.url,
+              title: WAVE1_SOCIAL_FIXTURES.italsolDirectorHit.title,
+              snippet: dirtySnippet,
+            },
+          ],
+        },
       });
       const tool = createSocialSerperSearchTool();
       const out = await tool.execute({ query: "Italsol Srl", num: 5 }, TOOL_CTX);
@@ -353,20 +337,16 @@ describe("F01–F05 Wave 1 Social Intelligence & Zero-Cost OSINT (E2E Tiers 1–
 
     it("T2-F01-03: Exa highlights with 10x 400-char entries are bounded to <=3 x <=240 chars", async () => {
       const rawHighlights = Array.from({ length: 10 }, (_, idx) => `Highlight-${idx}-${"X".repeat(390)}`);
-      upstreams.setRoute("/exa", (_req, res) => {
-        res.statusCode = 200;
-        res.setHeader("Content-Type", "application/json");
-        res.end(
-          JSON.stringify({
-            results: [
-              {
-                url: WAVE1_SOCIAL_FIXTURES.effeDirectorHit.url,
-                title: WAVE1_SOCIAL_FIXTURES.effeDirectorHit.title,
-                highlights: rawHighlights,
-              },
-            ],
-          }),
-        );
+      upstreams.setResponse("/exa", {
+        json: {
+          results: [
+            {
+              url: WAVE1_SOCIAL_FIXTURES.effeDirectorHit.url,
+              title: WAVE1_SOCIAL_FIXTURES.effeDirectorHit.title,
+              highlights: rawHighlights,
+            },
+          ],
+        },
       });
       const tool = createSocialExaPeopleTool();
       const out = await tool.execute({ query: "Effe Energy", numResults: 5 }, TOOL_CTX);
@@ -400,21 +380,17 @@ describe("F01–F05 Wave 1 Social Intelligence & Zero-Cost OSINT (E2E Tiers 1–
     });
 
     it("T2-F01-05: snippet:null or non-string garbage in upstream hit does not crash social search tool", async () => {
-      upstreams.setRoute("/serper", (_req, res) => {
-        res.statusCode = 200;
-        res.setHeader("Content-Type", "application/json");
-        res.end(
-          JSON.stringify({
-            organic: [
-              {
-                link: WAVE1_SOCIAL_FIXTURES.italsolDirectorHit.url,
-                title: WAVE1_SOCIAL_FIXTURES.italsolDirectorHit.title,
-                snippet: null,
-                highlights: [123, null, { bad: true }],
-              },
-            ],
-          }),
-        );
+      upstreams.setResponse("/serper", {
+        json: {
+          organic: [
+            {
+              link: WAVE1_SOCIAL_FIXTURES.italsolDirectorHit.url,
+              title: WAVE1_SOCIAL_FIXTURES.italsolDirectorHit.title,
+              snippet: null,
+              highlights: [123, null, { bad: true }],
+            },
+          ],
+        },
       });
       const tool = createSocialSerperSearchTool();
       const out = await tool.execute({ query: "Italsol Srl", num: 5 }, TOOL_CTX);
@@ -826,8 +802,11 @@ describe("F01–F05 Wave 1 Social Intelligence & Zero-Cost OSINT (E2E Tiers 1–
 
     it("T2-F04-01: only statutory discovery opts into the privacy link", () => {
       const url = "https://buyer.example/informativa-privacy";
-      expect(rankLegalPageLinks([url])).toEqual([]);
-      expect(Reflect.apply(rankLegalPageLinks, undefined, [[url], { includePrivacy: true }]))
+      const rankLinks: (
+        links: readonly string[], options?: { includePrivacy: boolean },
+      ) => ReturnType<typeof rankLegalPageLinks> = rankLegalPageLinks;
+      expect(rankLinks([url])).toEqual([]);
+      expect(rankLinks([url], { includePrivacy: true }))
         .toEqual([expect.objectContaining({ url, kind: "impressum" })]);
     });
 
