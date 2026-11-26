@@ -289,6 +289,310 @@ export async function listPlatformWorkspaceIds(
   return rows.map((row) => row.id);
 }
 
+interface WorkspaceReencryptionContext {
+  workspaceId: string;
+  activeKeyId: string;
+  dryRun: boolean;
+  counts: WorkspaceReencryptionCounts;
+}
+
+interface ReencryptContactPointRow extends ContactPointStrengthRow {
+  id: string;
+  contactId: string;
+  type: string;
+  value: string;
+  domainBlindKey: string | null;
+}
+
+interface ExistingContactPointRow extends ContactPointStrengthRow {
+  id: string;
+  domainBlindKey: string | null;
+}
+
+function computeEmailDomainBlindKey(
+  workspaceId: string,
+  plaintext: string,
+): string | undefined {
+  const domain = emailDomainOfAddress(plaintext);
+  return domain
+    ? blindContactKey(`domain:${domain}`, {
+        workspaceId,
+        purpose: PII_PURPOSE.DOMAIN_BLIND_KEY,
+      })
+    : undefined;
+}
+
+async function reencryptWorkspaceContacts(
+  tx: Prisma.TransactionClient,
+  ctx: WorkspaceReencryptionContext,
+): Promise<void> {
+  const contacts = await tx.canonicalContact.findMany({
+    select: {
+      id: true,
+      fullName: true,
+      dedupeKey: true,
+      company: { select: { dedupeKey: true } },
+      contactPoints: { select: { type: true, value: true } },
+    },
+    orderBy: { id: 'asc' },
+  });
+
+  for (const c of contacts) {
+    const needName = needsPiiReencryption(c.fullName, ctx.activeKeyId);
+    const needKey = needsBlindReindex(c.dedupeKey, ctx.activeKeyId);
+    if (!needName && !needKey) continue;
+
+    const fullNamePlain = decryptPii(c.fullName, {
+      workspaceId: ctx.workspaceId,
+      purpose: PII_PURPOSE.CANONICAL_CONTACT_FULL_NAME,
+      allowLegacyPlaintext: true,
+    });
+
+    let targetKey: string | null = null;
+    if (needKey) {
+      targetKey = resolveUpgradedDedupeKey({
+        workspaceId: ctx.workspaceId,
+        storedDedupeKey: c.dedupeKey,
+        fullNamePlain,
+        companyKey: c.company.dedupeKey,
+        points: c.contactPoints,
+      });
+      if (!targetKey) {
+        ctx.counts.unmatchedDedupeKeys += 1;
+      } else if (targetKey !== c.dedupeKey) {
+        const survivor = await tx.canonicalContact.findFirst({
+          where: {
+            workspaceId: ctx.workspaceId,
+            dedupeKey: targetKey,
+            NOT: { id: c.id },
+          },
+          select: { id: true },
+        });
+        if (survivor) {
+          if (!ctx.dryRun) {
+            await mergeContactInto(tx, ctx.workspaceId, c.id, survivor.id);
+          }
+          ctx.counts.merges += 1;
+          continue;
+        }
+      }
+    }
+
+    const data: { fullName?: string; dedupeKey?: string } = {};
+    if (needName) {
+      data.fullName = encryptPii(fullNamePlain, {
+        workspaceId: ctx.workspaceId,
+        purpose: PII_PURPOSE.CANONICAL_CONTACT_FULL_NAME,
+      });
+      ctx.counts.names += 1;
+    }
+    if (targetKey && targetKey !== c.dedupeKey) {
+      data.dedupeKey = targetKey;
+      ctx.counts.dedupeKeys += 1;
+    }
+    if (!ctx.dryRun && (data.fullName !== undefined || data.dedupeKey !== undefined)) {
+      await tx.canonicalContact.update({ where: { id: c.id }, data });
+    }
+  }
+}
+
+async function resolveContactPointCollision(
+  tx: Prisma.TransactionClient,
+  ctx: WorkspaceReencryptionContext,
+  args: {
+    point: ReencryptContactPointRow;
+    existing: ExistingContactPointRow;
+    plaintext: string;
+    targetValue: string;
+    targetDomainBlind: string | undefined;
+    deletedPointIds: Set<string>;
+  },
+): Promise<void> {
+  const { point, existing, plaintext, targetValue, targetDomainBlind, deletedPointIds } = args;
+  const fallbackDomainBlind = (): string | undefined =>
+    targetDomainBlind ??
+    (point.type === 'email' ? computeEmailDomainBlindKey(ctx.workspaceId, plaintext) : undefined);
+
+  if (isStrongerContactPoint(point, existing)) {
+    const survivorDomainBlind =
+      point.domainBlindKey === null && existing.domainBlindKey !== null
+        ? fallbackDomainBlind()
+        : targetDomainBlind;
+    if (!ctx.dryRun) {
+      await mergeOrReparentContactPoint(tx, {
+        kind: 'replace_weaker_and_rekey',
+        weakerPointId: existing.id,
+        survivorPointId: point.id,
+        value: targetValue,
+        ...(survivorDomainBlind !== undefined ? { domainBlindKey: survivorDomainBlind } : {}),
+      });
+    }
+    deletedPointIds.add(existing.id);
+    return;
+  }
+
+  if (ctx.dryRun) return;
+  await mergeOrReparentContactPoint(tx, {
+    kind: 'delete_duplicate',
+    duplicatePointId: point.id,
+  });
+  if (existing.domainBlindKey === null && point.domainBlindKey !== null) {
+    const carriedDomainBlind = fallbackDomainBlind();
+    if (carriedDomainBlind !== undefined) {
+      await rekeyContactPointPii(tx, {
+        pointId: existing.id,
+        domainBlindKey: carriedDomainBlind,
+      });
+    }
+  }
+}
+
+async function reencryptWorkspaceContactPoints(
+  tx: Prisma.TransactionClient,
+  ctx: WorkspaceReencryptionContext,
+): Promise<void> {
+  const points = await tx.contactPoint.findMany({
+    where: { type: { in: PII_TYPES } },
+    select: {
+      id: true,
+      contactId: true,
+      type: true,
+      value: true,
+      status: true,
+      verifiedAt: true,
+      verificationState: true,
+      validSince: true,
+      confidence: true,
+      lastVerificationEventId: true,
+      domainBlindKey: true,
+    },
+    orderBy: { id: 'asc' },
+  });
+
+  const deletedPointIds = new Set<string>();
+  for (const p of points) {
+    if (deletedPointIds.has(p.id)) continue;
+    const needValue = needsPiiReencryption(p.value, ctx.activeKeyId);
+    const needDomainBlind =
+      p.type === 'email' &&
+      p.domainBlindKey !== null &&
+      needsBlindReindex(p.domainBlindKey, ctx.activeKeyId);
+    if (!needValue && !needDomainBlind) continue;
+
+    const plaintext = decryptPii(p.value, {
+      workspaceId: ctx.workspaceId,
+      purpose: PII_PURPOSE.CONTACT_POINT_VALUE,
+      allowLegacyPlaintext: true,
+    });
+    const targetValue = needValue
+      ? encryptPii(plaintext, {
+          workspaceId: ctx.workspaceId,
+          purpose: PII_PURPOSE.CONTACT_POINT_VALUE,
+        })
+      : p.value;
+    const targetDomainBlind = needDomainBlind
+      ? computeEmailDomainBlindKey(ctx.workspaceId, plaintext)
+      : undefined;
+
+    if (needValue) {
+      const existing = await tx.contactPoint.findFirst({
+        where: {
+          contactId: p.contactId,
+          type: p.type,
+          value: targetValue,
+          NOT: { id: p.id },
+        },
+        select: {
+          id: true,
+          status: true,
+          verifiedAt: true,
+          verificationState: true,
+          validSince: true,
+          confidence: true,
+          lastVerificationEventId: true,
+          domainBlindKey: true,
+        },
+      });
+      if (existing) {
+        await resolveContactPointCollision(tx, ctx, {
+          point: p,
+          existing,
+          plaintext,
+          targetValue,
+          targetDomainBlind,
+          deletedPointIds,
+        });
+        ctx.counts.dedup += 1;
+        continue;
+      }
+    }
+
+    const updateData: { value?: string; domainBlindKey?: string } = {};
+    if (needValue) {
+      updateData.value = targetValue;
+      ctx.counts.points += 1;
+    }
+    if (targetDomainBlind !== undefined) {
+      updateData.domainBlindKey = targetDomainBlind;
+      ctx.counts.domainBlindKeys += 1;
+    }
+    if (!ctx.dryRun && (updateData.value !== undefined || updateData.domainBlindKey !== undefined)) {
+      await rekeyContactPointPii(tx, {
+        pointId: p.id,
+        ...updateData,
+      });
+    }
+  }
+}
+
+async function reencryptWorkspaceFieldEvidence(
+  tx: Prisma.TransactionClient,
+  ctx: WorkspaceReencryptionContext,
+): Promise<void> {
+  const scalars = await tx.fieldEvidence.findMany({
+    where: { entityType: 'contact', field: { in: PII_TYPES } },
+    select: { id: true, value: true },
+  });
+  for (const e of scalars) {
+    if (typeof e.value === 'string' && needsPiiReencryption(e.value, ctx.activeKeyId)) {
+      const upgraded = reencryptPii(e.value, {
+        workspaceId: ctx.workspaceId,
+        purpose: PII_PURPOSE.FIELD_EVIDENCE_VALUE,
+        allowLegacyPlaintext: true,
+      });
+      if (!ctx.dryRun) {
+        await tx.fieldEvidence.update({
+          where: { id: e.id },
+          data: { value: upgraded },
+        });
+      }
+      ctx.counts.evidence += 1;
+    }
+  }
+
+  const guesses = await tx.fieldEvidence.findMany({
+    where: { entityType: 'contact', field: 'email.guess' },
+    select: { id: true, value: true },
+  });
+  for (const g of guesses) {
+    const v = g.value as { email?: unknown } | null;
+    if (v && typeof v.email === 'string' && needsPiiReencryption(v.email, ctx.activeKeyId)) {
+      const upgraded = reencryptPii(v.email, {
+        workspaceId: ctx.workspaceId,
+        purpose: PII_PURPOSE.FIELD_EVIDENCE_VALUE,
+        allowLegacyPlaintext: true,
+      });
+      if (!ctx.dryRun) {
+        await tx.fieldEvidence.update({
+          where: { id: g.id },
+          data: { value: { ...v, email: upgraded } },
+        });
+      }
+      ctx.counts.evidence += 1;
+    }
+  }
+}
+
 /**
  * Re-encrypts & upgrades blind indexes for one workspace using a raw (un-extended)
  * `app_user` PrismaClient inside an RLS-scoped transaction (`set_config('app.current_workspace_id')`).
@@ -298,303 +602,49 @@ export async function reencryptWorkspacePiiBatch(
   workspaceId: string,
   options: { dryRun?: boolean; activeKeyId?: string } = {},
 ): Promise<WorkspaceReencryptionCounts> {
-  const dryRun = options.dryRun ?? false;
-  const activeKeyId = options.activeKeyId ?? getActivePiiKeyId();
-  const counts: WorkspaceReencryptionCounts = {
+  const ctx: WorkspaceReencryptionContext = {
     workspaceId,
-    names: 0,
-    dedupeKeys: 0,
-    unmatchedDedupeKeys: 0,
-    merges: 0,
-    points: 0,
-    domainBlindKeys: 0,
-    dedup: 0,
-    evidence: 0,
+    activeKeyId: options.activeKeyId ?? getActivePiiKeyId(),
+    dryRun: options.dryRun ?? false,
+    counts: {
+      workspaceId,
+      names: 0,
+      dedupeKeys: 0,
+      unmatchedDedupeKeys: 0,
+      merges: 0,
+      points: 0,
+      domainBlindKeys: 0,
+      dedup: 0,
+      evidence: 0,
+    },
   };
 
   await appDb.$transaction(
     async (tx) => {
       await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${workspaceId}, true)`;
-
-      const contacts = await tx.canonicalContact.findMany({
-        select: {
-          id: true,
-          fullName: true,
-          dedupeKey: true,
-          company: { select: { dedupeKey: true } },
-          contactPoints: { select: { type: true, value: true } },
-        },
-        orderBy: { id: 'asc' },
-      });
-
-      for (const c of contacts) {
-        const needName = needsPiiReencryption(c.fullName, activeKeyId);
-        const needKey = needsBlindReindex(c.dedupeKey, activeKeyId);
-        if (!needName && !needKey) continue;
-
-        const fullNamePlain = decryptPii(c.fullName, {
-          workspaceId,
-          purpose: PII_PURPOSE.CANONICAL_CONTACT_FULL_NAME,
-          allowLegacyPlaintext: true,
-        });
-
-        let targetKey: string | null = null;
-        if (needKey) {
-          targetKey = resolveUpgradedDedupeKey({
-            workspaceId,
-            storedDedupeKey: c.dedupeKey,
-            fullNamePlain,
-            companyKey: c.company.dedupeKey,
-            points: c.contactPoints,
-          });
-          if (!targetKey) {
-            counts.unmatchedDedupeKeys += 1;
-          } else if (targetKey !== c.dedupeKey) {
-            const survivor = await tx.canonicalContact.findFirst({
-              where: {
-                workspaceId,
-                dedupeKey: targetKey,
-                NOT: { id: c.id },
-              },
-              select: { id: true },
-            });
-            if (survivor) {
-              if (!dryRun) {
-                await mergeContactInto(tx, workspaceId, c.id, survivor.id);
-              }
-              counts.merges += 1;
-              continue;
-            }
-          }
-        }
-
-        const data: { fullName?: string; dedupeKey?: string } = {};
-        if (needName) {
-          data.fullName = encryptPii(fullNamePlain, {
-            workspaceId,
-            purpose: PII_PURPOSE.CANONICAL_CONTACT_FULL_NAME,
-          });
-          counts.names += 1;
-        }
-        if (targetKey && targetKey !== c.dedupeKey) {
-          data.dedupeKey = targetKey;
-          counts.dedupeKeys += 1;
-        }
-        if (!dryRun && (data.fullName !== undefined || data.dedupeKey !== undefined)) {
-          await tx.canonicalContact.update({ where: { id: c.id }, data });
-        }
-      }
-
-      const points = await tx.contactPoint.findMany({
-        where: { type: { in: PII_TYPES } },
-        select: {
-          id: true,
-          contactId: true,
-          type: true,
-          value: true,
-          status: true,
-          verifiedAt: true,
-          verificationState: true,
-          validSince: true,
-          confidence: true,
-          lastVerificationEventId: true,
-          domainBlindKey: true,
-        },
-        orderBy: { id: 'asc' },
-      });
-
-      const deletedPointIds = new Set<string>();
-      for (const p of points) {
-        if (deletedPointIds.has(p.id)) continue;
-        const needValue = needsPiiReencryption(p.value, activeKeyId);
-        const needDomainBlind =
-          p.type === 'email' &&
-          p.domainBlindKey !== null &&
-          needsBlindReindex(p.domainBlindKey, activeKeyId);
-        if (!needValue && !needDomainBlind) continue;
-
-        const plaintext = decryptPii(p.value, {
-          workspaceId,
-          purpose: PII_PURPOSE.CONTACT_POINT_VALUE,
-          allowLegacyPlaintext: true,
-        });
-        const targetValue = needValue
-          ? encryptPii(plaintext, {
-              workspaceId,
-              purpose: PII_PURPOSE.CONTACT_POINT_VALUE,
-            })
-          : p.value;
-
-        let targetDomainBlind: string | undefined;
-        if (needDomainBlind) {
-          const domain = emailDomainOfAddress(plaintext);
-          if (domain) {
-            targetDomainBlind = blindContactKey(`domain:${domain}`, {
-              workspaceId,
-              purpose: PII_PURPOSE.DOMAIN_BLIND_KEY,
-            });
-          }
-        }
-
-        if (needValue) {
-          const existing = await tx.contactPoint.findFirst({
-            where: {
-              contactId: p.contactId,
-              type: p.type,
-              value: targetValue,
-              NOT: { id: p.id },
-            },
-            select: {
-              id: true,
-              status: true,
-              verifiedAt: true,
-              verificationState: true,
-              validSince: true,
-              confidence: true,
-              lastVerificationEventId: true,
-              domainBlindKey: true,
-            },
-          });
-          if (existing) {
-            const pStronger = isStrongerContactPoint(p, existing);
-            const fallbackDomainBlind = (): string | undefined => {
-              if (targetDomainBlind !== undefined) return targetDomainBlind;
-              if (p.type !== 'email') return undefined;
-              const domain = emailDomainOfAddress(plaintext);
-              return domain
-                ? blindContactKey(`domain:${domain}`, {
-                    workspaceId,
-                    purpose: PII_PURPOSE.DOMAIN_BLIND_KEY,
-                  })
-                : undefined;
-            };
-            if (pStronger) {
-              const survivorDomainBlind =
-                p.domainBlindKey === null && existing.domainBlindKey !== null
-                  ? fallbackDomainBlind()
-                  : targetDomainBlind;
-              if (!dryRun) {
-                await mergeOrReparentContactPoint(tx, {
-                  kind: 'replace_weaker_and_rekey',
-                  weakerPointId: existing.id,
-                  survivorPointId: p.id,
-                  value: targetValue,
-                  ...(survivorDomainBlind !== undefined
-                    ? { domainBlindKey: survivorDomainBlind }
-                    : {}),
-                });
-              }
-              deletedPointIds.add(existing.id);
-            } else {
-              if (!dryRun) {
-                await mergeOrReparentContactPoint(tx, {
-                  kind: 'delete_duplicate',
-                  duplicatePointId: p.id,
-                });
-                if (existing.domainBlindKey === null && p.domainBlindKey !== null) {
-                  const carriedDomainBlind = fallbackDomainBlind();
-                  if (carriedDomainBlind !== undefined) {
-                    await rekeyContactPointPii(tx, {
-                      pointId: existing.id,
-                      domainBlindKey: carriedDomainBlind,
-                    });
-                  }
-                }
-              }
-            }
-            counts.dedup += 1;
-            continue;
-          }
-        }
-
-        const updateData: { value?: string; domainBlindKey?: string } = {};
-        if (needValue) {
-          updateData.value = targetValue;
-          counts.points += 1;
-        }
-        if (targetDomainBlind !== undefined) {
-          updateData.domainBlindKey = targetDomainBlind;
-          counts.domainBlindKeys += 1;
-        }
-        if (!dryRun && (updateData.value !== undefined || updateData.domainBlindKey !== undefined)) {
-          await rekeyContactPointPii(tx, {
-            pointId: p.id,
-            ...updateData,
-          });
-        }
-      }
-
-      const scalars = await tx.fieldEvidence.findMany({
-        where: { entityType: 'contact', field: { in: PII_TYPES } },
-        select: { id: true, value: true },
-      });
-      for (const e of scalars) {
-        if (typeof e.value === 'string' && needsPiiReencryption(e.value, activeKeyId)) {
-          const upgraded = reencryptPii(e.value, {
-            workspaceId,
-            purpose: PII_PURPOSE.FIELD_EVIDENCE_VALUE,
-            allowLegacyPlaintext: true,
-          });
-          if (!dryRun) {
-            await tx.fieldEvidence.update({
-              where: { id: e.id },
-              data: { value: upgraded },
-            });
-          }
-          counts.evidence += 1;
-        }
-      }
-
-      const guesses = await tx.fieldEvidence.findMany({
-        where: { entityType: 'contact', field: 'email.guess' },
-        select: { id: true, value: true },
-      });
-      for (const g of guesses) {
-        const v = g.value as { email?: unknown } | null;
-        if (v && typeof v.email === 'string' && needsPiiReencryption(v.email, activeKeyId)) {
-          const upgraded = reencryptPii(v.email, {
-            workspaceId,
-            purpose: PII_PURPOSE.FIELD_EVIDENCE_VALUE,
-            allowLegacyPlaintext: true,
-          });
-          if (!dryRun) {
-            await tx.fieldEvidence.update({
-              where: { id: g.id },
-              data: { value: { ...v, email: upgraded } },
-            });
-          }
-          counts.evidence += 1;
-        }
-      }
+      await reencryptWorkspaceContacts(tx, ctx);
+      await reencryptWorkspaceContactPoints(tx, ctx);
+      await reencryptWorkspaceFieldEvidence(tx, ctx);
     },
     { maxWait: 10_000, timeout: 60_000 },
   );
 
-  return counts;
+  return ctx.counts;
 }
 
-/**
- * Re-encrypts platform-scoped PII tables (`patent_inventor_cache` and `source_channel_record`)
- * via an `execution_budget_platform_writer` PrismaClient.
- */
-export async function reencryptPlatformPiiBatch(
-  platformWriter: PrismaClient,
-  options: { dryRun?: boolean; activeKeyId?: string } = {},
-): Promise<PlatformReencryptionCounts> {
-  await assertScopedDatabasePrincipal(
-    platformWriter,
-    EXECUTION_BUDGET_PLATFORM_WRITER_ROLE,
-    'PiiReencryption',
-  );
-  const dryRun = options.dryRun ?? false;
-  const activeKeyId = options.activeKeyId ?? getActivePiiKeyId();
-  const counts: PlatformReencryptionCounts = {
-    patentCacheNames: 0,
-    patentCacheKeys: 0,
-    patentCacheDedup: 0,
-    channelRecords: 0,
-  };
+const SOURCE_CHANNEL_PII_SPECS = [
+  ['contactName', PII_PURPOSE.SOURCE_CHANNEL_CONTACT_NAME],
+  ['contactTitle', PII_PURPOSE.SOURCE_CHANNEL_CONTACT_TITLE],
+  ['email', PII_PURPOSE.SOURCE_CHANNEL_EMAIL],
+  ['phone', PII_PURPOSE.SOURCE_CHANNEL_PHONE],
+] as const;
 
+async function reencryptPatentInventorCache(
+  platformWriter: PrismaClient,
+  activeKeyId: string,
+  dryRun: boolean,
+  counts: PlatformReencryptionCounts,
+): Promise<void> {
   const patentRows = await platformWriter.patentInventorCache.findMany({
     select: {
       id: true,
@@ -665,7 +715,14 @@ export async function reencryptPlatformPiiBatch(
       });
     }
   }
+}
 
+async function reencryptSourceChannelRecords(
+  platformWriter: PrismaClient,
+  activeKeyId: string,
+  dryRun: boolean,
+  counts: PlatformReencryptionCounts,
+): Promise<void> {
   let cursor: string | null = null;
   const pageSize = 200;
   for (;;) {
@@ -704,14 +761,7 @@ export async function reencryptPlatformPiiBatch(
         email?: string;
         phone?: string;
       } = {};
-      const fieldSpecs = [
-        ['contactName', PII_PURPOSE.SOURCE_CHANNEL_CONTACT_NAME],
-        ['contactTitle', PII_PURPOSE.SOURCE_CHANNEL_CONTACT_TITLE],
-        ['email', PII_PURPOSE.SOURCE_CHANNEL_EMAIL],
-        ['phone', PII_PURPOSE.SOURCE_CHANNEL_PHONE],
-      ] as const;
-
-      for (const [field, purpose] of fieldSpecs) {
+      for (const [field, purpose] of SOURCE_CHANNEL_PII_SPECS) {
         const val = row[field];
         if (typeof val === 'string' && needsPiiReencryption(val, activeKeyId)) {
           patch[field] = reencryptPlatformPii(val, {
@@ -737,6 +787,31 @@ export async function reencryptPlatformPiiBatch(
     cursor = batch[batch.length - 1]!.id;
     if (batch.length < pageSize) break;
   }
+}
 
+/**
+ * Re-encrypts platform-scoped PII tables (`patent_inventor_cache` and `source_channel_record`)
+ * via an `execution_budget_platform_writer` PrismaClient.
+ */
+export async function reencryptPlatformPiiBatch(
+  platformWriter: PrismaClient,
+  options: { dryRun?: boolean; activeKeyId?: string } = {},
+): Promise<PlatformReencryptionCounts> {
+  await assertScopedDatabasePrincipal(
+    platformWriter,
+    EXECUTION_BUDGET_PLATFORM_WRITER_ROLE,
+    'PiiReencryption',
+  );
+  const dryRun = options.dryRun ?? false;
+  const activeKeyId = options.activeKeyId ?? getActivePiiKeyId();
+  const counts: PlatformReencryptionCounts = {
+    patentCacheNames: 0,
+    patentCacheKeys: 0,
+    patentCacheDedup: 0,
+    channelRecords: 0,
+  };
+
+  await reencryptPatentInventorCache(platformWriter, activeKeyId, dryRun, counts);
+  await reencryptSourceChannelRecords(platformWriter, activeKeyId, dryRun, counts);
   return counts;
 }

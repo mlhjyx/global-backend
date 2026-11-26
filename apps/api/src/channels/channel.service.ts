@@ -7,7 +7,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { decryptChannelRecordPii } from './channel-records';
+import { formatChannelRecordListItem } from './channel-records';
 // 必须是值导入：构造函数参数的类型元数据（design:paramtypes）据此生成 Nest 注入令牌；
 // `import type` 会在编译期被擦除，参数类型退化为 Function，@Optional() 将永远注入 undefined，
 // requestCrawl 在真实进程里恒返回 PLATFORM_TEMPORAL_UNAVAILABLE（单测直接 new 时无法暴露）。
@@ -907,31 +907,7 @@ export class ChannelService {
       return {
         channelId,
         counts,
-        records: rows.map((row) => {
-          const pii = decryptChannelRecordPii(row);
-          return {
-            id: row.id,
-            crawlRunId: row.crawlRunId,
-            name: row.name,
-            website: row.website,
-            country: row.country,
-            industry: row.industry,
-            products: row.products,
-            keywords: row.keywords,
-            contactName: pii.contactName,
-            contactTitle: pii.contactTitle,
-            email: pii.email,
-            phone: pii.phone,
-            sourceUrl: row.sourceUrl,
-            firstSeenAt: row.firstSeenAt.toISOString(),
-            lastSeenAt: row.lastSeenAt.toISOString(),
-            contentHash: row.contentHash,
-            reviewStatus: row.reviewStatus,
-            reviewedBy: row.reviewedBy,
-            reviewedAt: row.reviewedAt?.toISOString() ?? null,
-            materializedCompanyId: row.materializedCompanyId,
-          };
-        }),
+        records: rows.map(formatChannelRecordListItem),
       };
     });
   }

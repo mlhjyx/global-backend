@@ -81,6 +81,55 @@ export function decryptChannelRecordPii<
   return decrypted;
 }
 
+export interface ChannelRecordListRow {
+  id: string;
+  crawlRunId: string;
+  name: string;
+  website: string | null;
+  country: string | null;
+  industry: string | null;
+  products: unknown;
+  keywords: unknown;
+  contactName: string | null;
+  contactTitle: string | null;
+  email: string | null;
+  phone: string | null;
+  sourceUrl: string;
+  firstSeenAt: Date;
+  lastSeenAt: Date;
+  contentHash: string | null;
+  reviewStatus: string;
+  reviewedBy: string | null;
+  reviewedAt: Date | null;
+  materializedCompanyId: string | null;
+}
+
+export function formatChannelRecordListItem<T extends ChannelRecordListRow>(row: T) {
+  const pii = decryptChannelRecordPii(row);
+  return {
+    id: row.id,
+    crawlRunId: row.crawlRunId,
+    name: row.name,
+    website: row.website,
+    country: row.country,
+    industry: row.industry,
+    products: row.products as T['products'],
+    keywords: row.keywords as T['keywords'],
+    contactName: pii.contactName,
+    contactTitle: pii.contactTitle,
+    email: pii.email,
+    phone: pii.phone,
+    sourceUrl: row.sourceUrl,
+    firstSeenAt: row.firstSeenAt.toISOString(),
+    lastSeenAt: row.lastSeenAt.toISOString(),
+    contentHash: row.contentHash,
+    reviewStatus: row.reviewStatus,
+    reviewedBy: row.reviewedBy,
+    reviewedAt: row.reviewedAt?.toISOString() ?? null,
+    materializedCompanyId: row.materializedCompanyId,
+  };
+}
+
 export function recordContentHash(row: ChannelRecordRow): string {
   const fields = [
     row.name,
