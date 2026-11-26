@@ -32,7 +32,7 @@ import {
   resolveReportedModelIdentityAmong,
 } from "../model-identity";
 import { isReviewedModelSubstitution } from "../model-identity-substitutes";
-import { NEW_API_REQUEST_BOUND_RESOLVER_ID } from "../new-api-request-bound-settlement";
+import { NEW_API_REQUEST_BOUND_RESOLVER_ID } from "../settlement-readback-contract";
 import { buildTenantGatewayHeaders } from "../tenant-gateway-routing";
 import { boundedModelUsage } from "../model-usage-boundary";
 import {

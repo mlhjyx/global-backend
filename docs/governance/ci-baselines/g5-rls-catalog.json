@@ -187,6 +187,12 @@
       "expiresAt": "2027-01-31",
       "reason": "无 workspace_id、RLS 开但零策略（仅属主/SECURITY DEFINER 访问）"
     },
+    "platform_schedule_config": {
+      "class": "platform_table",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id 且无 RLS 的平台调度开关表（PLATFORM_AUTHORITY_MODE=internal_db）"
+    },
     "registry_entity": {
       "class": "platform_table",
       "owner": "backend-platform",

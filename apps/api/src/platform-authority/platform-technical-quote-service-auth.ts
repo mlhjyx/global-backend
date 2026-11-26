@@ -10,6 +10,7 @@ import {
 import { types } from "node:util";
 import { PLATFORM_EXECUTION_TECHNICAL_QUOTE_HTTP_PATH } from "@global/contracts/platform-authority";
 import { RuntimeReadinessContributorRegistry } from "../runtime/runtime-readiness-registry";
+import { isInternalDbPlatformAuthorityMode } from "./platform-authority-mode";
 
 export const PLATFORM_TECHNICAL_QUOTE_READ_SCOPE =
   "platform-technical-quote.read" as const;
@@ -299,6 +300,9 @@ export class PlatformTechnicalQuoteAuthenticationReadinessContributor
     this.unregister = this.registry.register(
       PLATFORM_TECHNICAL_QUOTE_AUTHENTICATION_READINESS_CONTRIBUTOR,
       async () => {
+        if (isInternalDbPlatformAuthorityMode(process.env)) {
+          return { status: "ok" } as const;
+        }
         const readiness = await verifierReadiness(this.verifier);
         return readiness.status === "ready"
           ? ({ status: "ok" } as const)

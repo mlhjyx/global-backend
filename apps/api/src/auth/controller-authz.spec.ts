@@ -74,6 +74,7 @@ const SERVICE_PROTECTED_CONTROLLER_FILES = new Set([
   'outreach/contact-bounce.controller.ts',
   'execution-budget/execution-budget-window-usage.controller.ts',
   'platform-authority/platform-execution-technical-quote.controller.ts',
+  'platform-authority/platform-schedule-config-internal.controller.ts',
   'platform-authority/platform-target-lookup.controller.ts',
   'platform-authority/platform-revocation-http.controller.ts',
   'workspace/workspace-purge-internal.controller.ts',
@@ -165,6 +166,9 @@ describe('controller authorization guard topology', () => {
           'PLATFORM_AUTHORITY_TARGET_READER_SCOPE',
         ] : path === 'workspace/workspace-purge-internal.controller.ts' ? [
           '@UseGuards(WorkspacePurgeServiceTokenGuard)',
+          'x-service-token',
+        ] : path === 'platform-authority/platform-schedule-config-internal.controller.ts' ? [
+          '@UseGuards(PlatformScheduleConfigServiceTokenGuard)',
           'x-service-token',
         ] : [
           '@ApiBearerAuth(PLATFORM_TECHNICAL_QUOTE_OPENAPI_SECURITY_SCHEME)',

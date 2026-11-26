@@ -389,4 +389,10 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
     '列出 agent 注册表：角色名、角色提示词版本、技能子集、模型与 loop 策略、平台启停状态；仅运营身份（ops:read）可读，租户调用返回 403。',
   'PATCH /api/v1/ops-agents/{agentKey}/status':
     '平台级启停（kill switch）：DISABLED 后该 agent 的对应回合对所有 workspace fail-closed（AGENT_DISABLED），worker 最迟 30 秒生效；未登记返回 404；需要 ops:write。',
+
+  // ── PlatformAuthority（平台调度 Kill Switch · M10-PR3）────────────────────
+  'GET /api/v1/internal/platform-schedules':
+    '内部服务鉴权（x-service-token）只读查询当前 PLATFORM_AUTHORITY_MODE（r4 / internal_db）与 4 个平台定时调度（acq-sweep / raw-source-retention / sanctions-refresh / tool-budget-reconciliation）在 public.platform_schedule_config 中的实时启停配置。',
+  'PATCH /api/v1/internal/platform-schedules/{scheduleId}':
+    '内部服务鉴权（x-service-token）切换单个平台定时调度的数据库 Kill Switch（enabled 置 false 后入场、活动鉴权与中途出网围栏三层立即 fail-closed），强制校验 updatedBy 并输出结构化操作审计日志。',
 });

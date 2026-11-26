@@ -1,9 +1,10 @@
-import { Injectable, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
+import { Injectable, OnModuleDestroy, OnModuleInit, Optional } from "@nestjs/common";
 import {
   resolveModelGatewayBaseUrl,
   validateModelGatewayEndpoint,
 } from "../adapters/model-gateway-endpoint";
 import { settlementReadbackConfigured } from "./settlement-readback-config";
+import { PrismaService } from "../prisma/prisma.service";
 import { S3Client } from "@aws-sdk/client-s3";
 import Redis from "ioredis";
 import { constants } from "node:fs";
@@ -31,15 +32,18 @@ import {
   type GenericArtifactStorageConfig,
 } from "../durable-results/artifact/generic-operation-artifact.storage-config";
 import { checkMinioAllVersionLifecycle } from "../durable-results/artifact/generic-operation-artifact.minio-lifecycle";
-import {
-  NEW_API_REQUEST_BOUND_RESOLVER_ID,
-  NewApiRequestBoundSettlementResolver,
-} from "../model-gateway/new-api-request-bound-settlement";
+import { NEW_API_REQUEST_BOUND_RESOLVER_ID } from "../model-gateway/settlement-readback-contract";
 import {
   canonicalGatewayCredential,
   gatewayCredentialsAreDistinct,
 } from "../model-gateway/gateway-credential-boundary";
 import { loadSettlementDerivationKeyring } from "../model-gateway/settlement-wire-identity";
+import { isInternalDbPlatformAuthorityMode } from "../platform-authority/platform-authority-mode";
+import { inspectInternalDbPlatformAuthorityReadiness } from "../platform-authority/internal-db-platform-authority";
+import {
+  PlatformScheduleConfigService,
+  type PlatformScheduleConfigReaderDb,
+} from "../platform-authority/platform-schedule-config.service";
 import { loadVerifiedPlatformAuthorityPolicyAsset } from "../platform-authority/platform-authority-policy-asset";
 import {
   PlatformAutomationReadinessService,
@@ -281,7 +285,21 @@ export async function inspectPlatformBudgetAuthorityReadiness(
         >)
     | undefined,
   registry: RuntimeReadinessContributorRegistry,
+  options?: {
+    readonly env?: NodeJS.ProcessEnv;
+    readonly scheduleConfigReader?: PlatformScheduleConfigReaderDb;
+  },
 ): Promise<PlatformAutomationReadinessReport> {
+  const env = options?.env ?? process.env;
+  if (isInternalDbPlatformAuthorityMode(env)) {
+    const configService = options?.scheduleConfigReader
+      ? new PlatformScheduleConfigService({
+          reader: options.scheduleConfigReader,
+          env,
+        })
+      : undefined;
+    return inspectInternalDbPlatformAuthorityReadiness(configService);
+  }
   const policyAsset = loadVerifiedPlatformAuthorityPolicyAsset();
   const quoteService = new PlatformExecutionTechnicalQuoteService({
     policyAsset,
@@ -372,9 +390,17 @@ export async function checkPlatformBudgetAuthorityReadiness(
     | Pick<ExecutionBudgetAuthorityRepository, "inspectPlatformWriterCapability">
     | undefined,
   registry: RuntimeReadinessContributorRegistry,
+  options?: {
+    readonly env?: NodeJS.ProcessEnv;
+    readonly scheduleConfigReader?: PlatformScheduleConfigReaderDb;
+  },
 ): Promise<RuntimeComponentStatus> {
   return (
-    await checkPlatformBudgetAuthorityReadinessSnapshot(repository, registry)
+    await checkPlatformBudgetAuthorityReadinessSnapshot(
+      repository,
+      registry,
+      options,
+    )
   ).component;
 }
 
@@ -383,11 +409,16 @@ export async function checkPlatformBudgetAuthorityReadinessSnapshot(
     | Pick<ExecutionBudgetAuthorityRepository, "inspectPlatformWriterCapability">
     | undefined,
   registry: RuntimeReadinessContributorRegistry,
+  options?: {
+    readonly env?: NodeJS.ProcessEnv;
+    readonly scheduleConfigReader?: PlatformScheduleConfigReaderDb;
+  },
 ) {
   try {
     const report = await inspectPlatformBudgetAuthorityReadiness(
       repository,
       registry,
+      options,
     );
     if (report.status === "ready") {
       return Object.freeze({
@@ -490,6 +521,7 @@ export async function checkSiteBuildSettlementReadbackReadiness(
   }
   try {
     keyringLoader(keyringPath);
+    const { NewApiRequestBoundSettlementResolver } = await import("../model-gateway/new-api-request-bound-settlement");
     const resolver = new NewApiRequestBoundSettlementResolver(
       {
         gatewayOrigin: new URL(configured).origin,
@@ -608,6 +640,7 @@ export class ExecutionBudgetAuthorityReadinessContributors
   constructor(
     private readonly registry: RuntimeReadinessContributorRegistry,
     private readonly repository: ExecutionBudgetAuthorityRepository,
+    @Optional() private readonly prisma?: PrismaService,
   ) {}
 
   onModuleInit(): void {
@@ -615,6 +648,7 @@ export class ExecutionBudgetAuthorityReadinessContributors
       checkPlatformBudgetAuthorityReadinessSnapshot(
         this.repository,
         this.registry,
+        { scheduleConfigReader: this.prisma },
       ).then((snapshot) => ({
         ...snapshot.component,
         platformAutomation: snapshot.platformAutomationReport,
