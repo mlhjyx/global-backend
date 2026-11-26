@@ -153,4 +153,38 @@ describe('PR-03/PR-03b TED buyer/winner contract', () => {
     );
     expect(result.queue).not.toBe('rejected');
   });
+
+  it('Phase 3B: EPC/integrator award winner enters buyer scoring pipeline without TED_WINNER_SUPPLY_SIDE rejection', () => {
+    const epcNotice: TedAwardNotice = {
+      publicationNumber: '654321-2026',
+      publicationDate: '2026-11-25+01:00',
+      noticeType: 'can-standard',
+      formType: 'result',
+      cpvCodes: ['45261215'],
+      buyerNames: ['Stadtwerke München'],
+      buyerCountries: ['DEU'],
+      winners: [
+        {
+          name: 'Solarbau EPC GmbH',
+          country: 'DEU',
+          identifier: 'DE987654321',
+          internetAddress: 'https://solarbau-epc.example',
+        },
+      ],
+    };
+    const rec = mapNoticeToRecords(epcNotice, NOW)[0]!;
+    expect((rec.attributes?.ted as Record<string, unknown>).self_role).toBe('buyer');
+    const scored = scoreLead(
+      {
+        ...base,
+        name: rec.name,
+        domain: rec.domain ?? null,
+        country: rec.country ?? null,
+        attributes: rec.attributes ?? null,
+      },
+      icp,
+    );
+    expect(scored.detail.reasonCodes ?? []).not.toContain('TED_WINNER_SUPPLY_SIDE');
+    expect(scored.queue).not.toBe('rejected');
+  });
 });

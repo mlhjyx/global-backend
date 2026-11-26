@@ -20,6 +20,7 @@ import {
   createDiscoveryCompanyReceiptCollector,
   isDiscoveryCompanyLineageInvalid,
 } from '../company-discovery-lineage';
+import { classifyTedAwardWinner } from './ted-role-classifier';
 
 const PARSER_VERSION = 'ted/v1';
 const NOTICE_DETAIL_BASE = 'https://ted.europa.eu/en/notice/-/detail/';
@@ -219,6 +220,14 @@ export function mapNoticeToRecords(notice: TedAwardNotice, now: string): Provide
     .filter((w) => w.name.trim())
     .map((w, i) => {
       const domain = w.internetAddress ? (normalizeDomain(w.internetAddress) ?? undefined) : undefined;
+      const normalizedName = normalizeTedCompanyName(w.name);
+      // Phase 3 反转中标方角色判定：EPC 总包商 / 系统集成商刚中标项目急需采购核心设备（self_role='buyer'），
+      // 核心组件同业制造商保持供给侧排除（self_role='winner'），完全兼容既有 raw_source_provider_payload_valid_v2。
+      const roleClassification = classifyTedAwardWinner({
+        winnerName: normalizedName,
+        cpvCodes: notice.cpvCodes,
+        noticeType: notice.noticeType,
+      });
       const ted = prune({
         publication_number: notice.publicationNumber,
         publication_date: notice.publicationDate,
@@ -228,7 +237,7 @@ export function mapNoticeToRecords(notice: TedAwardNotice, now: string): Provide
         buyer_countries: buyerCountries,
         winner_identifier: tedIdentifier(w.identifier),
         winner_city: w.city,
-        self_role: 'winner',
+        self_role: roleClassification.tedSelfRole,
         relationships: [...buyerRelationships, ...winnerRelationships],
         license: 'CC-BY-4.0',
         attribution: TED_ATTRIBUTION,
@@ -237,7 +246,7 @@ export function mapNoticeToRecords(notice: TedAwardNotice, now: string): Provide
       const country = toAlpha2(w.country); // §8.3：ISO-3(DEU)→alpha-2(DE)，复用于国别字段 + §8.4 id scheme 国别限定
       return {
         externalId: `ted:${notice.publicationNumber ?? 'na'}:${i}`,
-        name: normalizeTedCompanyName(w.name),
+        name: normalizedName,
         domain,
         country,
         // §8.4：winner-identifier 是**国别**税号/注册号（仅国内唯一）→ scheme 按国别限定，防不同国

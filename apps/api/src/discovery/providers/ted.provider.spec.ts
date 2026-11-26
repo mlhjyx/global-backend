@@ -143,6 +143,23 @@ describe('TED 中标方 → ProviderCompanyRecord（mapNoticeToRecords）', () =
     const recs = mapNoticeToRecords(notice({ winners: [{ name: 'Acme AG', country: 'DEU' }] }), NOW);
     expect(recs[0].country).toBe('DE');
   });
+
+  it('Phase 3B：EPC/系统集成商中标方反转为高意向买家（self_role=buyer），核心组件同业仍保持 winner', () => {
+    const epcRecs = mapNoticeToRecords(
+      notice({
+        cpvCodes: ['45261215'],
+        winners: [
+          { name: 'Solarbau EPC GmbH', country: 'DEU', identifier: 'DE999', internetAddress: 'https://solarbau-epc.de' },
+          { name: 'Rhein Anlagenbau & Systemintegration GmbH', country: 'DEU', identifier: 'DE888' },
+        ],
+      }),
+      NOW,
+    );
+    expect(epcRecs).toHaveLength(2);
+    expect((epcRecs[0]!.attributes?.ted as Record<string, unknown>).self_role).toBe('buyer');
+    expect((epcRecs[1]!.attributes?.ted as Record<string, unknown>).self_role).toBe('buyer');
+    expect(JSON.stringify(epcRecs)).not.toContain('@');
+  });
 });
 
 describe('§8.3 toAlpha2 国别归一', () => {

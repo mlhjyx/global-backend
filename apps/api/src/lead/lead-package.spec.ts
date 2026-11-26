@@ -336,4 +336,52 @@ describe('buildLeadPackage', () => {
     });
     expect(pkg.identifiers.vat_id).toBe('IT04553650989');
   });
+
+  it('Phase 3B: attaches grounded bilingual icebreakerSuggestions and omits them when omitSocials is true', () => {
+    const input = base();
+    const pkg = buildLeadPackage({
+      ...input,
+      company: {
+        ...input.company,
+        name: 'Rhein Solar EPC GmbH',
+        attributes: {
+          ted: {
+            publication_number: '654321-2026',
+            publication_date: '2026-11-24',
+            notice_type: 'can-standard',
+            cpv: ['45261215'],
+            self_role: 'buyer',
+          },
+        },
+      },
+      companySignals: [
+        {
+          providerKey: 'changedetection',
+          signalKind: 'page_change',
+          sourceUrl: 'https://rhein-epc.de/projects',
+          title: '官网新增工业光伏项目案例页',
+          excerpt: null,
+          observedAt: new Date('2026-11-25T10:00:00.000Z'),
+        },
+      ],
+    });
+
+    expect(pkg.icebreakerSuggestions.length).toBe(2);
+    expect(pkg.icebreakerSuggestions[0]).toMatchObject({
+      signalType: 'PAGE_CHANGE',
+      signalUrl: 'https://rhein-epc.de/projects',
+    });
+    expect(pkg.icebreakerSuggestions[1]).toMatchObject({
+      signalType: 'TENDER_AWARDED',
+      signalUrl: 'https://ted.europa.eu/en/notice/-/detail/654321-2026',
+    });
+    expect(pkg.icebreakerSuggestions[1]!.openerZh).toContain('Rhein Solar EPC GmbH');
+    expect(pkg.icebreakerSuggestions[1]!.openerEn).toContain('Rhein Solar EPC GmbH');
+
+    const suppressedPkg = buildLeadPackage({
+      ...input,
+      omitSocials: true,
+    });
+    expect(suppressedPkg.icebreakerSuggestions).toEqual([]);
+  });
 });

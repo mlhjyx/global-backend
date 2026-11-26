@@ -36,6 +36,59 @@ export interface IcpPeerExclusionsLayer {
   readonly rationale: string | null;
 }
 
+export type IcpFeedbackOutcome =
+  | 'rejected'
+  | 'replied_positive'
+  | 'booked_meeting'
+  | 'opt_out'
+  | 'wrong_contact'
+  | 'bounced';
+
+export type IcpFeedbackRejectionReason =
+  | 'wrong_role_peer'
+  | 'wrong_industry'
+  | 'too_small'
+  | 'wrong_country'
+  | 'dead_company'
+  | 'bounced_unreachable';
+
+export interface IcpFitCounterExample {
+  readonly domain: string | null;
+  readonly companyName: string | null;
+  readonly industry: string | null;
+  readonly outcome: IcpFeedbackOutcome;
+  readonly reason: IcpFeedbackRejectionReason | 'unspecified';
+  readonly note: string | null;
+  readonly recordedAt: string;
+}
+
+export interface IcpFitPositiveExample {
+  readonly domain: string | null;
+  readonly companyName: string | null;
+  readonly industry: string | null;
+  readonly outcome: 'replied_positive' | 'booked_meeting';
+  readonly recordedAt: string;
+}
+
+export interface IcpFeedbackLearningStats {
+  readonly totalRecorded: number;
+  readonly outcomeCounts: Record<string, number>;
+  readonly rejectionReasonCounts: Record<string, number>;
+  readonly lastRecordedAt: string | null;
+}
+
+export interface IcpFeedbackLearningSummary {
+  readonly icpId: string;
+  readonly icpName: string;
+  readonly icpVersion: number;
+  readonly excludedDomains: string[];
+  readonly excludedKeywords: string[];
+  readonly excludedBusinessModels: string[];
+  readonly counterExamples: IcpFitCounterExample[];
+  readonly positiveExamples: IcpFitPositiveExample[];
+  readonly stats: IcpFeedbackLearningStats;
+}
+
 export interface GenerateIcpOverrides {
   readonly name?: string;
   readonly productLines?: readonly string[];
@@ -338,5 +391,343 @@ export function syncThreeLayerOnIcpPatch(
     ...(peerModels.length > 0 && patchAttributes?.peer_exclusions !== undefined
       ? { exclusions: peerModels }
       : {}),
+  };
+}
+
+const MAX_FIT_COUNTER_EXAMPLES = 5;
+const MAX_FIT_POSITIVE_EXAMPLES = 5;
+const MAX_LEARNED_EXCLUDED_DOMAINS = 50;
+const MAX_LEARNED_EXCLUDED_KEYWORDS = 30;
+const FEEDBACK_EMAIL_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/giu;
+const FEEDBACK_PHONE_RE = /(?:\+?\d[\d\s().-]{7,18}\d)/gu;
+const FEEDBACK_PERSONAL_LINKEDIN_RE = /https?:\/\/(?:[\w-]+\.)?linkedin\.com\/in\/[^\s,;)"]+/giu;
+const STRICT_DOMAIN_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/u;
+
+export function normalizeFeedbackDomain(raw: string | null | undefined): string | null {
+  if (!raw || typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed.includes('@')) return null;
+  let candidate = trimmed;
+  if (trimmed.includes('://')) {
+    try {
+      const parsed = new URL(trimmed);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+      candidate = parsed.hostname;
+    } catch {
+      return null;
+    }
+  } else {
+    candidate = trimmed.split('/')[0] ?? '';
+  }
+  let clean = candidate.toLowerCase();
+  if (clean.startsWith('www.')) clean = clean.slice(4);
+  while (clean.endsWith('.')) clean = clean.slice(0, -1);
+  return STRICT_DOMAIN_RE.test(clean) ? clean : null;
+}
+
+export function scrubFeedbackPiiText(raw: string | null | undefined, maxLen = 200): string | null {
+  if (!raw || typeof raw !== 'string') return null;
+  const scrubbed = raw
+    .replace(FEEDBACK_PERSONAL_LINKEDIN_RE, '')
+    .replace(FEEDBACK_EMAIL_RE, '[redacted]')
+    .replace(FEEDBACK_PHONE_RE, '[redacted]')
+    .replace(/\s+/gu, ' ')
+    .trim()
+    .slice(0, maxLen);
+  return scrubbed || null;
+}
+
+function readCounterExamples(raw: unknown): IcpFitCounterExample[] {
+  if (!Array.isArray(raw)) return [];
+  const out: IcpFitCounterExample[] = [];
+  for (const item of raw) {
+    if (!isPlainRecord(item)) continue;
+    const outcome = typeof item.outcome === 'string' ? (item.outcome as IcpFeedbackOutcome) : 'rejected';
+    const reason =
+      typeof item.reason === 'string'
+        ? (item.reason as IcpFeedbackRejectionReason | 'unspecified')
+        : 'unspecified';
+    const recordedAt = typeof item.recordedAt === 'string' ? item.recordedAt : '';
+    if (!recordedAt) continue;
+    out.push({
+      domain: typeof item.domain === 'string' ? item.domain : null,
+      companyName: typeof item.companyName === 'string' ? item.companyName : null,
+      industry: typeof item.industry === 'string' ? item.industry : null,
+      outcome,
+      reason,
+      note: typeof item.note === 'string' ? item.note : null,
+      recordedAt,
+    });
+    if (out.length >= MAX_FIT_COUNTER_EXAMPLES) break;
+  }
+  return out;
+}
+
+function readPositiveExamples(raw: unknown): IcpFitPositiveExample[] {
+  if (!Array.isArray(raw)) return [];
+  const out: IcpFitPositiveExample[] = [];
+  for (const item of raw) {
+    if (!isPlainRecord(item)) continue;
+    const outcome =
+      item.outcome === 'replied_positive' || item.outcome === 'booked_meeting'
+        ? item.outcome
+        : null;
+    const recordedAt = typeof item.recordedAt === 'string' ? item.recordedAt : '';
+    if (!outcome || !recordedAt) continue;
+    out.push({
+      domain: typeof item.domain === 'string' ? item.domain : null,
+      companyName: typeof item.companyName === 'string' ? item.companyName : null,
+      industry: typeof item.industry === 'string' ? item.industry : null,
+      outcome,
+      recordedAt,
+    });
+    if (out.length >= MAX_FIT_POSITIVE_EXAMPLES) break;
+  }
+  return out;
+}
+
+function readIntMap(raw: unknown): Record<string, number> {
+  if (!isPlainRecord(raw)) return {};
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (typeof v === 'number' && Number.isFinite(v) && v >= 0) {
+      out[k] = Math.trunc(v);
+    }
+  }
+  return out;
+}
+
+function readFeedbackStats(raw: unknown): IcpFeedbackLearningStats {
+  const rec = isPlainRecord(raw) ? raw : {};
+  return {
+    totalRecorded:
+      typeof rec.totalRecorded === 'number' && Number.isFinite(rec.totalRecorded)
+        ? Math.max(0, Math.trunc(rec.totalRecorded))
+        : 0,
+    outcomeCounts: readIntMap(rec.outcomeCounts),
+    rejectionReasonCounts: readIntMap(rec.rejectionReasonCounts),
+    lastRecordedAt: typeof rec.lastRecordedAt === 'string' ? rec.lastRecordedAt : null,
+  };
+}
+
+function shouldHardExcludeDomain(
+  outcome: IcpFeedbackOutcome,
+  rejectionReason: IcpFeedbackRejectionReason | null,
+): boolean {
+  if (outcome === 'opt_out') return true;
+  if (outcome !== 'rejected') return false;
+  return (
+    rejectionReason === 'wrong_role_peer' ||
+    rejectionReason === 'wrong_industry' ||
+    rejectionReason === 'dead_company'
+  );
+}
+
+function collectLearnedKeywords(
+  outcome: IcpFeedbackOutcome,
+  rejectionReason: IcpFeedbackRejectionReason | null,
+  industry: string | null,
+  excludedKeywords: readonly string[] | undefined,
+  existingKeywords: readonly string[],
+): string[] {
+  if (outcome !== 'rejected') return [];
+  const candidates: string[] = [];
+  for (const kw of excludedKeywords ?? []) {
+    const safeKw = scrubFeedbackPiiText(kw, 80);
+    if (safeKw && !safeKw.includes('[redacted]')) candidates.push(safeKw);
+  }
+  if (rejectionReason === 'wrong_industry' && industry) {
+    const safeInd = scrubFeedbackPiiText(industry, 80);
+    if (safeInd && !safeInd.includes('[redacted]')) candidates.push(safeInd);
+  }
+  const existingLower = new Set(existingKeywords.map((k) => k.toLowerCase()));
+  return uniqueStrings(candidates, 10).filter((kw) => !existingLower.has(kw.toLowerCase()));
+}
+
+function mergeCounterExamples(
+  existing: IcpFitCounterExample[],
+  input: {
+    outcome: IcpFeedbackOutcome;
+    rejectionReason: IcpFeedbackRejectionReason | null;
+    domain: string | null;
+    companyName: string | null;
+    industry: string | null;
+    note: string | null;
+    recordedAt: string;
+  },
+): { examples: IcpFitCounterExample[]; added: boolean } {
+  if (input.outcome !== 'rejected' && input.outcome !== 'opt_out') {
+    return { examples: existing, added: false };
+  }
+  const next: IcpFitCounterExample = {
+    domain: input.domain,
+    companyName: scrubFeedbackPiiText(input.companyName, 140),
+    industry: scrubFeedbackPiiText(input.industry, 100),
+    outcome: input.outcome,
+    reason: input.rejectionReason ?? 'unspecified',
+    note: scrubFeedbackPiiText(input.note, 200),
+    recordedAt: input.recordedAt,
+  };
+  const keyOf = (e: IcpFitCounterExample) =>
+    `${(e.domain ?? '').toLowerCase()}|${(e.companyName ?? '').toLowerCase()}|${e.reason}`;
+  const nextKey = keyOf(next);
+  return {
+    examples: [next, ...existing.filter((e) => keyOf(e) !== nextKey)].slice(0, MAX_FIT_COUNTER_EXAMPLES),
+    added: true,
+  };
+}
+
+function mergePositiveExamples(
+  existing: IcpFitPositiveExample[],
+  input: {
+    outcome: IcpFeedbackOutcome;
+    domain: string | null;
+    companyName: string | null;
+    industry: string | null;
+    recordedAt: string;
+  },
+): IcpFitPositiveExample[] {
+  if (input.outcome !== 'replied_positive' && input.outcome !== 'booked_meeting') {
+    return existing;
+  }
+  const next: IcpFitPositiveExample = {
+    domain: input.domain,
+    companyName: scrubFeedbackPiiText(input.companyName, 140),
+    industry: scrubFeedbackPiiText(input.industry, 100),
+    outcome: input.outcome,
+    recordedAt: input.recordedAt,
+  };
+  return [
+    next,
+    ...existing.filter((e) => (e.domain ?? e.companyName) !== (next.domain ?? next.companyName)),
+  ].slice(0, MAX_FIT_POSITIVE_EXAMPLES);
+}
+
+export function applyFeedbackEvolutionToAttributes(input: {
+  readonly existingAttributes: unknown;
+  readonly exclusions: unknown;
+  readonly outcome: IcpFeedbackOutcome;
+  readonly rejectionReason: IcpFeedbackRejectionReason | null;
+  readonly domain: string | null;
+  readonly companyName: string | null;
+  readonly industry: string | null;
+  readonly excludedKeywords?: readonly string[];
+  readonly note: string | null;
+  readonly recordedAt: string;
+}): {
+  readonly nextAttributes: Record<string, unknown>;
+  readonly appliedRules: {
+    readonly addedExcludedDomain: string | null;
+    readonly addedExcludedKeywords: string[];
+    readonly addedCounterExample: boolean;
+  };
+} {
+  const attrs = isPlainRecord(input.existingAttributes) ? { ...input.existingAttributes } : {};
+  const existingPeer = isPlainRecord(attrs.peer_exclusions) ? attrs.peer_exclusions : {};
+  const existingDomains = uniqueStrings(asStrings(existingPeer.excluded_domains), MAX_LEARNED_EXCLUDED_DOMAINS);
+  const existingKeywords = uniqueStrings(asStrings(existingPeer.excluded_keywords), MAX_LEARNED_EXCLUDED_KEYWORDS);
+  const existingModels = uniqueStrings(
+    [...asStrings(existingPeer.excluded_business_models), ...asStrings(input.exclusions)],
+    25,
+  );
+
+  const normalizedDomain = normalizeFeedbackDomain(input.domain);
+  const shouldAddDomain =
+    Boolean(normalizedDomain) &&
+    shouldHardExcludeDomain(input.outcome, input.rejectionReason) &&
+    !existingDomains.some((d) => d.toLowerCase() === normalizedDomain);
+  const addedExcludedDomain = shouldAddDomain ? normalizedDomain : null;
+  const nextDomains = addedExcludedDomain ? [...existingDomains, addedExcludedDomain] : existingDomains;
+
+  const addedExcludedKeywords = collectLearnedKeywords(
+    input.outcome,
+    input.rejectionReason,
+    input.industry,
+    input.excludedKeywords,
+    existingKeywords,
+  );
+  const nextKeywords = uniqueStrings([...existingKeywords, ...addedExcludedKeywords], MAX_LEARNED_EXCLUDED_KEYWORDS);
+
+  const counterMerged = mergeCounterExamples(readCounterExamples(attrs.fit_counter_examples), {
+    outcome: input.outcome,
+    rejectionReason: input.rejectionReason,
+    domain: normalizedDomain,
+    companyName: input.companyName,
+    industry: input.industry,
+    note: input.note,
+    recordedAt: input.recordedAt,
+  });
+  const positiveExamples = mergePositiveExamples(readPositiveExamples(attrs.fit_positive_examples), {
+    outcome: input.outcome,
+    domain: normalizedDomain,
+    companyName: input.companyName,
+    industry: input.industry,
+    recordedAt: input.recordedAt,
+  });
+
+  const prevStats = readFeedbackStats(attrs.feedback_learning_stats);
+  const nextRejectionCounts = input.rejectionReason
+    ? {
+        ...prevStats.rejectionReasonCounts,
+        [input.rejectionReason]: (prevStats.rejectionReasonCounts[input.rejectionReason] ?? 0) + 1,
+      }
+    : prevStats.rejectionReasonCounts;
+
+  const nextAttributes: Record<string, unknown> = {
+    ...attrs,
+    peer_exclusions: {
+      excluded_business_models: existingModels,
+      excluded_keywords: nextKeywords,
+      excluded_domains: uniqueStrings(nextDomains, MAX_LEARNED_EXCLUDED_DOMAINS),
+      rationale:
+        typeof existingPeer.rationale === 'string' && existingPeer.rationale.trim()
+          ? existingPeer.rationale.trim()
+          : '排除同行业竞争对手、上游成品制造厂与无关行业企业',
+    },
+    fit_counter_examples: counterMerged.examples,
+    fit_positive_examples: positiveExamples,
+    feedback_learning_stats: {
+      totalRecorded: prevStats.totalRecorded + 1,
+      outcomeCounts: {
+        ...prevStats.outcomeCounts,
+        [input.outcome]: (prevStats.outcomeCounts[input.outcome] ?? 0) + 1,
+      },
+      rejectionReasonCounts: nextRejectionCounts,
+      lastRecordedAt: input.recordedAt,
+    },
+  };
+
+  return {
+    nextAttributes,
+    appliedRules: {
+      addedExcludedDomain,
+      addedExcludedKeywords,
+      addedCounterExample: counterMerged.added,
+    },
+  };
+}
+
+export function buildFeedbackLearningSummary(icp: {
+  readonly id: string;
+  readonly name: string;
+  readonly version: number;
+  readonly exclusions: unknown;
+  readonly companyAttributes: unknown;
+}): IcpFeedbackLearningSummary {
+  const attrs = isPlainRecord(icp.companyAttributes) ? icp.companyAttributes : {};
+  const peer = isPlainRecord(attrs.peer_exclusions) ? attrs.peer_exclusions : {};
+  return {
+    icpId: icp.id,
+    icpName: icp.name,
+    icpVersion: icp.version,
+    excludedDomains: uniqueStrings(asStrings(peer.excluded_domains), MAX_LEARNED_EXCLUDED_DOMAINS),
+    excludedKeywords: uniqueStrings(asStrings(peer.excluded_keywords), MAX_LEARNED_EXCLUDED_KEYWORDS),
+    excludedBusinessModels: uniqueStrings(
+      [...asStrings(peer.excluded_business_models), ...asStrings(icp.exclusions)],
+      25,
+    ),
+    counterExamples: readCounterExamples(attrs.fit_counter_examples),
+    positiveExamples: readPositiveExamples(attrs.fit_positive_examples),
+    stats: readFeedbackStats(attrs.feedback_learning_stats),
   };
 }

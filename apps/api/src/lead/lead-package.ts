@@ -25,6 +25,10 @@ import {
   type LeadPackageCompanySignal,
   type LeadPackageSignalItem,
 } from '../signals/enrichment-signal-projection';
+import {
+  buildSignalIcebreakers,
+  type SignalIcebreakerSuggestion,
+} from '../signals/signal-icebreaker';
 
 export interface LeadPackageLead {
   readonly id: string;
@@ -125,6 +129,7 @@ export interface LeadPackage {
   readonly social_profiles: readonly LeadPackageSocialProfile[];
   readonly suggested_contact_path: SuggestedContactPath | null;
   readonly signals: readonly LeadPackageSignalItem[];
+  readonly icebreakerSuggestions: readonly SignalIcebreakerSuggestion[];
   readonly scores: {
     readonly fit: number | null;
     readonly role: number | null;
@@ -215,6 +220,7 @@ function companyProfile(attributes: Record<string, unknown>) {
 export function leadSignals(
   attributes: unknown,
   companySignals?: readonly LeadPackageCompanySignal[],
+  companyName?: string,
 ): readonly LeadPackageSignalItem[] {
   const attrs = record(attributes);
   const intent = record(attrs.intent);
@@ -228,7 +234,7 @@ export function leadSignals(
       const url = isHttps(text(event.page_url)) ? (text(event.page_url) as string) : null;
       return [{ type, at, url }];
     });
-  const storedAndFallback = projectStoredAndFallbackSignals(attrs, companySignals);
+  const storedAndFallback = projectStoredAndFallbackSignals(attrs, companySignals, companyName);
   const seen = new Set<string>();
   return [...intentItems, ...storedAndFallback]
     .sort((left, right) => Date.parse(right.at) - Date.parse(left.at))
@@ -299,6 +305,13 @@ export function buildLeadPackage(input: LeadPackageInput): LeadPackage {
   const socialProfiles = input.omitSocials
     ? []
     : extractCompanySocialProfiles(input.contactPoints, input.company.attributes);
+  const projectedSignals = leadSignals(attributes, input.companySignals, input.company.name);
+  const icebreakerSuggestions = input.omitSocials
+    ? Object.freeze([])
+    : buildSignalIcebreakers({
+        companyName: input.company.name,
+        signals: projectedSignals,
+      });
 
   return Object.freeze({
     lead_id: input.lead.id,
@@ -322,7 +335,8 @@ export function buildLeadPackage(input: LeadPackageInput): LeadPackage {
     company_channels: Object.freeze(companyChannels),
     social_profiles: Object.freeze(socialProfiles),
     suggested_contact_path: suggestedContactPath(input.contactPoints),
-    signals: Object.freeze([...leadSignals(attributes, input.companySignals)]),
+    signals: Object.freeze([...projectedSignals]),
+    icebreakerSuggestions,
     scores: Object.freeze({
       fit: finite(scores.fit),
       role: finite(scores.role),

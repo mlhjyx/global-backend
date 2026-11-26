@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   HttpCode,
+  Optional,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -22,6 +23,12 @@ import { Enveloped, envelope } from '../common/envelope';
 import { ApiEnvelope, ApiListEnvelope } from '../common/api-envelope.decorator';
 import { IcpService } from './icp.service';
 import { IcpFeedbackService } from './icp-feedback.service';
+import { FeedbackLearningService } from './feedback-learning.service';
+import {
+  FEEDBACK_SUMMARY_SCHEMA,
+  RECORD_FEEDBACK_RESPONSE_SCHEMA,
+  RecordIcpFeedbackDto,
+} from './dto/feedback-learning.dto';
 import { IcpDto } from './dto/icp.dto';
 import {
   BacktestDto,
@@ -121,6 +128,7 @@ export class IcpController {
   constructor(
     private readonly icps: IcpService,
     private readonly feedback: IcpFeedbackService,
+    @Optional() private readonly feedbackLearning?: FeedbackLearningService,
   ) {}
 
   @Post('companies/:companyId/icps')
@@ -349,6 +357,39 @@ export class IcpController {
   @ApiEnvelope({ type: 'object', additionalProperties: true })
   async recomputeFeedback(@Ctx() ctx: RequestContext, @Param('icpId', ParseUUIDPipe) icpId: string) {
     return envelope(await this.feedback.recompute(ctx, icpId));
+  }
+
+  @Post('icps/:icpId/feedback/record')
+  @RequireScopes('acquisition:write')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: '记录线索真实驳回或外联结果反馈，自动沉淀 ICP 排除规则与反例',
+    description:
+      '接收人工驳回（同行/行业不符/失效站点等）、退订、退信或正向回复反馈，自动将确认的排除域名、关键词与最多 5 条脱敏反例写入 ICP 的 peer_exclusions 与 fit_counter_examples，供后续发现与 fit-v3 自动避坑。',
+  })
+  @ApiBody({ type: RecordIcpFeedbackDto })
+  @ApiEnvelope(RECORD_FEEDBACK_RESPONSE_SCHEMA)
+  async recordFeedbackLearning(
+    @Ctx() ctx: RequestContext,
+    @Param('icpId', ParseUUIDPipe) icpId: string,
+    @Body() dto: RecordIcpFeedbackDto,
+  ) {
+    return envelope(await this.feedbackLearning!.recordFeedback(ctx, icpId, dto));
+  }
+
+  @Get('icps/:icpId/feedback/summary')
+  @RequireScopes('acquisition:read')
+  @ApiOperation({
+    summary: '只读查看该 ICP 已沉淀的排除规则、反例与真实反馈统计摘要',
+    description:
+      '返回指定 ICP 当前累积的同行排除域名、排除关键词、最多 5 条高信息量反例、正向转化样例以及按结果与驳回原因分组的统计摘要，不触发模型调用或数据变更。',
+  })
+  @ApiEnvelope(FEEDBACK_SUMMARY_SCHEMA)
+  async feedbackLearningSummary(
+    @Ctx() ctx: RequestContext,
+    @Param('icpId', ParseUUIDPipe) icpId: string,
+  ) {
+    return envelope(await this.feedbackLearning!.getSummary(ctx, icpId));
   }
 
   @Get('icps/:icpId/query-plans')

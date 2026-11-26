@@ -9616,6 +9616,548 @@
         "description": "重算该 ICP 的反馈聚合（幂等；通常由接受/拒绝动作自动触发，这里是手动补偿入口）。"
       }
     },
+    "/api/v1/icps/{icpId}/feedback/record": {
+      "post": {
+        "description": "接收人工驳回（同行/行业不符/失效站点等）、退订、退信或正向回复反馈，自动将确认的排除域名、关键词与最多 5 条脱敏反例写入 ICP 的 peer_exclusions 与 fit_counter_examples，供后续发现与 fit-v3 自动避坑。",
+        "operationId": "IcpController_recordFeedbackLearning_v1",
+        "parameters": [
+          {
+            "name": "icpId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordIcpFeedbackDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "icpId",
+                        "icpVersion",
+                        "recorded",
+                        "appliedRules",
+                        "summary"
+                      ],
+                      "properties": {
+                        "icpId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "icpVersion": {
+                          "type": "integer"
+                        },
+                        "recorded": {
+                          "type": "object",
+                          "required": [
+                            "outcome",
+                            "rejectionReason",
+                            "domain",
+                            "companyId",
+                            "leadId",
+                            "recordedAt"
+                          ],
+                          "properties": {
+                            "outcome": {
+                              "type": "string",
+                              "enum": [
+                                "rejected",
+                                "replied_positive",
+                                "booked_meeting",
+                                "opt_out",
+                                "wrong_contact",
+                                "bounced"
+                              ]
+                            },
+                            "rejectionReason": {
+                              "type": "string",
+                              "enum": [
+                                "wrong_role_peer",
+                                "wrong_industry",
+                                "too_small",
+                                "wrong_country",
+                                "dead_company",
+                                "bounced_unreachable"
+                              ],
+                              "nullable": true
+                            },
+                            "domain": {
+                              "type": "string",
+                              "nullable": true
+                            },
+                            "companyId": {
+                              "type": "string",
+                              "format": "uuid",
+                              "nullable": true
+                            },
+                            "leadId": {
+                              "type": "string",
+                              "format": "uuid",
+                              "nullable": true
+                            },
+                            "recordedAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            }
+                          }
+                        },
+                        "appliedRules": {
+                          "type": "object",
+                          "required": [
+                            "addedExcludedDomain",
+                            "addedExcludedKeywords",
+                            "addedCounterExample"
+                          ],
+                          "properties": {
+                            "addedExcludedDomain": {
+                              "type": "string",
+                              "nullable": true
+                            },
+                            "addedExcludedKeywords": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "addedCounterExample": {
+                              "type": "boolean"
+                            }
+                          }
+                        },
+                        "summary": {
+                          "type": "object",
+                          "required": [
+                            "icpId",
+                            "icpName",
+                            "icpVersion",
+                            "excludedDomains",
+                            "excludedKeywords",
+                            "excludedBusinessModels",
+                            "counterExamples",
+                            "positiveExamples",
+                            "stats"
+                          ],
+                          "properties": {
+                            "icpId": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "icpName": {
+                              "type": "string"
+                            },
+                            "icpVersion": {
+                              "type": "integer"
+                            },
+                            "excludedDomains": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "excludedKeywords": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "excludedBusinessModels": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "counterExamples": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "required": [
+                                  "domain",
+                                  "companyName",
+                                  "industry",
+                                  "outcome",
+                                  "reason",
+                                  "note",
+                                  "recordedAt"
+                                ],
+                                "properties": {
+                                  "domain": {
+                                    "type": "string",
+                                    "nullable": true
+                                  },
+                                  "companyName": {
+                                    "type": "string",
+                                    "nullable": true
+                                  },
+                                  "industry": {
+                                    "type": "string",
+                                    "nullable": true
+                                  },
+                                  "outcome": {
+                                    "type": "string",
+                                    "enum": [
+                                      "rejected",
+                                      "replied_positive",
+                                      "booked_meeting",
+                                      "opt_out",
+                                      "wrong_contact",
+                                      "bounced"
+                                    ]
+                                  },
+                                  "reason": {
+                                    "type": "string",
+                                    "enum": [
+                                      "wrong_role_peer",
+                                      "wrong_industry",
+                                      "too_small",
+                                      "wrong_country",
+                                      "dead_company",
+                                      "bounced_unreachable",
+                                      "unspecified"
+                                    ]
+                                  },
+                                  "note": {
+                                    "type": "string",
+                                    "nullable": true
+                                  },
+                                  "recordedAt": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                  }
+                                }
+                              }
+                            },
+                            "positiveExamples": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "required": [
+                                  "domain",
+                                  "companyName",
+                                  "industry",
+                                  "outcome",
+                                  "recordedAt"
+                                ],
+                                "properties": {
+                                  "domain": {
+                                    "type": "string",
+                                    "nullable": true
+                                  },
+                                  "companyName": {
+                                    "type": "string",
+                                    "nullable": true
+                                  },
+                                  "industry": {
+                                    "type": "string",
+                                    "nullable": true
+                                  },
+                                  "outcome": {
+                                    "type": "string",
+                                    "enum": [
+                                      "replied_positive",
+                                      "booked_meeting"
+                                    ]
+                                  },
+                                  "recordedAt": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                  }
+                                }
+                              }
+                            },
+                            "stats": {
+                              "type": "object",
+                              "required": [
+                                "totalRecorded",
+                                "outcomeCounts",
+                                "rejectionReasonCounts",
+                                "lastRecordedAt"
+                              ],
+                              "properties": {
+                                "totalRecorded": {
+                                  "type": "integer"
+                                },
+                                "outcomeCounts": {
+                                  "type": "object",
+                                  "additionalProperties": {
+                                    "type": "integer"
+                                  }
+                                },
+                                "rejectionReasonCounts": {
+                                  "type": "object",
+                                  "additionalProperties": {
+                                    "type": "integer"
+                                  }
+                                },
+                                "lastRecordedAt": {
+                                  "type": "string",
+                                  "format": "date-time",
+                                  "nullable": true
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "记录线索真实驳回或外联结果反馈，自动沉淀 ICP 排除规则与反例",
+        "tags": [
+          "ICP"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
+        ]
+      }
+    },
+    "/api/v1/icps/{icpId}/feedback/summary": {
+      "get": {
+        "description": "返回指定 ICP 当前累积的同行排除域名、排除关键词、最多 5 条高信息量反例、正向转化样例以及按结果与驳回原因分组的统计摘要，不触发模型调用或数据变更。",
+        "operationId": "IcpController_feedbackLearningSummary_v1",
+        "parameters": [
+          {
+            "name": "icpId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "icpId",
+                        "icpName",
+                        "icpVersion",
+                        "excludedDomains",
+                        "excludedKeywords",
+                        "excludedBusinessModels",
+                        "counterExamples",
+                        "positiveExamples",
+                        "stats"
+                      ],
+                      "properties": {
+                        "icpId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "icpName": {
+                          "type": "string"
+                        },
+                        "icpVersion": {
+                          "type": "integer"
+                        },
+                        "excludedDomains": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "excludedKeywords": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "excludedBusinessModels": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "counterExamples": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "domain",
+                              "companyName",
+                              "industry",
+                              "outcome",
+                              "reason",
+                              "note",
+                              "recordedAt"
+                            ],
+                            "properties": {
+                              "domain": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "companyName": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "industry": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "outcome": {
+                                "type": "string",
+                                "enum": [
+                                  "rejected",
+                                  "replied_positive",
+                                  "booked_meeting",
+                                  "opt_out",
+                                  "wrong_contact",
+                                  "bounced"
+                                ]
+                              },
+                              "reason": {
+                                "type": "string",
+                                "enum": [
+                                  "wrong_role_peer",
+                                  "wrong_industry",
+                                  "too_small",
+                                  "wrong_country",
+                                  "dead_company",
+                                  "bounced_unreachable",
+                                  "unspecified"
+                                ]
+                              },
+                              "note": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "recordedAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              }
+                            }
+                          }
+                        },
+                        "positiveExamples": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "domain",
+                              "companyName",
+                              "industry",
+                              "outcome",
+                              "recordedAt"
+                            ],
+                            "properties": {
+                              "domain": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "companyName": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "industry": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "outcome": {
+                                "type": "string",
+                                "enum": [
+                                  "replied_positive",
+                                  "booked_meeting"
+                                ]
+                              },
+                              "recordedAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              }
+                            }
+                          }
+                        },
+                        "stats": {
+                          "type": "object",
+                          "required": [
+                            "totalRecorded",
+                            "outcomeCounts",
+                            "rejectionReasonCounts",
+                            "lastRecordedAt"
+                          ],
+                          "properties": {
+                            "totalRecorded": {
+                              "type": "integer"
+                            },
+                            "outcomeCounts": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "integer"
+                              }
+                            },
+                            "rejectionReasonCounts": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "integer"
+                              }
+                            },
+                            "lastRecordedAt": {
+                              "type": "string",
+                              "format": "date-time",
+                              "nullable": true
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "只读查看该 ICP 已沉淀的排除规则、反例与真实反馈统计摘要",
+        "tags": [
+          "ICP"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ]
+      }
+    },
     "/api/v1/query-plans/{planId}/confirm": {
       "post": {
         "operationId": "IcpController_confirmQueryPlan_v1",
@@ -16864,6 +17406,43 @@
                           "additionalProperties": true,
                           "items": {
                             "type": "object"
+                          }
+                        },
+                        "icebreakerSuggestions": {
+                          "type": "array",
+                          "description": "基于真实企业公开信号生成的零捏造、零 PII 中英文外联破冰首句建议",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "signalType",
+                              "signalTitle",
+                              "signalUrl",
+                              "detectedAt",
+                              "openerZh",
+                              "openerEn"
+                            ],
+                            "properties": {
+                              "signalType": {
+                                "type": "string"
+                              },
+                              "signalTitle": {
+                                "type": "string"
+                              },
+                              "signalUrl": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "detectedAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "openerZh": {
+                                "type": "string"
+                              },
+                              "openerEn": {
+                                "type": "string"
+                              }
+                            }
                           }
                         },
                         "scores": {
@@ -31772,6 +32351,76 @@
             "description": "「重新生成」的幂等键（BFF 或客户端生成）。"
           }
         }
+      },
+      "RecordIcpFeedbackDto": {
+        "type": "object",
+        "properties": {
+          "leadId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "关联的线索 ID（可选，服务端可自动补齐公司信息）"
+          },
+          "companyId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "关联的规范公司 ID（可选）"
+          },
+          "domain": {
+            "type": "string",
+            "maxLength": 255,
+            "description": "公司域名或官网地址（服务端自动规范化去 www.）"
+          },
+          "companyName": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "公司名称（可选；若提供 companyId/leadId 可自动回填）"
+          },
+          "industry": {
+            "type": "string",
+            "maxLength": 120,
+            "description": "公司所属行业（可选，用于反例上下文与排除沉淀）"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "rejected",
+              "replied_positive",
+              "booked_meeting",
+              "opt_out",
+              "wrong_contact",
+              "bounced"
+            ],
+            "description": "真实外联或人工审核结果类型"
+          },
+          "rejectionReason": {
+            "type": "string",
+            "enum": [
+              "wrong_role_peer",
+              "wrong_industry",
+              "too_small",
+              "wrong_country",
+              "dead_company",
+              "bounced_unreachable"
+            ],
+            "description": "当 outcome 为 rejected 时的结构化驳回原因"
+          },
+          "excludedKeywords": {
+            "maxItems": 10,
+            "description": "可选：补充沉淀到 peer_exclusions.excluded_keywords 的排除关键词",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 500,
+            "description": "可选人工备注（写入反例前会自动脱敏去除个人邮箱与电话）"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
       },
       "ExecuteTaskRefDto": {
         "type": "object",
