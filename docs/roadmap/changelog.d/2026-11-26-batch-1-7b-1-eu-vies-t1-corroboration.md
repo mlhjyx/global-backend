@@ -1,7 +1,7 @@
 ---
 date: 2026-11-26
 pr:
-title: Add official free EU VIES VAT T1 corroboration and EU VAT website extraction
+title: "feat(discovery,vies): 接入欧盟官方免费 VIES 税号 T1 交叉核验与欧盟税号提取"
 ---
 
 - 起因：意大利等欧洲 B2B 中小企业大多没有 LEI 且不入 Wikidata，仅凭官网自述（T3）难以通过独立源交叉核验；同时 `website_profile` 此前只识别德国 `USt-IdNr.` 且页文脱敏会把无国别前缀的 11 位意大利 `P.IVA` 误当作电话号抹掉，导致大量真实欧盟买家缺少独立 T1 核验信号。

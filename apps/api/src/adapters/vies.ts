@@ -304,6 +304,7 @@ export async function checkViesVat(
     }
   }
 
-  setCooldown(split.countryCode, now, UNAVAILABLE_COOLDOWN_MS);
+  // Non-5xx/non-429 unexpected responses (e.g. HTTP 400 INVALID_INPUT for one bad VAT)
+  // fail transiently without poisoning the whole member state's cooldown window.
   throw new ViesTransientError('VIES_UNAVAILABLE', split.countryCode, `http_${response.status}`);
 }

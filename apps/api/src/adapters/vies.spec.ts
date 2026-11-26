@@ -183,4 +183,44 @@ describe('EU VIES REST adapter (adapters/vies)', () => {
     ).rejects.toMatchObject({ code: 'VIES_RATE_LIMITED_COOLDOWN' });
     expect(frUnavailableClient).toHaveBeenCalledTimes(1);
   });
+
+  it('does NOT poison member-state cooldown on HTTP 400 INVALID_INPUT for a single request', async () => {
+    const httpClient = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: 400,
+        ok: false,
+        text: JSON.stringify({
+          actionSucceed: false,
+          errorWrappers: [{ error: 'INVALID_INPUT' }],
+        }),
+      })
+      .mockResolvedValueOnce({
+        status: 200,
+        ok: true,
+        text: JSON.stringify({
+          isValid: true,
+          requestDate: '2026-11-26T05:10:00.000Z',
+          userError: 'VALID',
+          name: 'EFFE ENERGY SRL',
+          address: 'VIA BENEDETTO CASTELLI 9/11 \n25064 GUSSAGO BS\n',
+        }),
+      });
+
+    const err = await checkViesVat(
+      { countryCode: 'IT', vatNumber: '04553650989' },
+      { httpClient, nowMs: () => clock },
+    ).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ViesTransientError);
+    expect(err).toMatchObject({ code: 'VIES_UNAVAILABLE' });
+
+    // Immediate next IT request is NOT blocked by cooldown and succeeds normally.
+    const next = await checkViesVat(
+      { countryCode: 'IT', vatNumber: '04553650989' },
+      { httpClient, nowMs: () => clock },
+    );
+    expect(next.status).toBe('VALID');
+    expect(next.legalName).toBe('EFFE ENERGY SRL');
+    expect(httpClient).toHaveBeenCalledTimes(2);
+  });
 });
