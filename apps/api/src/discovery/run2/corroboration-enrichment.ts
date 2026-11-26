@@ -21,7 +21,19 @@ import type {
   CompanyEnrichmentAdapter,
   EnrichmentResult,
 } from "../provider-contract";
-import { companyMayUseExternalProcessing } from "../company-suppression-gate";
+import {
+  companyMayUseExternalProcessing,
+  loadCompanyForSuppressionSafeWrite,
+} from "../company-suppression-gate";
+import { sanitizeCanonicalCompanyAttributes } from "../canonical-company-attributes";
+import {
+  splitViesVat,
+  VIES_PUBLIC_NAME_REDACTED_COUNTRIES,
+} from "../website-profile/eu-vat";
+import {
+  VIES_ATTEMPTED_MARKER,
+  viesAttemptToken,
+} from "../judgment/rejudge-candidates";
 import {
   commitCompanyEnrichmentResults,
   enrichmentHitSurvivesGovernance,
@@ -519,4 +531,151 @@ export async function corroborateCompanyBeforeFit(
     setup.company,
     setup.providers,
   );
+}
+
+const VIES_NON_TRANSIENT_MISS_STATUSES = new Set([
+  "miss",
+  "identity_unconfirmed",
+  "write_skipped",
+]);
+
+function readViesAttemptedMarker(attributes: unknown): string | null {
+  if (!attributes || typeof attributes !== "object" || Array.isArray(attributes)) {
+    return null;
+  }
+  const profile = (attributes as Record<string, unknown>).website_profile;
+  if (!profile || typeof profile !== "object" || Array.isArray(profile)) {
+    return null;
+  }
+  const value = (profile as Record<string, unknown>)[VIES_ATTEMPTED_MARKER];
+  return typeof value === "string" ? value : null;
+}
+
+/**
+ * Suppression-safe CAS merge write onto a bookkeeping marker under
+ * `canonical_company.attributes.website_profile.<markerKey>` following
+ * `fit-judge.ts` `persistEvidenceBundle`: required when `commitCompanyEnrichmentResults`
+ * skips writing `namespaceMarkers` because `hits` is empty (e.g. non-transient VIES miss
+ * `_vies_attempted` or deterministic `null` website profile `_parser_version`).
+ */
+export async function persistWebsiteProfileMarkerInTransaction(
+  tx: Prisma.TransactionClient,
+  workspaceId: string,
+  companyId: string,
+  markerKey: string,
+  markerValue: string,
+): Promise<void> {
+  const current = await loadCompanyForSuppressionSafeWrite(tx, workspaceId, companyId);
+  if (!current) return;
+  const versionRow = await tx.canonicalCompany.findUnique({
+    where: { id: companyId },
+    select: { version: true, status: true },
+  });
+  if (!versionRow || versionRow.status === "SUPPRESSED") return;
+  const existingProfile =
+    current.attributes.website_profile &&
+    typeof current.attributes.website_profile === "object" &&
+    !Array.isArray(current.attributes.website_profile)
+      ? (current.attributes.website_profile as Record<string, unknown>)
+      : {};
+  const nextAttributes = sanitizeCanonicalCompanyAttributes({
+    ...current.attributes,
+    website_profile: {
+      ...existingProfile,
+      [markerKey]: markerValue,
+    },
+  });
+  await tx.canonicalCompany.updateMany({
+    where: {
+      id: companyId,
+      workspaceId,
+      status: { not: "SUPPRESSED" },
+      version: versionRow.version,
+    },
+    data: {
+      attributes: nextAttributes as unknown as Prisma.InputJsonValue,
+      version: { increment: 1 },
+    },
+  });
+}
+
+export interface RejudgeCorroborationInput {
+  readonly workspaceId: string;
+  readonly icpId: string;
+  readonly companyId: string;
+  readonly rejudgeId: string;
+  readonly correlationId: string;
+}
+
+/**
+ * Audited lead rejudge T1/T2 corroboration (no discoveryCompanyJob / runEvent coupling).
+ * Writes `_vies_attempted` on non-transient VIES misses while leaving transient errors retryable.
+ */
+export async function corroborateCompanyForRejudge(
+  deps: CorroborationDependencies,
+  args: RejudgeCorroborationInput,
+  binding: ExecutionBudgetBinding,
+): Promise<{ readonly outcomes: readonly CorroborationOutcome[]; readonly viesMatched: boolean }> {
+  const setup = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+    if (!(await companyMayUseExternalProcessing(tx, args.workspaceId, args.companyId))) {
+      return null;
+    }
+    const company = await tx.canonicalCompany.findUnique({
+      where: { id: args.companyId },
+      select: {
+        name: true,
+        domain: true,
+        country: true,
+        region: true,
+        attributes: true,
+      },
+    });
+    if (!company) return null;
+    const providers = await deps.providers.routeEnrichment(tx as never);
+    return { company, providers };
+  });
+  if (!setup) return { outcomes: [], viesMatched: false };
+
+  const identity = readWebsiteProfileIdentity(setup.company.attributes);
+  const split = identity.vatId ? splitViesVat(identity.vatId) : null;
+  const attemptToken = split ? viesAttemptToken(split.vatId) : null;
+  const previousAttempt = readViesAttemptedMarker(setup.company.attributes);
+  const skipVies =
+    !split ||
+    VIES_PUBLIC_NAME_REDACTED_COUNTRIES.has(split.countryCode) ||
+    VIES_PUBLIC_NAME_REDACTED_COUNTRIES.has(split.isoCountry) ||
+    previousAttempt === attemptToken;
+
+  const outcomes = await corroborateCompanyWithProviders(
+    deps,
+    {
+      workspaceId: args.workspaceId,
+      icpId: args.icpId,
+      companyId: args.companyId,
+      correlationId: args.correlationId,
+      skipProvider: async (providerKey) => providerKey === "vies" && skipVies,
+    },
+    binding,
+    setup.company,
+    setup.providers,
+  );
+
+  const viesOutcome = outcomes.find((entry) => entry.provider === "vies");
+  const viesMatched = Boolean(viesOutcome?.status === "matched" && viesOutcome.stored);
+  if (
+    attemptToken &&
+    viesOutcome &&
+    VIES_NON_TRANSIENT_MISS_STATUSES.has(viesOutcome.status)
+  ) {
+    await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
+      persistWebsiteProfileMarkerInTransaction(
+        tx,
+        args.workspaceId,
+        args.companyId,
+        VIES_ATTEMPTED_MARKER,
+        attemptToken,
+      ),
+    );
+  }
+  return { outcomes, viesMatched };
 }

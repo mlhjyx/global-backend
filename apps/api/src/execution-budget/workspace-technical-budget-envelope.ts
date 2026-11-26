@@ -51,6 +51,8 @@ import {
   QUICK_JUDGE_BATCH_SIZE,
   QUICK_SCAN_POOL_LIMIT,
 } from '../discovery/run2/quick-scan';
+import { JUDGE_PANEL_MODELS } from '../discovery/judgment/panel';
+import { normalizeIcpRejudgeBudgetBody } from './icp-rejudge-budget-request';
 import {
   MAX_QUERY_PLAN_INDUSTRY_TERMS,
   MAX_QUERY_PLAN_TARGET_COUNTRIES,
@@ -109,6 +111,7 @@ export const WORKSPACE_EXECUTION_QUOTE_OPERATIONS = Object.freeze([
   'POST /companies',
   'POST /companies/:companyId/icps',
   'POST /icps/:icpId/query-plans',
+  'POST /icps/:icpId/rejudge',
   'POST /query-plans/:planId/execute',
   'POST /canonical-companies/:id/discover-contacts',
   'POST /canonical-companies/:id/enrich-contacts',
@@ -517,6 +520,45 @@ function enrichContactsEnvelope(
   );
 }
 
+/** Audited historical lead rejudge (POST /icps/:icpId/rejudge): 4x Panel x 2x Wire per company. */
+function icpRejudgeEnvelope(
+  request: Extract<WorkspaceExecutionBudgetRequest, { operation: 'POST /icps/:icpId/rejudge' }>,
+): WorkspaceTechnicalBudgetEnvelope {
+  const normalized = normalizeIcpRejudgeBudgetBody(request.body, invalid);
+  const companies = normalized.effectiveCompanies;
+  const fitLogicalInvocationsPerCompany = 1 + JUDGE_PANEL_MODELS.length;
+  const models: WorkspaceTechnicalBudgetModelPolicy[] = [
+    model('discovery.qualify_fit', companies * fitLogicalInvocationsPerCompany),
+    ...(normalized.refreshWebsiteProfile
+      ? [model('discovery.classify_trade_role', companies)]
+      : []),
+  ];
+  const tools: WorkspaceTechnicalBudgetToolPolicy[] = [
+    ...(normalized.refreshCorroboration
+      ? [
+          tool(contract(viesCheckTool), companies * MAX_VIES_CHECKS_PER_COMPANY),
+          tool(contract(gleifFetchTool), companies * MAX_GLEIF_FETCHES_PER_COMPANY),
+          tool(contract(wikidataEntityTool), companies * MAX_WIKIDATA_ENTITY_READS_PER_COMPANY),
+        ]
+      : []),
+    ...(normalized.refreshWebsiteProfile
+      ? [
+          tool(contract(crawl4aiFetchTool), companies * MAX_WEBSITE_PROFILE_FETCHES_PER_COMPANY),
+          tool(contract(crawl4aiRenderTool), companies * MAX_WEBSITE_PROFILE_RENDERS_PER_COMPANY),
+        ]
+      : []),
+  ];
+  return ready(request, models, tools, {
+    companies,
+    maxCompanies: normalized.maxCompanies,
+    batchSize: normalized.batchSize,
+    fitLogicalInvocationsPerCompany,
+    refreshCorroboration: normalized.refreshCorroboration ? 1 : 0,
+    refreshWebsiteProfile: normalized.refreshWebsiteProfile ? 1 : 0,
+    includeFresh: normalized.includeFresh ? 1 : 0,
+  });
+}
+
 export function resolveWorkspaceTechnicalBudgetEnvelope(
   request: WorkspaceExecutionBudgetRequest,
   env: NodeJS.ProcessEnv = process.env,
@@ -558,6 +600,8 @@ export function resolveWorkspaceTechnicalBudgetEnvelope(
         },
       );
     }
+    case 'POST /icps/:icpId/rejudge':
+      return icpRejudgeEnvelope(request);
     case 'POST /canonical-companies/:id/guess-emails': {
       const bounds = emailGuessBounds(request.body);
       const invocations = bounds.contacts * bounds.probesPerContact;

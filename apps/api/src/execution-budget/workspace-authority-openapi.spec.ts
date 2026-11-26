@@ -7,6 +7,7 @@ const operations = [
   '/api/v1/companies',
   '/api/v1/companies/{companyId}/icps',
   '/api/v1/icps/{icpId}/query-plans',
+  '/api/v1/icps/{icpId}/rejudge',
   '/api/v1/query-plans/{planId}/execute',
   '/api/v1/canonical-companies/{id}/discover-contacts',
   '/api/v1/canonical-companies/{id}/guess-emails',
@@ -88,6 +89,17 @@ describe('workspace execution authority OpenAPI', () => {
     expect(
       document.paths['/api/v1/query-plans/{planId}/execute']?.post?.responses?.['409']?.description,
     ).toBe('EXECUTION_BUDGET_GRANT_REUSED, INVALID_STATE or RERUN_REQUIRES_ATTEMPT');
+
+    const rejudgeConflict =
+      document.paths['/api/v1/icps/{icpId}/rejudge']?.post?.responses?.['409']?.description ?? '';
+    for (const code of [
+      'EXECUTION_BUDGET_GRANT_REUSED',
+      'INVALID_STATE',
+      'NO_REJUDGE_CANDIDATES',
+      'REJUDGE_COST_CAP_EXCEEDED',
+    ]) {
+      expect(rejudgeConflict).toContain(code);
+    }
   });
 
   it('documents a settled unusable model answer of the two generation endpoints as 502 MODEL_UPSTREAM_UNUSABLE', () => {

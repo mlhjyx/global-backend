@@ -354,3 +354,66 @@ describe('market-candidate generation budget request binding', () => {
     expect(workspaceExecutionBudgetRequestScope({ ...request, body: { intentDigest: 'b'.repeat(64) } } as unknown as WorkspaceExecutionBudgetRequest).requestSha256).not.toBe(a.requestSha256);
   });
 });
+
+describe('icp rejudge budget request binding', () => {
+  const COMPANY_A = '11111111-1111-4111-8111-111111111111';
+  const COMPANY_B = '22222222-2222-4222-8222-222222222222';
+  const baseRequest = {
+    operation: 'POST /icps/:icpId/rejudge',
+    icpId: ICP_ID,
+    body: { attemptId: 'rejudge-attempt-1' },
+  } as unknown as WorkspaceExecutionBudgetRequest;
+
+  it('binds POST /icps/:icpId/rejudge to icp.rejudge / icp and canonicalizes defaults and companyIds order', () => {
+    const a = workspaceExecutionBudgetRequestScope(baseRequest);
+    const b = workspaceExecutionBudgetRequestScope({
+      operation: 'POST /icps/:icpId/rejudge',
+      icpId: ICP_ID,
+      body: {
+        attemptId: 'rejudge-attempt-1',
+        maxCompanies: 100,
+        batchSize: 25,
+        refreshCorroboration: true,
+        refreshWebsiteProfile: false,
+        includeFresh: false,
+      },
+    } as unknown as WorkspaceExecutionBudgetRequest);
+    expect(a).toEqual({
+      purpose: 'icp.rejudge',
+      subjectType: 'icp',
+      subjectId: ICP_ID,
+      requestSha256: b.requestSha256,
+    });
+
+    const list1 = workspaceExecutionBudgetRequestScope({
+      operation: 'POST /icps/:icpId/rejudge',
+      icpId: ICP_ID,
+      body: { attemptId: 'rejudge-attempt-1', companyIds: [COMPANY_B, COMPANY_A, COMPANY_A] },
+    } as unknown as WorkspaceExecutionBudgetRequest);
+    const list2 = workspaceExecutionBudgetRequestScope({
+      operation: 'POST /icps/:icpId/rejudge',
+      icpId: ICP_ID,
+      body: { attemptId: 'rejudge-attempt-1', companyIds: [COMPANY_A.toUpperCase(), COMPANY_B] },
+    } as unknown as WorkspaceExecutionBudgetRequest);
+    expect(list1.requestSha256).toBe(list2.requestSha256);
+    expect(list1.requestSha256).not.toBe(a.requestSha256);
+  });
+
+  it.each([
+    { attemptId: '' },
+    { attemptId: 'ok', companyIds: [] },
+    { attemptId: 'ok', maxCompanies: 101 },
+    { attemptId: 'ok', maxCompanies: 0 },
+    { attemptId: 'ok', batchSize: 26 },
+    { attemptId: 'ok', includeFresh: true },
+    { attemptId: 'ok', unexpected: true },
+  ])('fails closed with EXECUTION_BUDGET_REQUEST_INVALID for invalid body %j', (body) => {
+    expect(() =>
+      workspaceExecutionBudgetRequestScope({
+        operation: 'POST /icps/:icpId/rejudge',
+        icpId: ICP_ID,
+        body,
+      } as unknown as WorkspaceExecutionBudgetRequest),
+    ).toThrow('EXECUTION_BUDGET_REQUEST_INVALID');
+  });
+});

@@ -7,6 +7,7 @@ export { toolBudgetReconciliationWorkflow } from "./tool-budget-reconciliation.w
 export { staleRunSweepWorkflow } from "./stale-run.workflow";
 export { rawRetentionSweepWorkflow } from "./raw-retention.workflow";
 export { qualifyWorkflow } from "./qualify.workflow";
+export { rejudgeWorkflow } from "./rejudge.workflow";
 export { backlogSweepWorkflow } from "./backlog.workflow";
 export { externalIntentSweepWorkflow } from "./external-intent.workflow";
 export { deletionWorkflow } from "./deletion.workflow";

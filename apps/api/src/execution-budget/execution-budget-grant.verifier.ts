@@ -44,6 +44,7 @@ const FIXED_ALGORITHMS = new Set(['RS256', 'ES256', 'EdDSA']);
 const PURPOSES = new Set<ExecutionBudgetPurpose>([
   'icp.design',
   'icp.query_plan',
+  'icp.rejudge',
   'understanding.run',
   'discovery.run',
   'contact.verify',

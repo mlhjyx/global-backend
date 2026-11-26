@@ -44,6 +44,7 @@ describe('execution budget authority claim types', () => {
     ['understanding.run', 'company'],
     ['icp.design', 'company'],
     ['icp.query_plan', 'icp'],
+    ['icp.rejudge', 'icp'],
     ['discovery.run', 'discovery_run'],
     ['discovery.run', 'company'],
     ['contact.verify', 'contact_point'],

@@ -46,6 +46,7 @@ import { prismaDiscoveryRunLeaseReader } from "./discovery-run-lease";
 import { createRawSourceActivities } from "./raw-source.activities";
 import { createToolBudgetReconciliationActivities } from "./tool-budget-reconciliation.activities";
 import { createQualifyActivities } from "./qualify.activities";
+import { createRejudgeActivities } from "./rejudge.activities";
 import { createBacklogActivities } from "./backlog.activities";
 import { createContactReverifyActivities } from "./contact-reverify.activities";
 import { createContactWeeklyReportActivities } from "./contact-weekly-report.activities";
@@ -664,6 +665,7 @@ async function main(): Promise<void> {
       ...createStreamingDiscoveryActivities({ prisma, providers, gateway, broker, runtimeTelemetry: runtimeTelemetry.telemetry, budgetStore }),
       ...createRawSourceActivities({ prisma }),
       ...createQualifyActivities({ prisma, sanctionsScreening }),
+      ...createRejudgeActivities({ prisma, providers, gateway, broker, runtimeTelemetry: runtimeTelemetry.telemetry, budgetStore, skills: skillResolver }),
       ...createBacklogActivities({
         prisma,
         providers,

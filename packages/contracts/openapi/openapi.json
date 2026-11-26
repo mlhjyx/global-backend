@@ -3845,6 +3845,69 @@
                     "additionalProperties": false,
                     "required": [
                       "operation",
+                      "icpId",
+                      "body"
+                    ],
+                    "properties": {
+                      "operation": {
+                        "type": "string",
+                        "enum": [
+                          "POST /icps/:icpId/rejudge"
+                        ]
+                      },
+                      "icpId": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "body": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "attemptId"
+                        ],
+                        "properties": {
+                          "attemptId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128
+                          },
+                          "maxCompanies": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 100
+                          },
+                          "batchSize": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 25
+                          },
+                          "refreshCorroboration": {
+                            "type": "boolean"
+                          },
+                          "refreshWebsiteProfile": {
+                            "type": "boolean"
+                          },
+                          "includeFresh": {
+                            "type": "boolean"
+                          },
+                          "companyIds": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 100,
+                            "items": {
+                              "type": "string",
+                              "format": "uuid"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "operation",
                       "planId"
                     ],
                     "properties": {
@@ -9516,6 +9579,203 @@
           "acquisition:read"
         ],
         "description": "该 ICP 的查询计划列表（含状态：DRAFT / READY）。"
+      }
+    },
+    "/api/v1/icps/{icpId}/rejudge": {
+      "post": {
+        "description": "要求 JUDGE_CONTRACT_MODE=enforce 且 ICP 处于 ACTIVE 状态。先对 Grant 验签并做候选与预算预检（无候选返回 409 NO_REJUDGE_CANDIDATES、超帽返回 409 REJUDGE_COST_CAP_EXCEEDED，均不消耗 Grant），通过后在单事务内原子核销 Grant 并投递 LeadRejudgeRequested。",
+        "operationId": "IcpController_rejudgeLeads_v1",
+        "parameters": [
+          {
+            "name": "icpId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Execution-Budget-Grant",
+            "in": "header",
+            "description": "SaaS signed authority bound to this exact workspace mutation",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16384
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejudgeIcpLeadsDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RejudgeIcpLeadsResponseDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "EXECUTION_BUDGET_GRANT_REQUIRED, EXECUTION_BUDGET_GRANT_INVALID, EXECUTION_BUDGET_GRANT_EXPIRED or EXECUTION_BUDGET_AUTHORITY_EXHAUSTED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH or EXECUTION_BUDGET_AUTHORITY_REVOKED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "EXECUTION_BUDGET_GRANT_REUSED, INVALID_STATE, NO_REJUDGE_CANDIDATES or REJUDGE_COST_CAP_EXCEEDED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "触发审计合规的存量 Lead 重判（走 WORKSPACE_GRANT + Outbox + rejudgeWorkflow，保护人工决策）",
+        "tags": [
+          "ICP"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
+        ]
       }
     },
     "/api/v1/icps/{icpId}/feedback": {
@@ -30495,6 +30755,7 @@
               "POST /companies",
               "POST /companies/:companyId/icps",
               "POST /icps/:icpId/query-plans",
+              "POST /icps/:icpId/rejudge",
               "POST /query-plans/:planId/execute",
               "POST /canonical-companies/:id/discover-contacts",
               "POST /canonical-companies/:id/enrich-contacts",
@@ -30517,6 +30778,7 @@
               "understanding.run",
               "icp.design",
               "icp.query_plan",
+              "icp.rejudge",
               "discovery.run",
               "contact.verify",
               "contact.enrich",
@@ -32351,6 +32613,105 @@
             "description": "「重新生成」的幂等键（BFF 或客户端生成）。"
           }
         }
+      },
+      "RejudgeIcpLeadsResponseDto": {
+        "type": "object",
+        "properties": {
+          "rejudgeId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "icpId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACCEPTED"
+            ]
+          },
+          "candidateCount": {
+            "type": "number",
+            "minimum": 1
+          },
+          "batchCount": {
+            "type": "number",
+            "minimum": 1
+          },
+          "estimatedCostMicros": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "refreshCorroboration": {
+            "type": "boolean"
+          },
+          "refreshWebsiteProfile": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "rejudgeId",
+          "icpId",
+          "status",
+          "candidateCount",
+          "batchCount",
+          "estimatedCostMicros",
+          "refreshCorroboration",
+          "refreshWebsiteProfile"
+        ]
+      },
+      "RejudgeIcpLeadsDto": {
+        "type": "object",
+        "properties": {
+          "attemptId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "description": "必填幂等键（每次触发生成新值，保证同 ICP 多次重判拥有独立预算账户与防重复扣账）"
+          },
+          "maxCompanies": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 100,
+            "description": "本次重判最大公司数（硬顶 100；越界直接 400 拒绝，不静默夹取）"
+          },
+          "batchSize": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 25,
+            "default": 25,
+            "description": "每批公司数（1..25，默认 25，透传给 planRejudgeBatches）"
+          },
+          "refreshCorroboration": {
+            "type": "boolean",
+            "default": true,
+            "description": "重判前是否刷新缺失的 T1/T2 核验（VIES / GLEIF / Wikidata）"
+          },
+          "refreshWebsiteProfile": {
+            "type": "boolean",
+            "default": false,
+            "description": "为 true 时对尚未升级到 website-profile/v2 且缺 vat_id 的公司重抓首页与欧盟法律页"
+          },
+          "includeFresh": {
+            "type": "boolean",
+            "default": false,
+            "description": "仅允许与显式 companyIds 联用：强制重判当前 input_digest 已新鲜的指定公司"
+          },
+          "companyIds": {
+            "minItems": 1,
+            "maxItems": 100,
+            "description": "可选定向公司 UUID v4 白名单（用于小批灰度；空数组直接 400 拒绝）",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "attemptId"
+        ]
       },
       "RecordIcpFeedbackDto": {
         "type": "object",

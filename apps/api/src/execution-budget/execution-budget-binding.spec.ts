@@ -105,3 +105,31 @@ describe('dedicated market-generation immutable account identity', () => {
     expect(() => parseExecutionBudgetBinding({ ...exact, accountKey: `${primary}:retry:77777777-7777-4777-8777-777777777777` })).toThrow('EXECUTION_BUDGET_BINDING_INVALID');
   });
 });
+
+describe('icp.rejudge immutable workspace account identity', () => {
+  const icpId = '77777777-7777-4777-8777-777777777777';
+  const primary = `icp.rejudge:icp:${icpId}:${REQUEST_SHA256}`;
+  const exact = {
+    ...binding,
+    accountKey: primary,
+    purpose: 'icp.rejudge' as const,
+    subjectType: 'icp',
+    subjectId: icpId,
+  };
+
+  it('accepts a fresh icp.rejudge binding bound to icp and rejects retry suffixes', () => {
+    expect(
+      parseExecutionBudgetBinding(exact, {
+        scopeKey: WORKSPACE_ID,
+        purpose: 'icp.rejudge',
+        subjectType: 'icp',
+      }),
+    ).toEqual(exact);
+    expect(() =>
+      parseExecutionBudgetBinding(
+        { ...exact, accountKey: `${primary}:retry:${AUTHORITY_ID}` },
+        { scopeKey: WORKSPACE_ID, purpose: 'icp.rejudge', subjectType: 'icp' },
+      ),
+    ).toThrow('EXECUTION_BUDGET_BINDING_INVALID');
+  });
+});

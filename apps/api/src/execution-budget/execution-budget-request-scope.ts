@@ -2,6 +2,13 @@ import { createHash } from 'node:crypto';
 import { readManufacturerNetworkExecutionBody, type ManufacturerNetworkExecuteBody } from '../discovery/manufacturer-network-execution';
 import { ExecutionControlError } from './execution-control-error';
 import type { WorkspaceExecutionBudgetScope } from './execution-budget-authority.service';
+import {
+  canonicalIcpRejudgeRequestMaterialBody,
+  normalizeIcpRejudgeBudgetBody,
+  type IcpRejudgeHttpRequestBody,
+} from './icp-rejudge-budget-request';
+
+export type { IcpRejudgeHttpRequestBody } from './icp-rejudge-budget-request';
 
 type JsonPrimitive = string | number | boolean | null;
 type JsonValue = JsonPrimitive | readonly JsonValue[] | { readonly [key: string]: JsonValue };
@@ -29,6 +36,11 @@ export type WorkspaceExecutionBudgetRequest =
       icpId: string;
       /** 「重新生成」的幂等键；缺省时请求哈希与旧版一致（旧 Grant 语义不变）。 */
       body?: Readonly<{ attemptId: string }>;
+    }>
+  | Readonly<{
+      operation: 'POST /icps/:icpId/rejudge';
+      icpId: string;
+      body: Readonly<IcpRejudgeHttpRequestBody>;
     }>
   | Readonly<{
       operation: 'POST /query-plans/:planId/execute';
@@ -146,6 +158,14 @@ function requestMaterial(request: WorkspaceExecutionBudgetRequest): JsonValue {
         icpId: request.icpId,
         ...(request.body === undefined ? {} : { body: request.body as JsonValue }),
       };
+    case 'POST /icps/:icpId/rejudge': {
+      const normalized = normalizeIcpRejudgeBudgetBody(request.body, invalidRequest);
+      return {
+        operation: request.operation,
+        icpId: request.icpId,
+        body: canonicalIcpRejudgeRequestMaterialBody(normalized) as unknown as JsonValue,
+      };
+    }
     case 'POST /query-plans/:planId/execute':
       if (request.body !== undefined) {
         try { readManufacturerNetworkExecutionBody(request.body); } catch { invalidRequest(); }
@@ -245,6 +265,13 @@ export function workspaceExecutionBudgetRequestScope(
     case 'POST /icps/:icpId/query-plans':
       return Object.freeze({
         purpose: 'icp.query_plan',
+        subjectType: 'icp',
+        subjectId: request.icpId,
+        requestSha256,
+      });
+    case 'POST /icps/:icpId/rejudge':
+      return Object.freeze({
+        purpose: 'icp.rejudge',
         subjectType: 'icp',
         subjectId: request.icpId,
         requestSha256,
@@ -358,5 +385,17 @@ export function verifyContactPointExecutionBudgetRequestScope(
           allowPersonalWithoutBasis: body.allowPersonalWithoutBasis,
         }
       : undefined,
+  });
+}
+
+/** Canonical public DTO boundary used by both the HTTP adapter and grant issuer. */
+export function icpRejudgeExecutionBudgetRequestScope(
+  icpId: string,
+  body: IcpRejudgeHttpRequestBody,
+): Readonly<WorkspaceExecutionBudgetScope> {
+  return workspaceExecutionBudgetRequestScope({
+    operation: 'POST /icps/:icpId/rejudge',
+    icpId,
+    body,
   });
 }

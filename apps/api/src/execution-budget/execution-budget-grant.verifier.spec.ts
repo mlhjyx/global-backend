@@ -1050,3 +1050,35 @@ describe('dedicated market-generation synthetic grant verification', () => {
     await expect(verifier().verify(await signedToken(), scope)).rejects.toThrow('EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH');
   });
 });
+
+describe('icp.rejudge synthetic grant verification', () => {
+  const scope: ExecutionBudgetGrantExpectedScope = {
+    ...EXPECTED_SCOPE,
+    purpose: 'icp.rejudge' as ExecutionBudgetGrantExpectedScope['purpose'],
+    subjectType: 'icp',
+  };
+
+  it('verifies a workspace grant scoped to icp.rejudge / icp', async () => {
+    const compact = await signedToken({
+      algorithm: 'RS256',
+      claims: { purpose: 'icp.rejudge', subject_type: 'icp', cap_microusd: '8300000' },
+    });
+    await expect(verifier().verify(compact, scope)).resolves.toMatchObject({
+      authorityKind: 'WORKSPACE_GRANT',
+      workspaceId: WORKSPACE_ID,
+      purpose: 'icp.rejudge',
+      subjectType: 'icp',
+      subjectId: COMPANY_ID,
+      requestSha256: REQUEST_HASH,
+      capMicrousd: 8_300_000n,
+    });
+  });
+
+  it('rejects a discovery.run grant presented for icp.rejudge', async () => {
+    const compact = await signedToken({
+      algorithm: 'RS256',
+      claims: { purpose: 'discovery.run', subject_type: 'discovery_run', cap_microusd: '8300000' },
+    });
+    await expect(verifier().verify(compact, scope)).rejects.toThrow('EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH');
+  });
+});

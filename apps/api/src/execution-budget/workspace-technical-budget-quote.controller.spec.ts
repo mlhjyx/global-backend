@@ -213,3 +213,48 @@ describe('manufacturer execution quote canonical boundary',()=>{
     expect(()=>controller().quote(CTX,{operation:'POST /query-plans/:planId/execute',planId,body})).toThrow();
   });
 });
+
+describe('icp rejudge quote controller boundary', () => {
+  const icpId = '40000000-0000-4000-8000-000000000004';
+  const companyIds = [
+    '10000000-0000-4000-8000-000000000001',
+    '10000000-0000-4000-8000-000000000002',
+    '10000000-0000-4000-8000-000000000003',
+    '10000000-0000-4000-8000-000000000004',
+    '10000000-0000-4000-8000-000000000005',
+  ];
+
+  it('quotes POST /icps/:icpId/rejudge bound to icp.rejudge / icp with exact 4x2 upper bound', () => {
+    const result = controller().quote(CTX, {
+      operation: 'POST /icps/:icpId/rejudge',
+      icpId,
+      body: {
+        attemptId: 'canary-it-5',
+        companyIds,
+        refreshCorroboration: true,
+        refreshWebsiteProfile: true,
+      },
+    });
+    expect(result).toEqual({
+      data: expect.objectContaining({
+        workspaceId: CTX.workspaceId,
+        operation: 'POST /icps/:icpId/rejudge',
+        purpose: 'icp.rejudge',
+        subjectType: 'icp',
+        subjectId: icpId,
+        requiredCapMicrousd: '8300000',
+      }),
+    });
+  });
+
+  it.each([
+    { operation: 'POST /icps/:icpId/rejudge', icpId },
+    { operation: 'POST /icps/:icpId/rejudge', icpId: 'not-a-uuid', body: { attemptId: 'a' } },
+    { operation: 'POST /icps/:icpId/rejudge', icpId, body: { attemptId: 'a', companyIds: [] } },
+    { operation: 'POST /icps/:icpId/rejudge', icpId, body: { attemptId: 'a', maxCompanies: 101 } },
+    { operation: 'POST /icps/:icpId/rejudge', icpId, body: { attemptId: 'a', includeFresh: true } },
+    { operation: 'POST /icps/:icpId/rejudge', icpId, body: { attemptId: 'a', extra: 1 } },
+  ])('fails closed with EXECUTION_BUDGET_QUOTE_INVALID for %j', (input) => {
+    expect(() => controller().quote(CTX, input)).toThrow('EXECUTION_BUDGET_QUOTE_INVALID');
+  });
+});

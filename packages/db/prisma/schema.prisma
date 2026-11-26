@@ -72,6 +72,7 @@ enum ExecutionBudgetAuthorityKind {
 enum ExecutionBudgetPurpose {
   ICP_DESIGN                  @map("icp.design")
   ICP_QUERY_PLAN              @map("icp.query_plan")
+  ICP_REJUDGE                 @map("icp.rejudge")
   UNDERSTANDING_RUN           @map("understanding.run")
   DISCOVERY_RUN               @map("discovery.run")
   CONTACT_VERIFY              @map("contact.verify")
