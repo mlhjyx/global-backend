@@ -76,4 +76,50 @@ describe('streaming-progress projection', () => {
     expect(legacy.stages.l1ExtractFit.fitMatch).toBe(4);
     expect(legacy.stages.l2TopKEnrich.watchesRegistered).toBe(4);
   });
+
+  it('preserves optional ADR-003 sharedFactHits/cooldownFlagged counts and stays backward-compatible with older snapshots', () => {
+    const initial = createInitialStreamingProgress(RUN_ID, { now: '2026-11-26T00:00:00.000Z' });
+    expect(initial.stages.l1ExtractFit.sharedFactHits).toBe(0);
+    expect(initial.stages.l1ExtractFit.cooldownFlagged).toBe(0);
+
+    // Older stored streaming snapshot without sharedFactHits/cooldownFlagged must still project cleanly
+    const olderSnapshot = readStreamingRunProgress({
+      id: RUN_ID,
+      status: 'RUNNING',
+      stats: {
+        streaming: {
+          runId: RUN_ID,
+          pipelineMode: 'streaming',
+          runStatus: 'RUNNING',
+          currentStage: 'l1_extract_fit',
+          updatedAt: '2026-11-26T00:05:00.000Z',
+          stages: {
+            l0Recall: initial.stages.l0Recall,
+            l1ExtractFit: {
+              status: 'running',
+              total: 5,
+              processed: 2,
+              rawHttpHits: 2,
+              crawl4aiFallbacks: 0,
+              pdfSkipped: 0,
+              wwwRetries: 0,
+              fitMatch: 1,
+              fitWeak: 1,
+              fitMismatch: 0,
+              failed: 0,
+              startedAt: '2026-11-26T00:01:00.000Z',
+              completedAt: null,
+            },
+            l2TopKEnrich: initial.stages.l2TopKEnrich,
+          },
+          recentCandidates: [],
+        },
+      },
+      createdAt: new Date('2026-11-26T00:00:00.000Z'),
+      completedAt: null,
+    });
+    expect(olderSnapshot.pipelineMode).toBe('streaming');
+    expect(olderSnapshot.stages.l1ExtractFit.processed).toBe(2);
+    expect(olderSnapshot.stages.l1ExtractFit.sharedFactHits).toBeUndefined();
+  });
 });

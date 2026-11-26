@@ -39,6 +39,9 @@ export interface StreamingCandidateSnapshot {
     readonly forms: number;
     readonly socials: number;
   };
+  readonly sharedFactHit?: boolean;
+  readonly cooldownFlagged?: boolean;
+  readonly cooldownRetryAfterDays?: number | null;
   readonly reasonSummary: string | null;
   readonly updatedAt: string;
 }
@@ -61,6 +64,8 @@ export interface StreamingL1Progress {
   readonly crawl4aiFallbacks: number;
   readonly pdfSkipped: number;
   readonly wwwRetries: number;
+  readonly sharedFactHits?: number;
+  readonly cooldownFlagged?: number;
   readonly fitMatch: number;
   readonly fitWeak: number;
   readonly fitMismatch: number;
@@ -126,6 +131,8 @@ export function createInitialStreamingProgress(
         crawl4aiFallbacks: 0,
         pdfSkipped: 0,
         wwwRetries: 0,
+        sharedFactHits: 0,
+        cooldownFlagged: 0,
         fitMatch: 0,
         fitWeak: 0,
         fitMismatch: 0,
