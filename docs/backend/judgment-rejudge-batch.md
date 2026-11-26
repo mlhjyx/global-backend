@@ -10,7 +10,7 @@
    - 完整走标准 `workspace-technical-quote` -> `WORKSPACE_GRANT`（`purpose: 'icp.rejudge'`，`subjectType: 'icp'`，`subjectId: icpId`，60 分钟准入租约）-> 预检零消耗 Grant -> 事务内原子核销 + Outbox `LeadRejudgeRequested` -> Temporal `rejudgeWorkflow`（`retry: { maximumAttempts: 1 }`）-> 末段发 `QualifyRequested`（不带 `runId`）重算评分。
    - **前置硬门**：要求 `JUDGE_CONTRACT_MODE=enforce` 且 ICP 状态为 `ACTIVE`（否则 `409 INVALID_STATE`，不消耗 Grant）。
    - **三条件精准收敛**：默认 `includeFresh=false` 时，仅纳入满足以下任一条件的非 `SUPPRESSED` 公司：
-     1. `needsWebsiteV2`：`refreshWebsiteProfile=true`、有域名、尚未写 `_parser_version: 'website-profile/v2'` 且 `vat_id == null`；
+     1. `needsWebsiteV2`：`refreshWebsiteProfile=true`、有域名、尚未写 `_parser_version: 'website-profile/v3'` 且 `vat_id == null`；
      2. `needsViesBackfill`：`refreshCorroboration=true`、拥有非德国等公开匿名国别的合法 EU `vat_id`、尚无 `attributes.vies` 且 `_vies_attempted` 未命中当前税号的分段哈希令牌；
      3. `needsDigestRejudge`：按当前 `loadIcpBrief` + 公司快照算出的 `(inputDigest, promptHash, rubricVersion, judgeLevel=2)` 在 `judgment_record` 中尚不存在。
      - 同一参数二次调用时若全部已收敛，直接返回 `409 NO_REJUDGE_CANDIDATES`（**零消耗 Grant、零 LLM 费用**）。

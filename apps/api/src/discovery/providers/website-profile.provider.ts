@@ -37,9 +37,9 @@ import {
 export const WEBSITE_PROFILE_TASK = 'discovery.classify_trade_role' as const;
 /** data_provider kill switch and canonical attribute namespace. */
 export const WEBSITE_PROFILE_PROVIDER_KEY = 'website_profile' as const;
-/** Namespace bookkeeping marker stamped on website_profile commits (Batch 1.7B). */
+/** Namespace bookkeeping marker stamped on website_profile commits (Batch 1.7B / 1.7C). */
 export const WEBSITE_PROFILE_PARSER_MARKER = '_parser_version' as const;
-export const WEBSITE_PROFILE_PARSER_VERSION = 'website-profile/v2' as const;
+export const WEBSITE_PROFILE_PARSER_VERSION = 'website-profile/v3' as const;
 /** crawl4ai.fetch text cap per page; a homepage this long may have been cut. */
 const PAGE_FETCH_MAX_CHARS = 40_000;
 const HOME_PROMPT_CHARS = 12_000;

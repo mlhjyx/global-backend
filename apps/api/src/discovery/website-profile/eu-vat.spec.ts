@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   VIES_PUBLIC_NAME_REDACTED_COUNTRIES,
+  extractAllEuVats,
   extractEuVat,
   isValidEuVat,
   isValidGermanVat,
   isValidItalianVat,
   normalizeEuVat,
+  normalizeEuVatWithHint,
   splitViesVat,
 } from './eu-vat';
 
@@ -154,5 +156,20 @@ describe('EU VAT validation and extraction (eu-vat)', () => {
     expect(
       extractEuVat('P.IVA 04553650989', { domain: 'global-site.com' }),
     ).toBeUndefined();
+  });
+
+  it('extracts multiple deduplicated EU VATs and supports Codice Fiscale / nr. labels and hinted structured values', () => {
+    expect(
+      extractAllEuVats(
+        'P.IVA e Codice Fiscale: 02053810517 | P.IVA n. 03899910925 | P.IVA 02053810517',
+        { domain: 'italsolsrl.it' },
+      ),
+    ).toEqual(['IT02053810517', 'IT03899910925']);
+
+    expect(normalizeEuVatWithHint('IT 0550.337.0289')).toBe('IT05503370289');
+    expect(normalizeEuVatWithHint('05503370289', { domain: 'gruppohvc.it' })).toBe('IT05503370289');
+    expect(normalizeEuVatWithHint('05503370289', { countryHint: 'IT' })).toBe('IT05503370289');
+    expect(normalizeEuVatWithHint('05503370289', { domain: 'global-site.com' })).toBeNull();
+    expect(normalizeEuVatWithHint('05503370288', { domain: 'gruppohvc.it' })).toBeNull();
   });
 });
