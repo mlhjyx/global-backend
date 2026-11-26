@@ -700,7 +700,7 @@ describe('LEGACY_EXECUTION_BUDGET_MODE (enforce | bypass)', () => {
         { workspaceId: WORKSPACE_ID, runId: 'run-1' },
       );
       expect(res1.data).toEqual({ ok: true });
-      expect(acquireSpy).toHaveBeenCalledWith('searxng.search', expect.any(Number));
+      expect(acquireSpy).toHaveBeenCalledWith('searxng.search', expect.any(Number), WORKSPACE_ID);
 
       // 3) Suppression gate still blocks in bypass mode.
       await expect(

@@ -18,6 +18,8 @@ import { ModelRouter } from "../model-gateway/model-router";
 import { RouterModelGateway } from "../model-gateway/router-model-gateway";
 import { buildGatewayProvider } from "../model-gateway/model-providers.config";
 import { AiTraceSink } from "../model-gateway/ai-trace.sink";
+import { createPrismaTenantDailyCostReader, TenantDailyCostBreaker } from "../model-gateway/tenant-daily-cost-breaker";
+import { attachAuxiliaryCustomerWorkers, resolveCustomerWorkerRuntimeSpec } from "./worker-tenant-runtime";
 import { createWorkspaceBudgetStore } from "../execution-budget/legacy-execution-budget-mode";
 import { createUnderstandingActivities } from "./understanding.activities";
 import { createCampaignPlanningActivities } from "./campaign-planning.activities";
@@ -164,6 +166,10 @@ async function holdWorkerNotReady(
         .catch(() => undefined);
     }, WORKER_NOT_READY_LOG_INTERVAL_MS);
   });
+}
+
+function catalogVerificationErrorCode(error: unknown): string {
+  return error instanceof Error && "code" in error && typeof error.code === "string" ? error.code : "PLATFORM_CATALOG_NOT_SEEDED";
 }
 
 /**
@@ -455,11 +461,7 @@ async function main(): Promise<void> {
     );
   } catch (error) {
     console.error("[worker] platform catalog verification failed:", error);
-    const code =
-      error instanceof Error && "code" in error && typeof error.code === "string"
-        ? error.code
-        : "PLATFORM_CATALOG_NOT_SEEDED";
-    await holdPlatformNotReady(code);
+    await holdPlatformNotReady(catalogVerificationErrorCode(error));
   }
 
   // Schedule provisioning is an independently authorized operator action.
@@ -473,6 +475,7 @@ async function main(): Promise<void> {
     budgetStore,
   );
   gateway.paidLedger = costLedger;
+  gateway.dailyCostBreaker = new TenantDailyCostBreaker({ reader: createPrismaTenantDailyCostReader(prisma) });
   // S0 技能运行时：DB 解析器（ops 启停生效；解析结果写不可变快照）。
   const skillResolver = createDbSkillResolver(
     new PrismaSkillRegistryStore(prisma),
@@ -602,25 +605,18 @@ async function main(): Promise<void> {
     "temporal-customer-worker",
     releaseIdentity.artifact_digest.replace(/^sha256:/, ""),
   );
-  const connection = await connectNativeMachine(machine.client).catch(
+  const workerRuntime = resolveCustomerWorkerRuntimeSpec(process.env);
+  const connection = await connectNativeMachine(machine.client, workerRuntime.tlsEnv).catch(
     async () => holdPlatformNotReady("TEMPORAL_WORKER_CONNECTION_UNAVAILABLE"),
   );
-  const worker = await Worker.create({
+  const primaryIdentity = workerIdentity(machine.subject, runtimeLeases.instanceId("WORKER"));
+  const sharedWorkerOptions = {
     connection,
-    dataConverter: {
-      failureConverterPath: require.resolve("./diagnostic-failure-converter"),
-    },
-    // B2（F5）：确定性账本错误在活动边界标 nonRetryable，别让重试预算撞同一行。
+    dataConverter: workerRuntime.dataConverter,
+    // B2（F5）：确定性账本错误在活动边界标 nonRetryable + 每租户活动并发上限。
     interceptors: DETERMINISTIC_LEDGER_FAILURE_INTERCEPTORS,
-    namespace: "default",
-    identity: workerIdentity(
-      machine.subject,
-      runtimeLeases.instanceId("WORKER"),
-    ),
-    taskQueue: UNDERSTANDING_TASK_QUEUE,
+    namespace: workerRuntime.namespace,
     workflowsPath: require.resolve("./customer-workflows"),
-    // ch08 §3.1.6：显式并发上限（Temporal 默认 100 会在 2 vCPU 主机上打满连接池/CPU）。
-    // 默认 12/8/4，WORKER_MAX_CONCURRENT_{ACTIVITY,WORKFLOW,LOCAL} 可调；非法值启动即失败。
     ...workerConcurrencyOptions(),
     ...WORKER_SHUTDOWN_OPTIONS,
     activities: {
@@ -741,13 +737,21 @@ async function main(): Promise<void> {
       ...createWorkspacePurgeActivities({ prisma, siteBuilderStorage, personalArtifactCleanupPort: personalArtifactCleanupRuntime.port }),
       ...createDataExportActivities({ prisma }),
     },
-  }).catch(async () => {
-    await connection.close().catch(() => undefined);
-    return holdPlatformNotReady("WORKER_INITIALIZATION_UNAVAILABLE");
-  });
+  };
+  const worker = await Worker.create({
+    ...sharedWorkerOptions,
+    dataConverter: { failureConverterPath: require.resolve("./diagnostic-failure-converter"), ...(typeof workerRuntime === "object" ? workerRuntime.payloadCodecOption : {}) },
+    identity: primaryIdentity,
+    taskQueue: workerRuntime.primaryTaskQueue,
+  })
+    .then((primary) => attachAuxiliaryCustomerWorkers(primary, sharedWorkerOptions, primaryIdentity, workerRuntime))
+    .catch(async () => {
+      await connection.close().catch(() => undefined);
+      return holdPlatformNotReady("WORKER_INITIALIZATION_UNAVAILABLE");
+    });
 
   console.log(
-    `[worker] understanding worker up on task queue '${UNDERSTANDING_TASK_QUEUE}'`,
+    `[worker] understanding worker up on task queue '${[workerRuntime.primaryTaskQueue, ...workerRuntime.auxiliaryTaskQueues].join(",")}'`,
   );
   clearInterval(startingHeartbeat);
   const workerShutdown = createIdempotentWorkerShutdown(worker, () =>

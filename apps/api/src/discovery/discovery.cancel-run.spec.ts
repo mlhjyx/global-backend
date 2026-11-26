@@ -35,8 +35,42 @@ describe('M0④ 停止深挖（RequestCancel）', () => {
       runId: RUN_ID,
       status: 'CANCEL_REQUESTED',
     });
-    expect(temporal.client.workflow.getHandle).toHaveBeenCalledWith(`discovery-${RUN_ID}`);
+    expect(temporal.client.workflow.getHandle).toHaveBeenCalledWith(
+      `ws:${WORKSPACE_ID}:discovery:${RUN_ID}`,
+    );
     expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to legacy unprefixed workflowId when tenant-prefixed execution is not found', async () => {
+    const cancelPrefixed = vi.fn(async () => {
+      throw new Error('workflow execution not found');
+    });
+    const cancelLegacy = vi.fn(async () => undefined);
+    const getHandle = vi.fn((wfId: string) => ({
+      cancel: wfId.startsWith('ws:') ? cancelPrefixed : cancelLegacy,
+    }));
+    const prisma = {
+      withWorkspace: async <T>(_ws: string, fn: (tx: unknown) => Promise<T>): Promise<T> =>
+        fn({
+          discoveryRun: {
+            findUnique: async () => ({ id: RUN_ID, status: 'RUNNING' }),
+          },
+        }),
+    };
+    const service = new DiscoveryService(
+      prisma as never,
+      {} as never,
+      {} as never,
+      undefined,
+      { client: { workflow: { getHandle } } } as never,
+    );
+    await expect(service.cancelRun(CTX, RUN_ID)).resolves.toEqual({
+      runId: RUN_ID,
+      status: 'CANCEL_REQUESTED',
+    });
+    expect(getHandle).toHaveBeenNthCalledWith(1, `ws:${WORKSPACE_ID}:discovery:${RUN_ID}`);
+    expect(getHandle).toHaveBeenNthCalledWith(2, `discovery-${RUN_ID}`);
+    expect(cancelLegacy).toHaveBeenCalledTimes(1);
   });
 
   it('is idempotent for a run that already finished', async () => {

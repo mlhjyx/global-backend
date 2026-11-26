@@ -17,7 +17,7 @@ describe('TemporalKbIngestLauncher R2-A2', () => {
     expect(start).toHaveBeenCalledWith(
       'kbIngestWorkflow',
       expect.objectContaining({
-        workflowId: 'site-kb-asset-1',
+        workflowId: 'ws:ws-1:site-kb:asset-1',
         args: [{ workspaceId: 'ws-1', siteId: 'site-1', assetId: 'asset-1' }],
       }),
     );

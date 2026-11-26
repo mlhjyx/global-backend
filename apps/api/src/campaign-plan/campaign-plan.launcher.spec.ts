@@ -47,7 +47,7 @@ describe('CampaignPlanLauncher', () => {
     ];
     expect(workflowType).toBe('campaignPlanningWorkflow');
     expect(options).toMatchObject({
-      workflowId: `campaign-plan-${JOB_ID}`,
+      workflowId: `ws:${WORKSPACE_ID}:campaign-plan:${JOB_ID}`,
       workflowExecutionTimeout: '60 minutes',
       workflowRunTimeout: '50 minutes',
       workflowTaskTimeout: '30 seconds',

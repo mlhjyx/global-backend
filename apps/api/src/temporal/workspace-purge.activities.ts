@@ -14,6 +14,11 @@ import type {
   WorkspacePurgeTargets,
 } from '../workspace/workspace-purge.types';
 import { TemporalClient } from './temporal.client';
+import {
+  expandPurgeWorkflowIds,
+  formatLegacyWorkflowId,
+  formatTenantWorkflowId,
+} from './tenant-workflow-id';
 
 export interface WorkspacePurgeActivityDeps {
   prisma: PrismaService;
@@ -210,14 +215,12 @@ export function createWorkspacePurgeActivities(deps: WorkspacePurgeActivityDeps)
         `),
       );
       const row = rows[0];
-      const selfWfId = `workspace-purge-${input.workspaceId}`;
-      const wfSet = new Set<string>(row?.workflow_ids ?? []);
-      for (const jobId of input.campaignPlanJobIds ?? []) {
-        wfSet.add(`campaign-plan-${jobId}`);
-      }
-      wfSet.delete(selfWfId);
+      const rawIds = [
+        ...(row?.workflow_ids ?? []),
+        ...(input.campaignPlanJobIds ?? []).map((jobId) => `campaign-plan-${jobId}`),
+      ];
       return {
-        workflowIds: [...wfSet],
+        workflowIds: expandPurgeWorkflowIds(input.workspaceId, rawIds),
         siteIds: row?.site_ids ?? [],
         legacyReleasePrefixes: row?.legacy_release_prefixes ?? [],
         exportObjectKeys: row?.export_object_keys ?? [],
@@ -237,9 +240,15 @@ export function createWorkspacePurgeActivities(deps: WorkspacePurgeActivityDeps)
         if (!ready || !clientHolder.client) {
           throw new Error('TEMPORAL_CLIENT_UNAVAILABLE');
         }
+        const selfLegacy = formatLegacyWorkflowId('workspace-purge', input.workspaceId);
+        const selfPrefixed = formatTenantWorkflowId(
+          input.workspaceId,
+          'workspace-purge',
+          input.workspaceId,
+        );
         let cancelled = 0;
         for (const workflowId of input.workflowIds) {
-          if (workflowId === `workspace-purge-${input.workspaceId}`) continue;
+          if (workflowId === selfLegacy || workflowId === selfPrefixed) continue;
           try {
             await clientHolder.client.workflow.getHandle(workflowId).cancel();
             cancelled += 1;

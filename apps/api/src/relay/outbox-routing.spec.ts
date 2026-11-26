@@ -729,7 +729,7 @@ describe("routeEvent — 三分支路由（收口③核心）", () => {
 
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({
-      workflowId: "discovery-run-closed",
+      workflowId: `ws:${ev.workspaceId}:discovery:run-closed`,
       workflowType: { name: DISCOVERY_WORKFLOW },
       workflowIdReusePolicy:
         temporalProto.api.enums.v1.WorkflowIdReusePolicy
@@ -797,7 +797,7 @@ describe("routeEvent — 三分支路由（收口③核心）", () => {
     expect(temporal.client.workflow.start).toHaveBeenCalledWith(
       ASSET_OBJECT_CLEANUP_WORKFLOW,
       expect.objectContaining({
-        workflowId: ev.eventId,
+        workflowId: `ws:${cleanupWorkspace}:asset-object-cleanup:${ev.eventId}`,
         args: [
           {
             eventId: ev.eventId,
@@ -832,7 +832,7 @@ describe("routeEvent — 三分支路由（收口③核心）", () => {
     expect(temporal.client.workflow.start).toHaveBeenCalledWith(
       PERSONAL_ARTIFACT_CLEANUP_WORKFLOW,
       expect.objectContaining({
-        workflowId: `personal-artifact-cleanup-${deletionRequestId}`,
+        workflowId: `ws:${ev.workspaceId}:personal-artifact-cleanup:${deletionRequestId}`,
         args: [{ workspaceId: ev.workspaceId, deletionRequestId }],
       }),
     );
@@ -886,7 +886,7 @@ describe("routeEvent — 三分支路由（收口③核心）", () => {
     expect(temporal.client.workflow.start).toHaveBeenCalledWith(
       ASSET_OBJECT_CLEANUP_WORKFLOW,
       expect.objectContaining({
-        workflowId: ev.eventId,
+        workflowId: `ws:${cleanupWorkspace}:asset-object-cleanup:${ev.eventId}`,
         args: [
           expect.objectContaining({
             eventId: ev.eventId,

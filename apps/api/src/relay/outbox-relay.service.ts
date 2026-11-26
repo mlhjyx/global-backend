@@ -21,9 +21,10 @@ import {
   ASSET_OBJECT_CLEANUP_WORKFLOW,
   QUALIFY_WORKFLOW,
   PERSONAL_ARTIFACT_CLEANUP_WORKFLOW,
-  UNDERSTANDING_TASK_QUEUE,
   UNDERSTANDING_WORKFLOW,
 } from "../temporal/understanding.constants";
+import { formatTenantWorkflowId } from "../temporal/tenant-workflow-id";
+import { resolveCustomerTaskQueue } from "../temporal/tenant-task-queues";
 import { DISCOVERY_RUN_EXECUTION_TIMEOUT } from "../temporal/discovery-run-lifecycle";
 import {
   DISCOVERY_WORKFLOW_KNOB_ENV,
@@ -72,6 +73,7 @@ import {
   qualifyWorkflowArgs,
 } from "./event-payload-helpers";
 import { OutboxDispatchBackoff, tryWithOutboxAdvisoryLock } from "./outbox-retry-guard";
+import { createOptionalOutboxWakeup, type OutboxWakeupController } from "./outbox-wakeup";
 
 /** Transactional Outbox relay (ADR-009): DATABASE_URL owner scans across tenants;
  * dispatched workflow activities reapply tenant scope through withWorkspace.
@@ -137,6 +139,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
   private principalVerified = false;
   private readonly fetchFn: FetchLike;
   private timer?: NodeJS.Timeout;
+  private wakeup?: OutboxWakeupController;
   private running = false;
   private expireCounter = 0;
   private initialized = false;
@@ -208,6 +211,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
 
   async onModuleInit(): Promise<void> {
     await this.reconnect();
+    this.wakeup = createOptionalOutboxWakeup(this.ownsDb, () => { void this.scheduleManagedTick(); });
     this.timer = setInterval(() => {
       void this.scheduleManagedTick();
     }, 2000);
@@ -314,6 +318,8 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     this.shuttingDown = true;
     this.shutdownAbort.abort();
     if (this.timer) clearInterval(this.timer);
+    await this.wakeup?.close().catch(() => undefined);
+    this.wakeup = undefined;
     this.readiness = {
       status: "not_ready",
       code: "OUTBOX_RELAY_DATABASE_UNAVAILABLE",
@@ -834,8 +840,8 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     if (ev.eventType === "SellerDocumentCleanupRequested" && (payload.subjectType !== "seller_document" || typeof payload.subjectId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(payload.subjectId)))
       throw new NonRetryableOutboxCommandError("seller document cleanup payload contract mismatch");
     await this.startWorkflowIdempotent(DELETION_WORKFLOW, {
-      taskQueue: UNDERSTANDING_TASK_QUEUE,
-      workflowId: `deletion-${ev.aggregateId}`,
+      taskQueue: resolveCustomerTaskQueue("batch"),
+      workflowId: formatTenantWorkflowId(ev.workspaceId, "deletion", ev.aggregateId),
       args: [{ workspaceId: ev.workspaceId, deletionRequestId: ev.aggregateId, subjectType: payload.subjectType ?? "", subjectId: payload.subjectId ?? "" }],
     }, `deletion workflow for request ${ev.aggregateId}`);
   }
@@ -914,17 +920,9 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       await this.startWorkflowIdempotent(
         UNDERSTANDING_WORKFLOW,
         {
-          taskQueue: UNDERSTANDING_TASK_QUEUE,
-          workflowId: `understanding-${ev.aggregateId}`,
-          args: [
-            {
-              workspaceId: ev.workspaceId,
-              companyId: ev.aggregateId,
-              website: payload.website ?? "",
-              executionContractVersion: 2,
-              executionBudget,
-            },
-          ],
+          taskQueue: resolveCustomerTaskQueue("interactive"),
+          workflowId: formatTenantWorkflowId(ev.workspaceId, "understanding", ev.aggregateId),
+          args: [{ workspaceId: ev.workspaceId, companyId: ev.aggregateId, website: payload.website ?? "", executionContractVersion: 2, executionBudget }],
         },
         `understanding workflow for company ${ev.aggregateId}`,
         ev,
@@ -954,13 +952,9 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       await this.startWorkflowIdempotent(
         resolveDiscoveryWorkflowType(),
         {
-          taskQueue: UNDERSTANDING_TASK_QUEUE,
-          workflowId: `discovery-${ev.aggregateId}`,
-          // 准入租约（3 小时）内 binding 一直可花钱：同一事件再投递不能在 run 结束后
-          // 用同一 binding 另起一次执行。已结束的同 ID 报 AlreadyStarted，按合并处理。
+          taskQueue: resolveCustomerTaskQueue("batch"),
+          workflowId: formatTenantWorkflowId(ev.workspaceId, "discovery", ev.aggregateId),
           workflowIdReusePolicy: WorkflowIdReusePolicy.REJECT_DUPLICATE,
-          // B3（审计 F2）：租约 180m + finalize 余量 10m + 缓冲；超时终止后 DB 行由
-          // stale-run 看门狗收尾（terminate 不执行 workflow 的 catch）。与 dev fast lane 对齐。
           workflowExecutionTimeout: DISCOVERY_RUN_EXECUTION_TIMEOUT,
           args: [
             {
@@ -971,12 +965,8 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
               icpId: payload.icpId ?? "",
               executionContractVersion: 2,
               executionBudget,
-              // B1（L01）：控制流可调常量显式随启动输入记录（默认=冻结值 20/16/2）。
               ...this.discoveryWorkflowKnobs(),
-              // M0③（Run 2.0）：部署开关决定这一轮 run 是否走快扫编排；启动参数一旦记录，
-              // 重放按历史输入走同一路径。
               ...(this.run2QuickScanEnabled() ? { run2QuickScan: true } : {}),
-              // M0⑥：影子对比（老路径主产出 + 新快扫对比，不物化名单）。
               ...(this.run2ShadowEnabled() ? { run2Shadow: true } : {}),
             },
           ],
@@ -989,9 +979,8 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       await this.startWorkflowIdempotent(
         QUALIFY_WORKFLOW,
         {
-          taskQueue: UNDERSTANDING_TASK_QUEUE,
-          // 同一 ICP 重复请求合并到一个在跑实例；跑完可再触发
-          workflowId: `qualify-${ev.aggregateId}`,
+          taskQueue: resolveCustomerTaskQueue("batch"),
+          workflowId: formatTenantWorkflowId(ev.workspaceId, "qualify", ev.aggregateId),
           args: [qualifyWorkflowArgs(ev)],
         },
         `qualify workflow for icp ${ev.aggregateId}`,
@@ -1002,8 +991,6 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       ev.eventType === "DeletionRequested" ||
       ev.eventType === "SellerDocumentCleanupRequested"
     ) {
-      // Public DSR and the S1a internal seller-document cleanup share deletionWorkflow;
-      // workflowId=deletion-<requestId> keeps replays on one running instance.
       await this.startDeletionCommand(ev);
     }
     if (ev.eventType === "PersonalArtifactCleanupRequested") {
@@ -1011,14 +998,9 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       await this.startWorkflowIdempotent(
         PERSONAL_ARTIFACT_CLEANUP_WORKFLOW,
         {
-          taskQueue: UNDERSTANDING_TASK_QUEUE,
-          workflowId: `personal-artifact-cleanup-${ev.aggregateId}`,
-          args: [
-            {
-              workspaceId: ev.workspaceId,
-              deletionRequestId: ev.aggregateId,
-            },
-          ],
+          taskQueue: resolveCustomerTaskQueue("batch"),
+          workflowId: formatTenantWorkflowId(ev.workspaceId, "personal-artifact-cleanup", ev.aggregateId),
+          args: [{ workspaceId: ev.workspaceId, deletionRequestId: ev.aggregateId }],
         },
         `personal artifact cleanup for request ${ev.aggregateId}`,
       );
@@ -1028,8 +1010,8 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       await this.startWorkflowIdempotent(
         ASSET_OBJECT_CLEANUP_WORKFLOW,
         {
-          taskQueue: UNDERSTANDING_TASK_QUEUE,
-          workflowId: ev.eventId,
+          taskQueue: resolveCustomerTaskQueue("batch"),
+          workflowId: formatTenantWorkflowId(ev.workspaceId, "asset-object-cleanup", ev.eventId),
           args: [command],
         },
         `asset ${command.objectClass} cleanup for event ${ev.eventId}`,

@@ -13,7 +13,7 @@ const INPUT = {
   siteId: "22222222-2222-4222-8222-222222222222",
   buildRunId: "33333333-3333-4333-8333-333333333333",
 };
-const WORKFLOW_ID = `site-demo-${INPUT.buildRunId}`;
+const WORKFLOW_ID = `ws:${INPUT.workspaceId}:site-demo:${INPUT.buildRunId}`;
 
 function makeLauncher() {
   const start = vi.fn();
@@ -151,5 +151,26 @@ describe("TemporalDemoV0Launcher exactly-once ACK contract", () => {
     });
     expect(getHandle).toHaveBeenCalledWith(WORKFLOW_ID);
     expect(start).not.toHaveBeenCalled();
+  });
+
+  it("租户前缀 workflowId 不存在时，只读回退查询历史无前缀 site-demo-<id>", async () => {
+    const start = vi.fn();
+    const describePrefixed = vi.fn().mockRejectedValue(new Error("Workflow execution not found"));
+    const describeLegacy = vi.fn().mockResolvedValue({
+      runId: "legacy-run",
+      raw: { workflowExecutionInfo: { firstRunId: "legacy-first-run" } },
+    });
+    const getHandle = vi.fn((wfId: string) => ({
+      describe: wfId.startsWith("ws:") ? describePrefixed : describeLegacy,
+    }));
+    const launcher = new TemporalDemoV0Launcher({
+      client: { workflow: { start, getHandle } },
+    } as unknown as TemporalClient);
+
+    await expect(launcher.recoverDemoV0(INPUT)).resolves.toEqual({
+      firstExecutionRunId: "legacy-first-run",
+    });
+    expect(getHandle).toHaveBeenNthCalledWith(1, WORKFLOW_ID);
+    expect(getHandle).toHaveBeenNthCalledWith(2, `site-demo-${INPUT.buildRunId}`);
   });
 });

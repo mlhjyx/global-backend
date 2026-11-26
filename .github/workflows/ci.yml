@@ -1058,6 +1058,22 @@ jobs:
           SANCTIONS_OPERATOR_REFRESH_TEST_APP_DATABASE_URL: postgresql://app_user:app_pw@127.0.0.1:5432/global_test
         run: pnpm --filter @global/api exec vitest run src/sanctions/sanctions-operator-refresh.postgres.spec.ts
 
+      # ADR-003 platform_shared physical schema boundary (platform_writer RW vs app_user SELECT-only,
+      # physical DB PII triggers) + transactional outbox_event PG NOTIFY <1s wakeup.
+      - name: ADR-003 platform_shared boundary & Outbox PG NOTIFY wakeup on PostgreSQL
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
+        shell: bash
+        env:
+          TEST_M10_PG_ADMIN_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
+          TEST_M10_PG_APP_USER_URL: postgresql://app_user:app_pw@127.0.0.1:5432/global_test
+        run: |
+          set -euo pipefail
+          M10_PW="$(openssl rand -hex 16)"
+          psql "${TEST_M10_PG_ADMIN_URL}" --no-psqlrc --set ON_ERROR_STOP=1 --quiet \
+            --command "DO \$\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ci_m10_platform_writer') THEN CREATE ROLE ci_m10_platform_writer LOGIN PASSWORD '${M10_PW}' IN ROLE platform_writer; ELSE ALTER ROLE ci_m10_platform_writer WITH LOGIN PASSWORD '${M10_PW}'; GRANT platform_writer TO ci_m10_platform_writer; END IF; END \$\$;"
+          export TEST_M10_PG_WRITER_URL="postgresql://ci_m10_platform_writer:${M10_PW}@127.0.0.1:5432/global_test"
+          pnpm --filter @global/api exec vitest run src/shared-facts/platform-shared-and-outbox-wakeup.postgres.spec.ts
+
   build-test-pg-disposable:
     name: postgres disposable · activation & pool cap
     needs: renderer-visual-scope

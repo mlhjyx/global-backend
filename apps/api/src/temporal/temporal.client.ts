@@ -12,6 +12,7 @@ import {
   validateCustomerTemporalReadiness,
   type CustomerTemporalReadinessReport,
 } from "./temporal-config";
+import { resolveTemporalPayloadCodec } from "./payload-codec";
 
 /** Thin wrapper so services (e.g. the relay) can start workflows via DI. */
 @Injectable()
@@ -90,10 +91,12 @@ export class TemporalClient implements OnModuleInit, OnModuleDestroy {
         return false;
       }
       const config = resolveCustomerTemporalConfig(process.env);
+      const payloadCodec = resolveTemporalPayloadCodec(process.env);
       this.connection = connection;
       this.client = new Client({
         connection: this.connection,
         namespace: config.namespace,
+        ...(payloadCodec ? { dataConverter: { payloadCodecs: [payloadCodec] } } : {}),
       });
       return true;
     } catch {

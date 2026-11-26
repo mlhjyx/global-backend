@@ -4,6 +4,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Inject, Inj
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { cancelTenantOrLegacyWorkflow } from '../temporal/tenant-workflow-id';
 import { RequestContext } from '../auth/request-context';
 import { DiscoveryProviderRegistry } from './provider.registry';
 import { persistDiscoveredContacts } from './contact-persist';
@@ -200,14 +201,7 @@ export class DiscoveryService {
         error: { code: 'TEMPORAL_UNAVAILABLE', message: 'temporal client is not connected' },
       });
     }
-    try {
-      await this.temporal.client.workflow.getHandle(`discovery-${runId}`).cancel();
-    } catch (error) {
-      // 工作流尚未被 relay 拉起（outbox 在途）：等价于「在开工前取消」，收尾由工作流启动后按
-      // 取消语义处理；连接级错误照旧上抛。
-      const message = error instanceof Error ? error.message : String(error);
-      if (!/not found|NotFound|does not exist/i.test(message)) throw error;
-    }
+    await cancelTenantOrLegacyWorkflow(this.temporal.client.workflow, ctx.workspaceId, 'discovery', runId);
     return { runId: run.id, status: 'CANCEL_REQUESTED' };
   }
 

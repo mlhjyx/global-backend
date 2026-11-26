@@ -138,7 +138,14 @@ export class KbService {
       }
       const markdown = TEXT_MIMES.has(asset.mime)
         ? buffer.toString('utf8')
-        : (await this.docling.convertToMarkdown(asset.filename, buffer, options.signal)).markdown;
+        : (
+            await this.docling.convertToMarkdown(
+              asset.filename,
+              buffer,
+              options.signal,
+              ctx.workspaceId,
+            )
+          ).markdown;
       options.heartbeat?.('parsed');
       options.signal?.throwIfAborted();
       if (markdown.trim().length === 0) {
@@ -151,10 +158,12 @@ export class KbService {
       }
       const chunks = chunkMarkdown(markdown);
       await this.renewFence(ctx, asset, fence);
-      const vectors = await this.embedAll(chunks.map((c) => c.text), () =>
-        this.renewFence(ctx, asset, fence),
+      const vectors = await this.embedAll(
+        chunks.map((c) => c.text),
+        () => this.renewFence(ctx, asset, fence),
         options.signal,
         options.heartbeat,
+        ctx.workspaceId,
       );
       options.signal?.throwIfAborted();
       await this.persistAssetDocument(
@@ -366,7 +375,7 @@ export class KbService {
 
   /** 语义检索（halfvec cosine，与 HNSW 索引同 cast，02 §12；迭代扫描 + 嵌入版本隔离）。 */
   async search(ctx: RequestContext, siteId: string, query: string, k = 5): Promise<SearchHit[]> {
-    const [vector] = await this.embeddings.embed([query]);
+    const [vector] = await this.embeddings.embed([query], undefined, ctx.workspaceId);
     const literal = toVectorLiteral(vector);
     const embedModel: string = this.embeddings.model;
     const embedVersion: string = this.embeddings.version;
@@ -382,6 +391,8 @@ export class KbService {
         FROM kb_chunk c
         JOIN kb_document d ON d.id = c.document_id
         WHERE d.site_id = ${siteId}::uuid
+          AND c.workspace_id = ${ctx.workspaceId}::uuid
+          AND d.workspace_id = ${ctx.workspaceId}::uuid
           AND c.embedding IS NOT NULL
           AND c.embed_model = ${embedModel}
           AND c.embed_version = ${embedVersion}
@@ -402,6 +413,7 @@ export class KbService {
     beforeBatch?: () => Promise<void>,
     signal?: AbortSignal,
     heartbeat?: (stage: string) => void,
+    workspaceId?: string,
   ): Promise<number[][]> {
     const vectors: number[][] = [];
     for (let i = 0; i < texts.length; i += EMBED_BATCH) {
@@ -409,7 +421,7 @@ export class KbService {
       heartbeat?.(`embedding:${i / EMBED_BATCH}`);
       signal?.throwIfAborted();
       const batch = texts.slice(i, i + EMBED_BATCH);
-      vectors.push(...(await this.embeddings.embed(batch, signal)));
+      vectors.push(...(await this.embeddings.embed(batch, signal, workspaceId)));
     }
     return vectors;
   }

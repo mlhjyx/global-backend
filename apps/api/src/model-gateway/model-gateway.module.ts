@@ -8,6 +8,11 @@ import { AiTraceSink } from './ai-trace.sink';
 import { PrismaService } from '../prisma/prisma.service';
 import { TOOL_BUDGET_STORE } from '../tools/budget-store';
 import { createWorkspaceBudgetStore } from '../execution-budget/legacy-execution-budget-mode';
+import {
+  createPrismaTenantDailyCostReader,
+  TENANT_DAILY_COST_BREAKER,
+  TenantDailyCostBreaker,
+} from './tenant-daily-cost-breaker';
 
 /**
  * Exposes the single ModelGateway. All vendors live behind the 中转站 (new-api);
@@ -23,6 +28,14 @@ import { createWorkspaceBudgetStore } from '../execution-budget/legacy-execution
     {
       provide: TOOL_BUDGET_STORE,
       useFactory: (prisma: PrismaService) => createWorkspaceBudgetStore(prisma),
+      inject: [PrismaService],
+    },
+    {
+      provide: TENANT_DAILY_COST_BREAKER,
+      useFactory: (prisma: PrismaService) =>
+        new TenantDailyCostBreaker({
+          reader: createPrismaTenantDailyCostReader(prisma),
+        }),
       inject: [PrismaService],
     },
     { provide: ModelGateway, useClass: RouterModelGateway },

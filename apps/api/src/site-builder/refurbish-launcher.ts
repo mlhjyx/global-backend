@@ -36,8 +36,23 @@ export interface RefurbishCancelResult {
   terminalStatus: 'cancelled' | 'completed' | 'failed';
 }
 
-export function refurbishWorkflowId(buildRunId: string): string {
-  return `site-refurbish-${buildRunId}`;
+import {
+  formatTenantWorkflowId,
+  isTenantOrLegacyWorkflowId,
+} from '../temporal/tenant-workflow-id';
+
+export function refurbishWorkflowId(buildRunId: string, workspaceId?: string): string {
+  return workspaceId
+    ? formatTenantWorkflowId(workspaceId, 'site-refurbish', buildRunId)
+    : `site-refurbish-${buildRunId}`;
+}
+
+export function isExpectedRefurbishWorkflowId(
+  workflowId: string,
+  buildRunId: string,
+  workspaceId: string,
+): boolean {
+  return isTenantOrLegacyWorkflowId(workflowId, workspaceId, 'site-refurbish', buildRunId);
 }
 
 export interface RefurbishLauncher {
@@ -48,6 +63,7 @@ export interface RefurbishLauncher {
   cancelRefurbish(
     buildRunId: string,
     workflowId?: string | null,
+    workspaceId?: string,
   ): Promise<RefurbishCancelResult>;
 }
 

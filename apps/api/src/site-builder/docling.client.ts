@@ -1,5 +1,19 @@
 import { Injectable } from '@nestjs/common';
 import { KbIngestError } from './kb-errors';
+import {
+  positiveIntEnv,
+  TenantConcurrencySemaphore,
+} from '../runtime/tenant-concurrency-semaphore';
+
+export type DoclingBackendMode = 'local' | 'managed_api';
+
+export function resolveDoclingBackendMode(
+  env: NodeJS.ProcessEnv = process.env,
+): DoclingBackendMode {
+  return env.DOCLING_BACKEND?.trim().toLowerCase() === 'managed_api'
+    ? 'managed_api'
+    : 'local';
+}
 
 const CONVERT_TIMEOUT_MS = 300_000; // 首次调用会下载布局模型，放宽
 
@@ -44,28 +58,111 @@ function requestSignal(external?: AbortSignal): AbortSignal {
  */
 @Injectable()
 export class DoclingClient {
-  private readonly baseUrl = (process.env.DOCLING_URL ?? 'http://localhost:5001').replace(
-    /\/$/,
-    '',
-  );
+  readonly backendMode: DoclingBackendMode = resolveDoclingBackendMode(process.env);
+  private readonly baseUrl = (
+    (this.backendMode === 'managed_api'
+      ? process.env.DOCLING_MANAGED_URL?.trim() || process.env.DOCLING_URL?.trim()
+      : process.env.DOCLING_URL?.trim()) || 'http://localhost:5001'
+  ).replace(/\/$/, '');
+  private readonly apiKey =
+    this.backendMode === 'managed_api'
+      ? process.env.DOCLING_API_KEY?.trim() || process.env.MODEL_GATEWAY_KEY?.trim() || ''
+      : process.env.DOCLING_API_KEY?.trim() || '';
+  private readonly semaphore = new TenantConcurrencySemaphore({
+    name: 'docling',
+    perTenantLimit: positiveIntEnv(process.env, 'DOCLING_MAX_CONCURRENT_PER_TENANT', 2, 16),
+    globalLimit: positiveIntEnv(process.env, 'DOCLING_MAX_CONCURRENT_GLOBAL', 6, 64),
+    acquireTimeoutMs: CONVERT_TIMEOUT_MS,
+  });
 
   async convertToMarkdown(
     filename: string,
     data: Buffer,
     signal?: AbortSignal,
+    workspaceId?: string,
   ): Promise<{ markdown: string }> {
-    let res: Response;
+    const run = async (): Promise<{ markdown: string }> => {
+      const headers: Record<string, string> = {
+        'content-type': 'application/json',
+        ...(this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {}),
+        ...(workspaceId?.trim() ? { 'X-Workspace-Id': workspaceId.trim() } : {}),
+      };
+      let res: Response;
+      try {
+        if (signal?.aborted) {
+          throw signal.reason instanceof Error ? signal.reason : new Error('Aborted');
+        }
+        res = await fetch(`${this.baseUrl}/v1/convert/source`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            options: { to_formats: ['md'] },
+            sources: [{ kind: 'file', base64_string: data.toString('base64'), filename }],
+          }),
+          signal: requestSignal(signal),
+        });
+      } catch (err) {
+        throw new KbIngestError(
+          'KB_DOCLING_UNAVAILABLE',
+          'retryable',
+          'parse',
+          `docling unavailable: ${err instanceof Error ? err.message : String(err)}`,
+          err instanceof Error ? { cause: err } : undefined,
+        );
+      }
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        let structured: unknown;
+        try {
+          structured = JSON.parse(body);
+        } catch {
+          structured = undefined;
+        }
+        const invalidInput = hasDocumentInputFailure(structured);
+        throw new KbIngestError(
+          invalidInput ? 'KB_DOCUMENT_INVALID' : 'KB_DOCLING_UNAVAILABLE',
+          invalidInput ? 'terminal' : 'retryable',
+          'parse',
+          `docling convert ${res.status}: ${body.slice(0, 300)}`,
+        );
+      }
+      let parsed: unknown;
+      try {
+        parsed = await res.json();
+      } catch (err) {
+        throw new KbIngestError(
+          'KB_DOCLING_UNAVAILABLE',
+          'retryable',
+          'parse',
+          'docling returned malformed JSON',
+          err instanceof Error ? { cause: err } : undefined,
+        );
+      }
+      if (!isRecord(parsed)) {
+        throw new KbIngestError(
+          'KB_DOCLING_UNAVAILABLE',
+          'retryable',
+          'parse',
+          'docling returned a non-object response',
+        );
+      }
+      const json = parsed as DoclingResponse;
+      const markdown = json.document?.md_content;
+      if (typeof markdown !== 'string' || markdown.length === 0) {
+        const invalidInput = hasDocumentInputFailure(parsed);
+        throw new KbIngestError(
+          invalidInput ? 'KB_DOCUMENT_INVALID' : 'KB_DOCLING_UNAVAILABLE',
+          invalidInput ? 'terminal' : 'retryable',
+          'parse',
+          `docling returned no markdown (status=${json.status ?? 'unknown'})`,
+        );
+      }
+      return { markdown };
+    };
     try {
-      res = await fetch(`${this.baseUrl}/v1/convert/source`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          options: { to_formats: ['md'] },
-          sources: [{ kind: 'file', base64_string: data.toString('base64'), filename }],
-        }),
-        signal: requestSignal(signal),
-      });
+      return await this.semaphore.withTenantSlot(workspaceId, run, signal);
     } catch (err) {
+      if (err instanceof KbIngestError) throw err;
       throw new KbIngestError(
         'KB_DOCLING_UNAVAILABLE',
         'retryable',
@@ -74,55 +171,5 @@ export class DoclingClient {
         err instanceof Error ? { cause: err } : undefined,
       );
     }
-    if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      let structured: unknown;
-      try {
-        structured = JSON.parse(body);
-      } catch {
-        structured = undefined;
-      }
-      // 415/422 也可能是网关或 FastAPI 请求 schema/部署契约错误，状态码本身
-      // 不能给用户文档定罪；只认明确绑定 user_input/document 的格式损坏证据。
-      const invalidInput = hasDocumentInputFailure(structured);
-      throw new KbIngestError(
-        invalidInput ? 'KB_DOCUMENT_INVALID' : 'KB_DOCLING_UNAVAILABLE',
-        invalidInput ? 'terminal' : 'retryable',
-        'parse',
-        `docling convert ${res.status}: ${body.slice(0, 300)}`,
-      );
-    }
-    let parsed: unknown;
-    try {
-      parsed = await res.json();
-    } catch (err) {
-      throw new KbIngestError(
-        'KB_DOCLING_UNAVAILABLE',
-        'retryable',
-        'parse',
-        'docling returned malformed JSON',
-        err instanceof Error ? { cause: err } : undefined,
-      );
-    }
-    if (!isRecord(parsed)) {
-      throw new KbIngestError(
-        'KB_DOCLING_UNAVAILABLE',
-        'retryable',
-        'parse',
-        'docling returned a non-object response',
-      );
-    }
-    const json = parsed as DoclingResponse;
-    const markdown = json.document?.md_content;
-    if (typeof markdown !== 'string' || markdown.length === 0) {
-      const invalidInput = hasDocumentInputFailure(parsed);
-      throw new KbIngestError(
-        invalidInput ? 'KB_DOCUMENT_INVALID' : 'KB_DOCLING_UNAVAILABLE',
-        invalidInput ? 'terminal' : 'retryable',
-        'parse',
-        `docling returned no markdown (status=${json.status ?? 'unknown'})`,
-      );
-    }
-    return { markdown };
   }
 }

@@ -19,6 +19,27 @@ import {
   TechnicalTaskLimitExceededError,
   type LegacyExecutionBudgetMode,
 } from "../execution-budget/legacy-execution-budget-mode";
+import type { TenantDailyCostBreaker } from "./tenant-daily-cost-breaker";
+
+export async function assertTenantDailyCostAllowed(
+  breaker: TenantDailyCostBreaker | undefined,
+  ctx: AiContext,
+  task: string,
+): Promise<void> {
+  if (!breaker) return;
+  await breaker.assertAllowed(ctx.workspaceId, task);
+}
+
+export function recordTenantDailyCostObserved(
+  breaker: TenantDailyCostBreaker | undefined,
+  ctx: AiContext,
+  result: { readonly usage?: { readonly costUsd?: number } } | undefined,
+): void {
+  const costUsd = result?.usage?.costUsd;
+  if (breaker && typeof costUsd === "number" && Number.isFinite(costUsd) && costUsd > 0) {
+    breaker.recordObservedSpend(ctx.workspaceId, costUsd);
+  }
+}
 
 export function buildCachedStructuredOperationKey(
   input: GenerateStructuredInput,
@@ -119,6 +140,7 @@ export async function executeWorkspaceBypassModelCall<T>(params: {
     signal?: AbortSignal,
   ) => Promise<ModelResult<T>>;
   readonly trace: AiTraceSink | undefined;
+  readonly dailyCostBreaker?: TenantDailyCostBreaker;
   readonly counts: Map<string, number>;
   readonly maxCalls: number | undefined;
   readonly assertExternalActionAuthorized: (ctx: AiContext) => Promise<void>;
@@ -206,6 +228,7 @@ export async function executeWorkspaceBypassModelCall<T>(params: {
       runId: ctx.runId,
       modelPolicy: ctx.modelPolicy,
     });
+    recordTenantDailyCostObserved(params.dailyCostBreaker, ctx, result);
     return result;
   } catch (err) {
     const failedUsage =

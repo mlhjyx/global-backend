@@ -33,6 +33,7 @@ import {
 } from "../model-identity";
 import { isReviewedModelSubstitution } from "../model-identity-substitutes";
 import { NEW_API_REQUEST_BOUND_RESOLVER_ID } from "../new-api-request-bound-settlement";
+import { buildTenantGatewayHeaders } from "../tenant-gateway-routing";
 import { boundedModelUsage } from "../model-usage-boundary";
 import {
   createProviderTransportObservation,
@@ -74,6 +75,7 @@ export interface OpenAICompatConfig {
   id: string; // 'deepseek' | 'openai' | 'gemini' | 'volcengine'
   baseUrl: string;
   apiKey: string;
+  tenantApiKeys?: ReadonlyMap<string, string>;
   requestTimeoutMs?: number;
   model: string;
   embedModel?: string;
@@ -463,16 +465,16 @@ export class OpenAICompatibleProvider implements ModelProvider {
             { callCount: 0, provider: this.id, model: snapshot.model },
           );
         }
-        return this.reviewVisionGoogleGenerateContent<T>(snapshot);
+        return this.reviewVisionGoogleGenerateContent<T>(snapshot, ctx);
     }
   }
 
-  async embed(input: EmbedInput): Promise<ModelResult<number[][]>> {
+  async embed(input: EmbedInput, ctx?: AiContext): Promise<ModelResult<number[][]>> {
     if (!this.cfg.embedModel)
       throw new Error(`${this.id}: embeddings not configured`);
     const res = await fetch(`${this.cfg.baseUrl}/embeddings`, {
       method: "POST",
-      headers: this.headers(),
+      headers: this.headers(ctx),
       signal: this.requestSignal(input.signal),
       body: JSON.stringify({ model: this.cfg.embedModel, input: input.input }),
     });
@@ -559,7 +561,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       `${this.cfg.baseUrl}/chat/completions`,
       {
         method: "POST",
-        headers: this.headers(),
+        headers: this.headers(ctx),
         signal: this.requestSignal(input.signal),
         body: JSON.stringify({
           model,
@@ -670,11 +672,18 @@ export class OpenAICompatibleProvider implements ModelProvider {
     };
   }
 
-  private headers(): Record<string, string> {
-    return {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${this.cfg.apiKey}`,
-    };
+  private headers(
+    ctx?: AiContext,
+    authHeader: "bearer" | "x-api-key" = "bearer",
+    extra?: Readonly<Record<string, string>>,
+  ): Record<string, string> {
+    return buildTenantGatewayHeaders({
+      defaultApiKey: this.cfg.apiKey,
+      tenantKeys: this.cfg.tenantApiKeys,
+      workspaceId: ctx?.workspaceId,
+      authHeader,
+      extra,
+    });
   }
 
   private trustedReportedModel(
@@ -1244,7 +1253,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       `${this.cfg.baseUrl}/chat/completions`,
       {
         method: "POST",
-        headers: this.headers(),
+        headers: this.headers(ctx),
         signal: this.requestSignal(opts.signal), // 模型调用必须有界（PRD 9.12）
         body: JSON.stringify({
           model: opts.model,
@@ -1410,7 +1419,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       `${this.cfg.baseUrl}/chat/completions`,
       {
         method: "POST",
-        headers: this.headers(),
+        headers: this.headers(ctx),
         signal: this.requestSignal(input.signal),
         body: JSON.stringify({
           model: input.model,
@@ -1528,7 +1537,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       `${this.cfg.baseUrl}/responses`,
       {
         method: "POST",
-        headers: this.headers(),
+        headers: this.headers(ctx),
         signal: this.requestSignal(input.signal),
         body: JSON.stringify({
           model: input.model,
@@ -1679,11 +1688,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       `${this.cfg.baseUrl}/messages`,
       {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": this.cfg.apiKey,
-          "anthropic-version": "2023-06-01",
-        },
+        headers: this.headers(ctx, "x-api-key", { "anthropic-version": "2023-06-01" }),
         signal: this.requestSignal(input.signal),
         body: JSON.stringify({
           model: input.model,
@@ -1786,6 +1791,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
 
   private async reviewVisionGoogleGenerateContent<T>(
     input: ReviewVisionInput,
+    ctx?: AiContext,
   ): Promise<ModelResult<T>> {
     const parts: Array<
       | { text: string }
@@ -1816,7 +1822,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       `${gatewayRoot}/v1beta/models/${encodeURIComponent(input.model)}:generateContent`,
       {
         method: "POST",
-        headers: this.headers(),
+        headers: this.headers(ctx),
         signal: this.requestSignal(input.signal),
         body: JSON.stringify({
           ...(input.system
@@ -1964,7 +1970,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       `${this.cfg.baseUrl}/responses`,
       {
         method: "POST",
-        headers: this.headers(),
+        headers: this.headers(ctx),
         signal: this.requestSignal(opts.signal),
         body: JSON.stringify({
           model: opts.model,
@@ -2088,11 +2094,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       `${this.cfg.baseUrl}/messages`,
       {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": this.cfg.apiKey,
-          "anthropic-version": "2023-06-01",
-        },
+        headers: this.headers(ctx, "x-api-key", { "anthropic-version": "2023-06-01" }),
         signal: this.requestSignal(opts.signal),
         body: JSON.stringify({
           model: opts.model,

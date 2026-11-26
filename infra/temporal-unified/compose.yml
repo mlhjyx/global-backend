@@ -1,0 +1,43 @@
+# 统一单 PostgreSQL 16 Temporal 编排（M10-PR2：消除 SQLite 与第二套 Temporal 实例）
+#
+# 用途：将客户与平台工作流收敛到单一 PostgreSQL 16 支撑的 Temporal Server（使用独立库
+# `temporal` 与 `temporal_visibility`，通过不同 namespace 与 task queue 隔离客户/平台工作流），
+# 替代历史开发态 SQLite Temporal 与重复的双 Temporal 实例，节省 400–600MB 宿主机内存。
+#
+# 启用方式（需先在目标 PG16 实例中创建 `temporal` 与 `temporal_visibility` 数据库）：
+#   TEMPORAL_POSTGRES_PASSWORD=<secret> docker compose -f infra/temporal-unified/compose.yml up -d
+#
+# 配套后端环境变量：
+#   TEMPORAL_CUSTOMER_BACKEND_MODE=postgres_platform
+#   TEMPORAL_CUSTOMER_ADDRESS=temporal-unified:7233
+#   TEMPORAL_CUSTOMER_NAMESPACE=customer
+#   TEMPORAL_DUAL_QUEUE_MODE=split
+#   TEMPORAL_PAYLOAD_CODEC_MODE=optional # 灰度完成且全部存量运行结束后切 enforce
+
+services:
+  temporal-unified:
+    image: temporalio/auto-setup:1.25.2
+    restart: unless-stopped
+    environment:
+      DB: postgres12
+      DB_PORT: "${TEMPORAL_POSTGRES_PORT:-5432}"
+      POSTGRES_USER: "${TEMPORAL_POSTGRES_USER:-temporal}"
+      POSTGRES_PWD: "${TEMPORAL_POSTGRES_PASSWORD:?TEMPORAL_POSTGRES_PASSWORD is required}"
+      POSTGRES_SEEDS: "${TEMPORAL_POSTGRES_HOST:-postgres}"
+      DBNAME: "${TEMPORAL_DB_NAME:-temporal}"
+      VISIBILITY_DBNAME: "${TEMPORAL_VISIBILITY_DB_NAME:-temporal_visibility}"
+      DEFAULT_NAMESPACE: "${TEMPORAL_CUSTOMER_NAMESPACE:-default}"
+      DEFAULT_NAMESPACE_RETENTION: "${TEMPORAL_RETENTION:-7d}"
+      NUM_HISTORY_SHARDS: "${TEMPORAL_HISTORY_SHARDS:-4}"
+      DYNAMIC_CONFIG_FILE_PATH: ""
+    ports:
+      - "127.0.0.1:${TEMPORAL_UNIFIED_PORT:-7233}:7233"
+    healthcheck:
+      test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "127.0.0.1:7233"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 512M

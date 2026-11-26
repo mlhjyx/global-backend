@@ -589,7 +589,7 @@ export class ToolBroker implements ExecutionBroker {
     }
     let release: (() => void | Promise<void>) | undefined;
     try {
-      release = await this.limiter.acquire(toolId, now());
+      release = await this.limiter.acquire(toolId, now(), ctx.workspaceId);
     } catch (error) {
       await this.releasePreWireBudget(paidScope, reservation);
       throw error;

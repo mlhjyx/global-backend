@@ -239,7 +239,7 @@ describe("relay routing with the development fast lane", () => {
       DISCOVERY_WORKFLOW,
       {
         taskQueue: LANE_QUEUE,
-        workflowId: "discovery-run-1",
+        workflowId: `ws:${LANE_WS}:discovery:run-1`,
         workflowIdReusePolicy: WorkflowIdReusePolicy.REJECT_DUPLICATE,
         workflowExecutionTimeout: "215 minutes",
         args: [
@@ -264,8 +264,8 @@ describe("relay routing with the development fast lane", () => {
 
   it("routes understanding and qualify of the lane workspace to the lane with 30-minute executions", async () => {
     for (const [eventType, workflowType, workflowId] of [
-      ["CompanyProfileCreated", UNDERSTANDING_WORKFLOW, "understanding-co-1"],
-      ["QualifyRequested", QUALIFY_WORKFLOW, "qualify-co-1"],
+      ["CompanyProfileCreated", UNDERSTANDING_WORKFLOW, `ws:${LANE_WS}:understanding:co-1`],
+      ["QualifyRequested", QUALIFY_WORKFLOW, `ws:${LANE_WS}:qualify:co-1`],
     ] as const) {
       // Arrange
       const ev = command(eventType, LANE_WS, 1n, "co-1");

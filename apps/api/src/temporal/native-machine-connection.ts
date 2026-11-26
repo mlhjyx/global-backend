@@ -43,9 +43,10 @@ export function bindNativeMachineCredential(
 
 export async function connectNativeMachine(
   client: MachineTokenClient,
+  env: NodeJS.ProcessEnv = process.env,
 ): Promise<NativeConnection> {
   return NativeConnection.connect({
-    ...(await temporalTlsConfiguration()),
+    ...(await temporalTlsConfiguration(env)),
     apiKey: client.currentToken(),
   });
 }

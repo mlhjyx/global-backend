@@ -16,7 +16,7 @@ const INPUT = {
   siteId: '22222222-2222-4222-8222-222222222222',
   buildRunId: '33333333-3333-4333-8333-333333333333',
 };
-const WORKFLOW_ID = refurbishWorkflowId(INPUT.buildRunId);
+const WORKFLOW_ID = refurbishWorkflowId(INPUT.buildRunId, INPUT.workspaceId);
 
 function makeLauncher() {
   const start = vi.fn();
@@ -87,6 +87,28 @@ describe('TemporalRefurbishLauncher ACK contract', () => {
     expect(getHandle).toHaveBeenCalledWith(WORKFLOW_ID);
   });
 
+  it('recover falls back to legacy unprefixed workflowId when prefixed execution is not found', async () => {
+    const start = vi.fn();
+    const describePrefixed = vi.fn().mockRejectedValue(new Error('Workflow execution not found'));
+    const describeLegacy = vi.fn().mockResolvedValue({
+      runId: 'legacy-run',
+      raw: { workflowExecutionInfo: { firstRunId: 'legacy-first-run' } },
+    });
+    const getHandle = vi.fn((wfId: string) => ({
+      describe: wfId.startsWith('ws:') ? describePrefixed : describeLegacy,
+    }));
+    const launcher = new TemporalRefurbishLauncher({
+      client: { workflow: { start, getHandle } },
+    } as unknown as TemporalClient);
+
+    await expect(launcher.recoverRefurbish(INPUT)).resolves.toEqual({
+      workflowId: `site-refurbish-${INPUT.buildRunId}`,
+      firstExecutionRunId: 'legacy-first-run',
+    });
+    expect(getHandle).toHaveBeenNthCalledWith(1, WORKFLOW_ID);
+    expect(getHandle).toHaveBeenNthCalledWith(2, `site-refurbish-${INPUT.buildRunId}`);
+  });
+
   it('fails closed on empty execution identity and preserves ordinary start errors', async () => {
     const empty = makeLauncher();
     empty.start.mockResolvedValue({ firstExecutionRunId: '' });
@@ -109,6 +131,34 @@ describe('TemporalRefurbishLauncher ACK contract', () => {
     expect(getHandle).toHaveBeenCalledWith('persisted-workflow-id');
     expect(cancel).toHaveBeenCalledOnce();
     expect(result).toHaveBeenCalledOnce();
+  });
+
+  it('cancel prefers tenant-prefixed workflowId when workflowId is null and falls back to legacy on NotFound', async () => {
+    const prefixedHit = makeLauncher();
+    await expect(
+      prefixedHit.launcher.cancelRefurbish(INPUT.buildRunId, null, INPUT.workspaceId),
+    ).resolves.toEqual({ terminalStatus: 'completed' });
+    expect(prefixedHit.getHandle).toHaveBeenCalledWith(WORKFLOW_ID);
+
+    const cancelLegacy = vi.fn().mockResolvedValue(undefined);
+    const resultLegacy = vi.fn().mockResolvedValue(undefined);
+    const getHandle = vi.fn((wfId: string) =>
+      wfId.startsWith('ws:')
+        ? {
+            cancel: vi.fn().mockRejectedValue(new Error('Workflow execution not found')),
+            result: vi.fn().mockRejectedValue(new Error('Workflow execution not found')),
+          }
+        : { cancel: cancelLegacy, result: resultLegacy },
+    );
+    const fallbackLauncher = new TemporalRefurbishLauncher({
+      client: { workflow: { start: vi.fn(), getHandle } },
+    } as unknown as TemporalClient);
+    await expect(
+      fallbackLauncher.cancelRefurbish(INPUT.buildRunId, null, INPUT.workspaceId),
+    ).resolves.toEqual({ terminalStatus: 'completed' });
+    expect(getHandle).toHaveBeenNthCalledWith(1, WORKFLOW_ID);
+    expect(getHandle).toHaveBeenNthCalledWith(2, `site-refurbish-${INPUT.buildRunId}`);
+    expect(cancelLegacy).toHaveBeenCalledOnce();
   });
 
   it('waits for the closed chain and classifies cancellation, failure, and transport errors', async () => {

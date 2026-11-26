@@ -188,7 +188,7 @@ export const crawl4aiRenderTool: Tool<{ url: string }, CrawlHtmlResult & { robot
     }
     let r: CrawlHtmlResult;
     try {
-      r = await crawlHtml(input.url, () => assertToolExternalActionAuthorized(ctx), undefined, ctx.beforePhysicalWire, sourcePhysicalWire(ctx, "crawl4ai.render.dispatch"));
+      r = await crawlHtml(input.url, () => assertToolExternalActionAuthorized(ctx), undefined, ctx.beforePhysicalWire, sourcePhysicalWire(ctx, "crawl4ai.render.dispatch"), ctx.workspaceId);
     } catch (error) {
       if (isWorkspaceRenderTimeout(error, ctx)) return { data: { url: input.url, html: CRAWL4AI_RENDER_EMPTY_HTML, headers: {} }, costCents: 0, degraded: true };
       throw error;

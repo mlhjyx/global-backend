@@ -15,10 +15,9 @@ import type { Readable } from 'node:stream';
 import type { RequestContext } from '../auth/request-context';
 import { PrismaService } from '../prisma/prisma.service';
 import { TemporalClient } from '../temporal/temporal.client';
-import {
-  DATA_EXPORT_WORKFLOW,
-  UNDERSTANDING_TASK_QUEUE,
-} from '../temporal/understanding.constants';
+import { DATA_EXPORT_WORKFLOW } from '../temporal/understanding.constants';
+import { formatTenantWorkflowId } from '../temporal/tenant-workflow-id';
+import { resolveCustomerTaskQueue } from '../temporal/tenant-task-queues';
 import {
   DataExportStorage,
   isDataExportS3NotFoundError,
@@ -75,8 +74,10 @@ function mapJob(row: {
   };
 }
 
-export function dataExportWorkflowId(exportId: string): string {
-  return `data-export-${exportId}`;
+export function dataExportWorkflowId(exportId: string, workspaceId?: string): string {
+  return workspaceId
+    ? formatTenantWorkflowId(workspaceId, 'data-export', exportId)
+    : `data-export-${exportId}`;
 }
 
 @Injectable()
@@ -154,8 +155,8 @@ export class DataExportsService {
 
     try {
       await this.temporal.client.workflow.start(DATA_EXPORT_WORKFLOW, {
-        taskQueue: UNDERSTANDING_TASK_QUEUE,
-        workflowId: dataExportWorkflowId(job.id),
+        taskQueue: resolveCustomerTaskQueue('batch'),
+        workflowId: dataExportWorkflowId(job.id, ctx.workspaceId),
         args: [{ workspaceId: ctx.workspaceId, exportId: job.id }],
       });
     } catch (error) {

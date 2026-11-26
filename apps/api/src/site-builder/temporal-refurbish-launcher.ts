@@ -7,7 +7,11 @@ import {
   WorkflowIdReusePolicy,
 } from '@temporalio/client';
 import { TemporalClient } from '../temporal/temporal.client';
-import { UNDERSTANDING_TASK_QUEUE } from '../temporal/understanding.constants';
+import {
+  formatTenantWorkflowId,
+  isTemporalNotFoundError,
+} from '../temporal/tenant-workflow-id';
+import { resolveCustomerTaskQueue } from '../temporal/tenant-task-queues';
 import {
   KbIngestLauncher,
   KbIngestLaunchInput,
@@ -81,12 +85,12 @@ export class TemporalRefurbishLauncher implements RefurbishLauncher {
   async launchRefurbish(
     input: RefurbishLaunchInput,
   ): Promise<RefurbishLaunchResult> {
-    const workflowId = refurbishWorkflowId(input.buildRunId);
+    const workflowId = refurbishWorkflowId(input.buildRunId, input.workspaceId);
     try {
       const handle = await this.temporal.client.workflow.start(
         'refurbishWorkflow',
         {
-          taskQueue: UNDERSTANDING_TASK_QUEUE,
+          taskQueue: resolveCustomerTaskQueue('interactive'),
           workflowId,
           args: [input],
           workflowIdReusePolicy: WorkflowIdReusePolicy.REJECT_DUPLICATE,
@@ -103,30 +107,56 @@ export class TemporalRefurbishLauncher implements RefurbishLauncher {
   async recoverRefurbish(
     input: RefurbishLaunchInput,
   ): Promise<RefurbishLaunchResult> {
-    const workflowId = refurbishWorkflowId(input.buildRunId);
-    const description = await this.temporal.client.workflow
-      .getHandle(workflowId)
-      .describe();
-    return launchResult(
-      workflowId,
-      description.raw.workflowExecutionInfo?.firstRunId || description.runId,
-    );
+    const prefixed = refurbishWorkflowId(input.buildRunId, input.workspaceId);
+    const legacy = refurbishWorkflowId(input.buildRunId);
+    try {
+      const description = await this.temporal.client.workflow
+        .getHandle(prefixed)
+        .describe();
+      return launchResult(
+        prefixed,
+        description.raw.workflowExecutionInfo?.firstRunId || description.runId,
+      );
+    } catch (error) {
+      if (!isTemporalNotFoundError(error)) throw error;
+      const description = await this.temporal.client.workflow
+        .getHandle(legacy)
+        .describe();
+      return launchResult(
+        legacy,
+        description.raw.workflowExecutionInfo?.firstRunId || description.runId,
+      );
+    }
   }
 
   async cancelRefurbish(
     buildRunId: string,
     workflowId?: string | null,
+    workspaceId?: string,
   ): Promise<RefurbishCancelResult> {
-    const handle = this.temporal.client.workflow.getHandle(
-      workflowId ?? refurbishWorkflowId(buildRunId),
-    );
-    try {
-      await handle.cancel();
-    } catch {
-      // The execution may have closed between the DB read and cancel RPC. result() distinguishes
-      // a truly closed chain from transport uncertainty; the latter times out and remains 502.
+    const cancelByWorkflowId = async (targetWorkflowId: string): Promise<RefurbishCancelResult> => {
+      const handle = this.temporal.client.workflow.getHandle(targetWorkflowId);
+      try {
+        await handle.cancel();
+      } catch {
+        // The execution may have closed between the DB read and cancel RPC. result() distinguishes
+        // a truly closed chain from transport uncertainty; the latter times out and remains 502.
+      }
+      return closedStatus(handle.result());
+    };
+    if (workflowId) {
+      return cancelByWorkflowId(workflowId);
     }
-    return closedStatus(handle.result());
+    const legacy = refurbishWorkflowId(buildRunId);
+    if (!workspaceId) {
+      return cancelByWorkflowId(legacy);
+    }
+    try {
+      return await cancelByWorkflowId(refurbishWorkflowId(buildRunId, workspaceId));
+    } catch (error) {
+      if (!isTemporalNotFoundError(error)) throw error;
+      return cancelByWorkflowId(legacy);
+    }
   }
 }
 
@@ -140,8 +170,8 @@ export class TemporalKbIngestLauncher implements KbIngestLauncher {
 
   async launchKbIngest(input: KbIngestLaunchInput): Promise<void> {
     await this.temporal.client.workflow.start('kbIngestWorkflow', {
-      taskQueue: UNDERSTANDING_TASK_QUEUE,
-      workflowId: `site-kb-${input.assetId}`,
+      taskQueue: resolveCustomerTaskQueue('interactive'),
+      workflowId: formatTenantWorkflowId(input.workspaceId, 'site-kb', input.assetId),
       args: [input],
     });
   }

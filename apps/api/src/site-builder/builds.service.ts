@@ -12,9 +12,9 @@ import { PrismaService } from "../prisma/prisma.service";
 import { RequestContext } from "../auth/request-context";
 import {
   BuildScopeInput,
+  isExpectedRefurbishWorkflowId,
   REFURBISH_LAUNCHER,
   RefurbishLauncher,
-  refurbishWorkflowId,
 } from "./refurbish-launcher";
 import {
   buildRequestHash,
@@ -484,10 +484,9 @@ export class BuildsService {
       },
     );
 
-    const expectedWorkflowId = refurbishWorkflowId(run.id);
     if (
       run.temporalWorkflowId &&
-      run.temporalWorkflowId !== expectedWorkflowId
+      !isExpectedRefurbishWorkflowId(run.temporalWorkflowId, run.id, ctx.workspaceId)
     ) {
       throw buildHttpError(
         HttpStatus.BAD_GATEWAY,
@@ -535,7 +534,7 @@ export class BuildsService {
       void startError;
     }
 
-    if (launch.workflowId !== expectedWorkflowId) {
+    if (!isExpectedRefurbishWorkflowId(launch.workflowId, run.id, ctx.workspaceId)) {
       this.log.error(
         `refurbish launcher returned an invalid workflow identity for run ${run.id}`,
       );
@@ -632,10 +631,9 @@ export class BuildsService {
             { status: run.status },
           );
         }
-        const expectedWorkflowId = refurbishWorkflowId(run.id);
         if (
           run.temporalWorkflowId &&
-          run.temporalWorkflowId !== expectedWorkflowId
+          !isExpectedRefurbishWorkflowId(run.temporalWorkflowId, run.id, ctx.workspaceId)
         ) {
           throw buildHttpError(
             HttpStatus.CONFLICT,
@@ -659,6 +657,7 @@ export class BuildsService {
       cancellation = await this.launcher.cancelRefurbish(
         buildId,
         cancellable.workflowId,
+        ctx.workspaceId,
       );
     } catch {
       const terminal = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
