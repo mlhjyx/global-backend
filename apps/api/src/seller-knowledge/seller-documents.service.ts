@@ -53,6 +53,8 @@ const QUOTA = Object.freeze({
   bytesPerWorkspace: envInt('SELLER_DOCUMENTS_MAX_BYTES_PER_WORKSPACE', 2 * 1024 * 1024 * 1024),
 });
 
+export const SELLER_DOCUMENT_QUOTA = QUOTA;
+
 function envInt(name: string, fallback: number): number {
   const raw = process.env[name];
   const parsed = raw === undefined ? Number.NaN : Number(raw);

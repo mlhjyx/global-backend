@@ -83,6 +83,8 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
     '理解预览（注册即建档）：返回理解状态（not_started/queued/running/ready/failed）、失败阶段标签、已分析页数，以及行业/产品/市场候选与受控行业词表。只读，复用一次真实 understanding run 的落库结果：不新增模型调用、不出网、不消费预算。行业候选由 profile.industry 词面归一到 canonical_taxonomy(kind=industry)；市场候选只含官网文本明确提到的国家并附原句。',
   'POST /api/v1/companies/{companyId}/onboarding-facts':
     '注册引导完成：把客户在理解预览里勾选的卖家事实（名称/行业/目标市场/产品/业务邮箱）写回同一档案，并把事实转成 NEEDS_REVIEW Claim 草稿。industryCode 必须是受控行业词表节点并回填 industry 标签；products 落 Offering(source=onboarding)。零模型调用、不出网、不消费 Grant。只允许 DRAFT/REVIEW；ENRICHING 返回 409 ONBOARDING_FACTS_NOT_ALLOWED。需要 acquisition:write。',
+  'POST /api/v1/companies/{companyId}/understanding/recompute':
+    '零成本重算企业理解草稿：读取档案当前行业/目标市场/已选产品与 ready 且未删除的卖家资料（支持可选 documentIds 过滤与 force=true 强制重扫），确定性生成 NEEDS_REVIEW Claim 草稿并写回 seller_document.facts_extracted_at；不触发网页重抓、不消费 Budget Grant，且绝不降级 ACTIVE 状态（ENRICHING 期间返回 409 UNDERSTANDING_IN_PROGRESS）。需要 acquisition:write。',
   'PATCH /api/v1/companies/{companyId}':
     '编辑 DRAFT 档案的卖家自查事实（名称/官网/行业/目标市场/业务邮箱）。补填官网后，调用方需另取 quote 与 Grant 调 retry 端点启动理解；本接口不消费 Grant。非 DRAFT 档案返回 409 COMPANY_NOT_EDITABLE。',
   'DELETE /api/v1/companies/{companyId}':
@@ -356,6 +358,12 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
     '复核队列统计：按状态/原因/优先级的分布与近 N 天 overturn rate（人工结论与原判定不一致的比例），用于 SLA 与质量报表。需要 acquisition:review。',
   'GET /api/v1/judgments/{id}':
     '单条判定明细：verdict、逐 criterion 的分数/证据/理由、模型与失败码；跨租户不可见（RLS）。需要 acquisition:read。',
+  // ── Workspace ─────────────────────────────────────────────────────────────
+  'PATCH /api/v1/workspace':
+    '同步当前工作空间名称：trim 后长度须为 1–128（空串/超长返回 400 VALIDATION_ERROR），在 withWorkspace(RLS) 内执行幂等 upsert（支持尚未建档的懒创建空间），返回 200 { data: WorkspaceDto }。需要 acquisition:write。',
+  'GET /api/v1/workspace/usage-summary':
+    '只读查询当前工作空间的实体数量与存储用量全景：单次 withWorkspace(RLS) 事务内聚合 company_profile（未删）、seller_document（未删及配额上限）、icp_definition、discovery_run、canonical_company、canonical_contact、asset/asset_variant、site_release（未删），并经只读 SECURITY DEFINER RPC 汇总 generic_operation_artifact 计数与字节数。需要 acquisition:read。',
+
   // ── Agents（AI 底座 · M2 步 9b）───────────────────────────────────────────
   'GET /api/v1/ops-agents':
     '列出 agent 注册表：角色名、角色提示词版本、技能子集、模型与 loop 策略、平台启停状态；仅运营身份（ops:read）可读，租户调用返回 403。',

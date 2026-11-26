@@ -163,6 +163,7 @@ function buildOpenApi(app: Parameters<typeof SwaggerModule.createDocument>[0]) {
     .addTag('ExecutionBudget', '平台内部执行预算包络（服务间调用，普通前端不调用）')
     .addTag('Campaign', 'Campaign 控制面内部入口（服务间调用，普通前端不调用）')
     .addTag('PlatformAuthority', '平台权威通道（服务间调用，普通前端不调用）')
+    .addTag('Workspace', '工作空间同步与存储/实体用量全景')
     .addTag('System', '健康探针与身份')
     .addBearerAuth()
     .addBearerAuth(
@@ -200,7 +201,7 @@ function buildOpenApi(app: Parameters<typeof SwaggerModule.createDocument>[0]) {
       { name: '运营与合规', tags: ['Reports', 'Metrics', 'Events', 'Compliance', 'Skills', 'Packs', 'Agents'] },
       { name: '建站', tags: ['SiteBuilder'] },
       { name: '平台间通道', tags: ['ExecutionBudget', 'PlatformAuthority', 'Campaign'] },
-      { name: '系统', tags: ['System'] },
+      { name: '系统', tags: ['Workspace', 'System'] },
     ],
   });
   const buildStatus = document.components?.schemas?.BuildStatusResponseDto;

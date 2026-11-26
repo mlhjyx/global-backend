@@ -12,7 +12,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiHeader, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiHeader, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from '../auth/auth.guard';
 import { Ctx } from '../auth/ctx.decorator';
 import { RequireScopes } from '../auth/require-scopes.decorator';
@@ -24,10 +24,15 @@ import { CompanyService } from './company.service';
 import { WebsiteCandidatesService } from './website-candidates';
 import { UnderstandingPreviewService } from './understanding-preview.service';
 import { OnboardingFactsService } from './onboarding-facts.service';
+import { CompanyUnderstandingRecomputeService } from './company-understanding-recompute.service';
 import { CreateCompanyDto } from './dto/create-company.dto';
 import { UpdateCompanyDto } from './dto/update-company.dto';
 import { RetryUnderstandingDto } from './dto/retry-understanding.dto';
 import { OnboardingFactsDto } from './dto/onboarding-facts.dto';
+import {
+  RecomputeUnderstandingDto,
+  RecomputeUnderstandingResponseDto,
+} from './dto/recompute-understanding.dto';
 import { CompanyDto, OfferingDto } from './dto/company.dto';
 import {
   ApiExecutionBudgetGrant,
@@ -46,6 +51,7 @@ export class CompanyController {
     private readonly websiteCandidates: WebsiteCandidatesService,
     private readonly understandingPreview: UnderstandingPreviewService,
     private readonly onboardingFacts: OnboardingFactsService,
+    private readonly understandingRecompute: CompanyUnderstandingRecomputeService,
   ) {}
 
   @Post()
@@ -112,6 +118,24 @@ export class CompanyController {
       this.companies.retryUnderstanding(ctx, companyId, dto.attemptId, compactJws),
     );
     return envelope(CompanyDto.from(company));
+  }
+
+  @Post(':companyId/understanding/recompute')
+  @RequireScopes('acquisition:write')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: '重算企业理解草稿（扫描 ready 资料库与当前档案事实，不降级 ACTIVE 状态）',
+  })
+  @ApiBody({ type: RecomputeUnderstandingDto, required: false })
+  @ApiEnvelope(RecomputeUnderstandingResponseDto)
+  async recomputeUnderstanding(
+    @Ctx() ctx: RequestContext,
+    @Param('companyId', ParseUUIDPipe) companyId: string,
+    @Body() dto?: RecomputeUnderstandingDto,
+  ): Promise<Enveloped<RecomputeUnderstandingResponseDto>> {
+    return envelope(
+      await this.understandingRecompute.recompute(ctx, companyId, dto ?? {}),
+    );
   }
 
   @Get(':companyId')

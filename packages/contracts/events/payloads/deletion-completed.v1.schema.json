@@ -43,6 +43,11 @@
       "minimum": 0,
       "description": "Rows erased from the patent-inventor cache for this subject; optional for historical v1 payloads"
     },
+    "erased_contact_refs": {
+      "type": "array",
+      "items": { "type": "string", "format": "uuid" },
+      "description": "当 subject_type='company' 时随该公司一并擦除的 canonical_contact.id 引用列表（可选，兼容历史 v1 payload；绝不嵌人名/邮箱）"
+    },
     "rule_version": { "type": "string" },
     "erased_at": { "type": "string", "format": "date-time" }
   }

@@ -377,6 +377,12 @@ export function matchesDeletionCompletedPayload(ev: PayloadEvent): boolean {
           Number.isSafeInteger(payload[key]) &&
           Number(payload[key]) >= 0,
       ) &&
+      (payload.erased_contact_refs === undefined ||
+        (payload.subject_type === "company" &&
+          Array.isArray(payload.erased_contact_refs) &&
+          payload.erased_contact_refs.every(
+            (ref) => typeof ref === "string" && UUID.test(ref),
+          ))) &&
       typeof payload.rule_version === "string" &&
       typeof payload.erased_at === "string",
   );

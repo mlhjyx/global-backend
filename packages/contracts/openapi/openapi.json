@@ -6124,6 +6124,64 @@
         ]
       }
     },
+    "/api/v1/companies/{companyId}/understanding/recompute": {
+      "post": {
+        "operationId": "CompanyController_recomputeUnderstanding_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecomputeUnderstandingDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RecomputeUnderstandingResponseDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "重算企业理解草稿（扫描 ready 资料库与当前档案事实，不降级 ACTIVE 状态）",
+        "tags": [
+          "Companies"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
+        ],
+        "description": "零成本重算企业理解草稿：读取档案当前行业/目标市场/已选产品与 ready 且未删除的卖家资料（支持可选 documentIds 过滤与 force=true 强制重扫），确定性生成 NEEDS_REVIEW Claim 草稿并写回 seller_document.facts_extracted_at；不触发网页重抓、不消费 Budget Grant，且绝不降级 ACTIVE 状态（ENRICHING 期间返回 409 UNDERSTANDING_IN_PROGRESS）。需要 acquisition:write。"
+      }
+    },
     "/api/v1/companies/{companyId}": {
       "get": {
         "operationId": "CompanyController_get_v1",
@@ -6803,6 +6861,843 @@
           "acquisition:read"
         ],
         "description": "理解阶段抽取出的结构化产品/服务，每条带来源页 URL 与原文片段。数组响应，不分页。"
+      }
+    },
+    "/api/v1/companies/{companyId}/seller-documents/presign": {
+      "post": {
+        "operationId": "SellerCompanyDocumentsController_presign_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PresignSellerDocumentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PresignSellerDocumentResponseDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "为卖家资料上传签发短时 presigned PUT（校验类型与配额）",
+        "tags": [
+          "Seller Documents"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
+        ],
+        "description": "为卖家资料上传签发短时 presigned PUT（15 分钟）。校验 MIME 白名单与单文件上限（PDF/Word/PPT/Excel ≤50MB，文本/Markdown ≤10MB）与配额（每空间 500 份/2 GiB、每公司 200 份，env 可调）；超限返回 409。返回 documentId 与 uploadUrl，上传对象带 1 天过期的 staging 生命周期标签。"
+      }
+    },
+    "/api/v1/companies/{companyId}/seller-documents/{documentId}/commit": {
+      "post": {
+        "operationId": "SellerCompanyDocumentsController_commit_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "documentId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SellerDocumentDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "确认上传：HEAD/魔数/sha256 校验、转存 canonical 并入队解析",
+        "tags": [
+          "Seller Documents"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
+        ],
+        "description": "确认上传完成：对 staging 对象做 HEAD、流式 sha256 与魔数校验（声明的 MIME 必须与实际内容相符），通过后转存 canonical 对象并将文档置为 queued、入队解析。上传未完成返回 409 并留在 pending_upload；内容不符置 rejected；同一公司已存在相同内容时返回 409 并清理已复制副本。"
+      }
+    },
+    "/api/v1/companies/{companyId}/seller-documents/{documentId}/content": {
+      "put": {
+        "description": "仅 pending_upload 状态可用；Content-Type 必须与 presign 申报一致，字节数必须等于申报大小。写入后照常调用 commit 校验并入队。",
+        "operationId": "SellerCompanyDocumentsController_uploadContent_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "documentId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "content-type",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SellerDocumentDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "浏览器直传：把文件字节经引擎写入暂存对象（presign 主机对浏览器不可达时的中转）",
+        "tags": [
+          "Seller Documents"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
+        ]
+      }
+    },
+    "/api/v1/companies/{companyId}/seller-documents/search": {
+      "get": {
+        "operationId": "SellerCompanyDocumentsController_search_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 500
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 10,
+              "maximum": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "documentId",
+                          "filename",
+                          "seq",
+                          "text",
+                          "score"
+                        ],
+                        "properties": {
+                          "documentId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "filename": {
+                            "type": "string"
+                          },
+                          "seq": {
+                            "type": "integer"
+                          },
+                          "text": {
+                            "type": "string"
+                          },
+                          "score": {
+                            "type": "number"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "资料库混合检索（向量 + 全文），限定公司与可检索状态",
+        "tags": [
+          "Seller Documents"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ],
+        "description": "资料库混合检索：查询词经本机 BGE-M3 嵌入后与分块向量做余弦（权重 0.7）并与全文 ts_rank_cd（权重 0.3）合成排序；只检索该公司 status=ready 且未删除的资料，limit 上限 50。"
+      }
+    },
+    "/api/v1/companies/{companyId}/seller-documents": {
+      "get": {
+        "operationId": "SellerCompanyDocumentsController_list_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "page"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/SellerDocumentDto"
+                      }
+                    },
+                    "page": {
+                      "type": "object",
+                      "required": [
+                        "next_cursor",
+                        "has_more"
+                      ],
+                      "properties": {
+                        "next_cursor": {
+                          "type": "string",
+                          "nullable": true,
+                          "description": "下一页游标；null = 没有更多"
+                        },
+                        "has_more": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "列出公司资料库（游标分页，软删不可见）",
+        "tags": [
+          "Seller Documents"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ],
+        "description": "游标分页列出公司的卖家资料（软删不可见）：limit 默认 20、上限 100，返回 { data, page: { next_cursor, has_more } }。每条含状态（pending_upload/committing/queued/processing/ready/failed_terminal/rejected）、类型与字节数。"
+      }
+    },
+    "/api/v1/seller-documents/{documentId}": {
+      "get": {
+        "operationId": "SellerDocumentsController_get_v1",
+        "parameters": [
+          {
+            "name": "documentId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SellerDocumentDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "资料详情（跨租户 404）",
+        "tags": [
+          "Seller Documents"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ],
+        "description": "按 id 取单份资料详情。资源属于其他 workspace 或已软删时返回 404，不泄露存在性。"
+      },
+      "delete": {
+        "operationId": "SellerDocumentsController_remove_v1",
+        "parameters": [
+          {
+            "name": "documentId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SellerDocumentDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "软删资料（恢复窗口内可由运营恢复；物理清理见 DSR/清理管线）",
+        "tags": [
+          "Seller Documents"
+        ],
+        "x-required-scopes": [
+          "acquisition:review"
+        ],
+        "description": "软删一份资料：置 deleted_at 并从列表与下载中消失；对象与分块的物理清理在受控清理管线（DSR 同路径）完成。需要 acquisition:review。"
+      }
+    },
+    "/api/v1/seller-documents/{documentId}/download-url": {
+      "get": {
+        "operationId": "SellerDocumentsController_downloadUrl_v1",
+        "parameters": [
+          {
+            "name": "documentId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "url"
+                      ],
+                      "properties": {
+                        "url": {
+                          "type": "string",
+                          "format": "uri"
+                        },
+                        "expiresInSeconds": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "短时 presigned GET 下载地址",
+        "tags": [
+          "Seller Documents"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ],
+        "description": "返回 10 分钟有效的 presigned GET；尚未上传完成（pending_upload/committing）或已被拒绝时返回 409。"
+      }
+    },
+    "/api/v1/seller-documents/{documentId}/content": {
+      "get": {
+        "operationId": "SellerDocumentsController_downloadContent_v1",
+        "parameters": [
+          {
+            "name": "documentId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "资料原文件二进制字节流",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            },
+            "headers": {
+              "Content-Type": {
+                "description": "文件 MIME 类型",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "description": "安全转义的附件文件名",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Length": {
+                "description": "文件字节数",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "资料不存在、已软删、属其他 workspace 或对象缺失"
+          },
+          "409": {
+            "description": "资料尚未上传完成或已被拒绝（SELLER_DOCUMENT_NOT_READY）"
+          },
+          "503": {
+            "description": "对象存储暂时不可用（SELLER_DOCUMENTS_STORAGE_UNAVAILABLE）"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "流式下载资料原文件（经服务端鉴权代理，不暴露内网对象存储签名）",
+        "tags": [
+          "Seller Documents"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ],
+        "description": "流式代理下载资料原文件：校验 workspace 隔离与状态（ready/queued/processing；未完成返回 409 SELLER_DOCUMENT_NOT_READY，缺失或跨租户 404，对象存储不可用 503），不暴露内网 MinIO 地址。需要 acquisition:read。"
+      }
+    },
+    "/api/v1/seller-documents/{documentId}/retry": {
+      "post": {
+        "operationId": "SellerDocumentsController_retry_v1",
+        "parameters": [
+          {
+            "name": "documentId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SellerDocumentDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "重试失败或排队中的资料解析",
+        "tags": [
+          "Seller Documents"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
+        ],
+        "description": "重试解析：仅 failed_terminal 或 queued 状态可调用，重置错误码后重新入队（202）。需要 acquisition:write。"
+      }
+    },
+    "/api/v1/companies/{companyId}/seller-documents/{documentId}/chunks/{seq}": {
+      "get": {
+        "operationId": "SellerDocumentClaimsController_readChunk_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "documentId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "seq",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/DocumentChunkViewDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "读取当前发布版本的单个分块（有界本地 DB，不调用 search/embedding）",
+        "tags": [
+          "Seller Documents"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ],
+        "description": "读取 ready 文档当前发布解析版本的单块文本（seq 从 0 起），返回 documentContentHash、parseRevision、chunkTextHash 与上下文元数据；只查本地数据库，不调用 search/embedding、不落写。文档未 ready 返回 409（DOCUMENT_CLAIM_SOURCE_UNAVAILABLE），分块不存在 404，seq 非法 400；需要 acquisition:read。"
+      }
+    },
+    "/api/v1/companies/{companyId}/seller-documents/{documentId}/claim-previews": {
+      "post": {
+        "operationId": "SellerDocumentClaimsController_preview_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "documentId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewDocumentClaimDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/DocumentClaimPreviewDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "校验 typed 引用并返回服务端重建的原句、bindingHash 与 requestDigest（纯检查，不写 Claim）",
+        "tags": [
+          "Seller Documents"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
+        ],
+        "description": "typed 引用预览（纯检查）：服务端重读文档与分块，逐项校验 documentContentHash、parseRevision、chunkSeq、chunkTextHash 与 UTF-8 字节区间原句一致后，返回重建原句、bindingHash 与 requestDigest；不写 Claim、不耗 Grant、不调模型。引用或文档失效返回 409，参数非法 400；需要 acquisition:write。"
+      }
+    },
+    "/api/v1/companies/{companyId}/seller-documents/{documentId}/claim-drafts": {
+      "post": {
+        "operationId": "SellerDocumentClaimsController_createDraft_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "documentId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDocumentClaimDraftDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/DocumentClaimDraftDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "事务重读引用并写入 NEEDS_REVIEW 草稿；同 key 同体返原件，异体 409",
+        "tags": [
+          "Seller Documents"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
+        ],
+        "description": "在同一事务内重读引用并写入 NEEDS_REVIEW 草稿（Claim + Evidence + typed 文档引用），首次写入必为 NEEDS_REVIEW；同来源同陈述跨请求者重放返回原件（replayed=true，201），requestDigest 或引用异体返回 409（DOCUMENT_CLAIM_REQUEST_MISMATCH / DOCUMENT_CLAIM_CONFLICT）；需要 acquisition:write。"
       }
     },
     "/api/v1/companies/{companyId}/claims": {
@@ -24439,843 +25334,6 @@
         "description": "计算 refurbish 的内部技术预算包络；不构成客户报价，也不限制余额。"
       }
     },
-    "/api/v1/companies/{companyId}/seller-documents/presign": {
-      "post": {
-        "operationId": "SellerCompanyDocumentsController_presign_v1",
-        "parameters": [
-          {
-            "name": "companyId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PresignSellerDocumentDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "data"
-                  ],
-                  "properties": {
-                    "data": {
-                      "$ref": "#/components/schemas/PresignSellerDocumentResponseDto"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "为卖家资料上传签发短时 presigned PUT（校验类型与配额）",
-        "tags": [
-          "Seller Documents"
-        ],
-        "x-required-scopes": [
-          "acquisition:write"
-        ],
-        "description": "为卖家资料上传签发短时 presigned PUT（15 分钟）。校验 MIME 白名单与单文件上限（PDF/Word/PPT/Excel ≤50MB，文本/Markdown ≤10MB）与配额（每空间 500 份/2 GiB、每公司 200 份，env 可调）；超限返回 409。返回 documentId 与 uploadUrl，上传对象带 1 天过期的 staging 生命周期标签。"
-      }
-    },
-    "/api/v1/companies/{companyId}/seller-documents/{documentId}/commit": {
-      "post": {
-        "operationId": "SellerCompanyDocumentsController_commit_v1",
-        "parameters": [
-          {
-            "name": "companyId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "documentId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "202": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "data"
-                  ],
-                  "properties": {
-                    "data": {
-                      "$ref": "#/components/schemas/SellerDocumentDto"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "确认上传：HEAD/魔数/sha256 校验、转存 canonical 并入队解析",
-        "tags": [
-          "Seller Documents"
-        ],
-        "x-required-scopes": [
-          "acquisition:write"
-        ],
-        "description": "确认上传完成：对 staging 对象做 HEAD、流式 sha256 与魔数校验（声明的 MIME 必须与实际内容相符），通过后转存 canonical 对象并将文档置为 queued、入队解析。上传未完成返回 409 并留在 pending_upload；内容不符置 rejected；同一公司已存在相同内容时返回 409 并清理已复制副本。"
-      }
-    },
-    "/api/v1/companies/{companyId}/seller-documents/{documentId}/content": {
-      "put": {
-        "description": "仅 pending_upload 状态可用；Content-Type 必须与 presign 申报一致，字节数必须等于申报大小。写入后照常调用 commit 校验并入队。",
-        "operationId": "SellerCompanyDocumentsController_uploadContent_v1",
-        "parameters": [
-          {
-            "name": "companyId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "documentId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "content-type",
-            "required": true,
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "data"
-                  ],
-                  "properties": {
-                    "data": {
-                      "$ref": "#/components/schemas/SellerDocumentDto"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "浏览器直传：把文件字节经引擎写入暂存对象（presign 主机对浏览器不可达时的中转）",
-        "tags": [
-          "Seller Documents"
-        ],
-        "x-required-scopes": [
-          "acquisition:write"
-        ]
-      }
-    },
-    "/api/v1/companies/{companyId}/seller-documents/search": {
-      "get": {
-        "operationId": "SellerCompanyDocumentsController_search_v1",
-        "parameters": [
-          {
-            "name": "companyId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "q",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "minLength": 2,
-              "maxLength": 500
-            }
-          },
-          {
-            "name": "limit",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "type": "integer",
-              "default": 10,
-              "maximum": 50
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "data"
-                  ],
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "required": [
-                          "documentId",
-                          "filename",
-                          "seq",
-                          "text",
-                          "score"
-                        ],
-                        "properties": {
-                          "documentId": {
-                            "type": "string",
-                            "format": "uuid"
-                          },
-                          "filename": {
-                            "type": "string"
-                          },
-                          "seq": {
-                            "type": "integer"
-                          },
-                          "text": {
-                            "type": "string"
-                          },
-                          "score": {
-                            "type": "number"
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "资料库混合检索（向量 + 全文），限定公司与可检索状态",
-        "tags": [
-          "Seller Documents"
-        ],
-        "x-required-scopes": [
-          "acquisition:read"
-        ],
-        "description": "资料库混合检索：查询词经本机 BGE-M3 嵌入后与分块向量做余弦（权重 0.7）并与全文 ts_rank_cd（权重 0.3）合成排序；只检索该公司 status=ready 且未删除的资料，limit 上限 50。"
-      }
-    },
-    "/api/v1/companies/{companyId}/seller-documents": {
-      "get": {
-        "operationId": "SellerCompanyDocumentsController_list_v1",
-        "parameters": [
-          {
-            "name": "companyId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "limit",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "type": "integer",
-              "default": 20,
-              "maximum": 100
-            }
-          },
-          {
-            "name": "cursor",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "data",
-                    "page"
-                  ],
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/SellerDocumentDto"
-                      }
-                    },
-                    "page": {
-                      "type": "object",
-                      "required": [
-                        "next_cursor",
-                        "has_more"
-                      ],
-                      "properties": {
-                        "next_cursor": {
-                          "type": "string",
-                          "nullable": true,
-                          "description": "下一页游标；null = 没有更多"
-                        },
-                        "has_more": {
-                          "type": "boolean"
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "列出公司资料库（游标分页，软删不可见）",
-        "tags": [
-          "Seller Documents"
-        ],
-        "x-required-scopes": [
-          "acquisition:read"
-        ],
-        "description": "游标分页列出公司的卖家资料（软删不可见）：limit 默认 20、上限 100，返回 { data, page: { next_cursor, has_more } }。每条含状态（pending_upload/committing/queued/processing/ready/failed_terminal/rejected）、类型与字节数。"
-      }
-    },
-    "/api/v1/seller-documents/{documentId}": {
-      "get": {
-        "operationId": "SellerDocumentsController_get_v1",
-        "parameters": [
-          {
-            "name": "documentId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "data"
-                  ],
-                  "properties": {
-                    "data": {
-                      "$ref": "#/components/schemas/SellerDocumentDto"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "资料详情（跨租户 404）",
-        "tags": [
-          "Seller Documents"
-        ],
-        "x-required-scopes": [
-          "acquisition:read"
-        ],
-        "description": "按 id 取单份资料详情。资源属于其他 workspace 或已软删时返回 404，不泄露存在性。"
-      },
-      "delete": {
-        "operationId": "SellerDocumentsController_remove_v1",
-        "parameters": [
-          {
-            "name": "documentId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "data"
-                  ],
-                  "properties": {
-                    "data": {
-                      "$ref": "#/components/schemas/SellerDocumentDto"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "软删资料（恢复窗口内可由运营恢复；物理清理见 DSR/清理管线）",
-        "tags": [
-          "Seller Documents"
-        ],
-        "x-required-scopes": [
-          "acquisition:review"
-        ],
-        "description": "软删一份资料：置 deleted_at 并从列表与下载中消失；对象与分块的物理清理在受控清理管线（DSR 同路径）完成。需要 acquisition:review。"
-      }
-    },
-    "/api/v1/seller-documents/{documentId}/download-url": {
-      "get": {
-        "operationId": "SellerDocumentsController_downloadUrl_v1",
-        "parameters": [
-          {
-            "name": "documentId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "data"
-                  ],
-                  "properties": {
-                    "data": {
-                      "type": "object",
-                      "required": [
-                        "url"
-                      ],
-                      "properties": {
-                        "url": {
-                          "type": "string",
-                          "format": "uri"
-                        },
-                        "expiresInSeconds": {
-                          "type": "integer"
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "短时 presigned GET 下载地址",
-        "tags": [
-          "Seller Documents"
-        ],
-        "x-required-scopes": [
-          "acquisition:read"
-        ],
-        "description": "返回 10 分钟有效的 presigned GET；尚未上传完成（pending_upload/committing）或已被拒绝时返回 409。"
-      }
-    },
-    "/api/v1/seller-documents/{documentId}/content": {
-      "get": {
-        "operationId": "SellerDocumentsController_downloadContent_v1",
-        "parameters": [
-          {
-            "name": "documentId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "资料原文件二进制字节流",
-            "content": {
-              "application/octet-stream": {
-                "schema": {
-                  "type": "string",
-                  "format": "binary"
-                }
-              }
-            },
-            "headers": {
-              "Content-Type": {
-                "description": "文件 MIME 类型",
-                "schema": {
-                  "type": "string"
-                }
-              },
-              "Content-Disposition": {
-                "description": "安全转义的附件文件名",
-                "schema": {
-                  "type": "string"
-                }
-              },
-              "Content-Length": {
-                "description": "文件字节数",
-                "schema": {
-                  "type": "integer",
-                  "minimum": 0
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "资料不存在、已软删、属其他 workspace 或对象缺失"
-          },
-          "409": {
-            "description": "资料尚未上传完成或已被拒绝（SELLER_DOCUMENT_NOT_READY）"
-          },
-          "503": {
-            "description": "对象存储暂时不可用（SELLER_DOCUMENTS_STORAGE_UNAVAILABLE）"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "流式下载资料原文件（经服务端鉴权代理，不暴露内网对象存储签名）",
-        "tags": [
-          "Seller Documents"
-        ],
-        "x-required-scopes": [
-          "acquisition:read"
-        ],
-        "description": "流式代理下载资料原文件：校验 workspace 隔离与状态（ready/queued/processing；未完成返回 409 SELLER_DOCUMENT_NOT_READY，缺失或跨租户 404，对象存储不可用 503），不暴露内网 MinIO 地址。需要 acquisition:read。"
-      }
-    },
-    "/api/v1/seller-documents/{documentId}/retry": {
-      "post": {
-        "operationId": "SellerDocumentsController_retry_v1",
-        "parameters": [
-          {
-            "name": "documentId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "202": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "data"
-                  ],
-                  "properties": {
-                    "data": {
-                      "$ref": "#/components/schemas/SellerDocumentDto"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "重试失败或排队中的资料解析",
-        "tags": [
-          "Seller Documents"
-        ],
-        "x-required-scopes": [
-          "acquisition:write"
-        ],
-        "description": "重试解析：仅 failed_terminal 或 queued 状态可调用，重置错误码后重新入队（202）。需要 acquisition:write。"
-      }
-    },
-    "/api/v1/companies/{companyId}/seller-documents/{documentId}/chunks/{seq}": {
-      "get": {
-        "operationId": "SellerDocumentClaimsController_readChunk_v1",
-        "parameters": [
-          {
-            "name": "companyId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          },
-          {
-            "name": "documentId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          },
-          {
-            "name": "seq",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "integer",
-              "minimum": 0
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "data"
-                  ],
-                  "properties": {
-                    "data": {
-                      "$ref": "#/components/schemas/DocumentChunkViewDto"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "读取当前发布版本的单个分块（有界本地 DB，不调用 search/embedding）",
-        "tags": [
-          "Seller Documents"
-        ],
-        "x-required-scopes": [
-          "acquisition:read"
-        ],
-        "description": "读取 ready 文档当前发布解析版本的单块文本（seq 从 0 起），返回 documentContentHash、parseRevision、chunkTextHash 与上下文元数据；只查本地数据库，不调用 search/embedding、不落写。文档未 ready 返回 409（DOCUMENT_CLAIM_SOURCE_UNAVAILABLE），分块不存在 404，seq 非法 400；需要 acquisition:read。"
-      }
-    },
-    "/api/v1/companies/{companyId}/seller-documents/{documentId}/claim-previews": {
-      "post": {
-        "operationId": "SellerDocumentClaimsController_preview_v1",
-        "parameters": [
-          {
-            "name": "companyId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          },
-          {
-            "name": "documentId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PreviewDocumentClaimDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "data"
-                  ],
-                  "properties": {
-                    "data": {
-                      "$ref": "#/components/schemas/DocumentClaimPreviewDto"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "校验 typed 引用并返回服务端重建的原句、bindingHash 与 requestDigest（纯检查，不写 Claim）",
-        "tags": [
-          "Seller Documents"
-        ],
-        "x-required-scopes": [
-          "acquisition:write"
-        ],
-        "description": "typed 引用预览（纯检查）：服务端重读文档与分块，逐项校验 documentContentHash、parseRevision、chunkSeq、chunkTextHash 与 UTF-8 字节区间原句一致后，返回重建原句、bindingHash 与 requestDigest；不写 Claim、不耗 Grant、不调模型。引用或文档失效返回 409，参数非法 400；需要 acquisition:write。"
-      }
-    },
-    "/api/v1/companies/{companyId}/seller-documents/{documentId}/claim-drafts": {
-      "post": {
-        "operationId": "SellerDocumentClaimsController_createDraft_v1",
-        "parameters": [
-          {
-            "name": "companyId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          },
-          {
-            "name": "documentId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateDocumentClaimDraftDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "data"
-                  ],
-                  "properties": {
-                    "data": {
-                      "$ref": "#/components/schemas/DocumentClaimDraftDto"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "事务重读引用并写入 NEEDS_REVIEW 草稿；同 key 同体返原件，异体 409",
-        "tags": [
-          "Seller Documents"
-        ],
-        "x-required-scopes": [
-          "acquisition:write"
-        ],
-        "description": "在同一事务内重读引用并写入 NEEDS_REVIEW 草稿（Claim + Evidence + typed 文档引用），首次写入必为 NEEDS_REVIEW；同来源同陈述跨请求者重放返回原件（replayed=true，201），requestDigest 或引用异体返回 409（DOCUMENT_CLAIM_REQUEST_MISMATCH / DOCUMENT_CLAIM_CONFLICT）；需要 acquisition:write。"
-      }
-    },
     "/api/v1/companies/{companyId}/market-candidate-sets/latest": {
       "get": {
         "description": "仅从引擎持久层读取；NOT_ANALYZED 只表示本能力没有可读文档，不表示市场无机会、生成已完成或失败。不会自动创建候选或调用模型、搜索、执行。",
@@ -28531,6 +28589,94 @@
         ],
         "description": "run 的决策轨迹（过程时间线）：源侦察员的选源/跳过原因与资格判定员的批量判定、被否候选，按时间升序键集分页（limit 默认 100、上限 200）；跨租户 404。需要 acquisition:read。"
       }
+    },
+    "/api/v1/workspace": {
+      "patch": {
+        "operationId": "WorkspaceController_update_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateWorkspaceDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/WorkspaceDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "同步工作空间名称（支持懒创建空间幂等 upsert）",
+        "tags": [
+          "Workspace"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
+        ],
+        "description": "同步当前工作空间名称：trim 后长度须为 1–128（空串/超长返回 400 VALIDATION_ERROR），在 withWorkspace(RLS) 内执行幂等 upsert（支持尚未建档的懒创建空间），返回 200 { data: WorkspaceDto }。需要 acquisition:write。"
+      }
+    },
+    "/api/v1/workspace/usage-summary": {
+      "get": {
+        "operationId": "WorkspaceController_usageSummary_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/WorkspaceUsageSummaryDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "获取当前工作空间的实体数量与存储用量全景",
+        "tags": [
+          "Workspace"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ],
+        "description": "只读查询当前工作空间的实体数量与存储用量全景：单次 withWorkspace(RLS) 事务内聚合 company_profile（未删）、seller_document（未删及配额上限）、icp_definition、discovery_run、canonical_company、canonical_contact、asset/asset_variant、site_release（未删），并经只读 SECURITY DEFINER RPC 汇总 generic_operation_artifact 计数与字节数。需要 acquisition:read。"
+      }
     }
   },
   "info": {
@@ -28627,6 +28773,10 @@
     {
       "name": "PlatformAuthority",
       "description": "平台权威通道（服务间调用，普通前端不调用）"
+    },
+    {
+      "name": "Workspace",
+      "description": "工作空间同步与存储/实体用量全景"
     },
     {
       "name": "System",
@@ -29106,6 +29256,61 @@
           "attemptId"
         ]
       },
+      "RecomputeUnderstandingResponseDto": {
+        "type": "object",
+        "properties": {
+          "companyId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "DRAFT",
+              "ENRICHING",
+              "REVIEW",
+              "ACTIVE"
+            ]
+          },
+          "documentsScanned": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "draftsCreated": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "profileDraftsCreated": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "companyId",
+          "status",
+          "documentsScanned",
+          "draftsCreated",
+          "profileDraftsCreated"
+        ]
+      },
+      "RecomputeUnderstandingDto": {
+        "type": "object",
+        "properties": {
+          "documentIds": {
+            "description": "可选：限定只重算指定的 ready 文档 id 列表",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "force": {
+            "type": "boolean",
+            "default": false,
+            "description": "为 true 时强制重新扫描已提取过的 ready 文档（facts_extracted_at 非空）"
+          }
+        }
+      },
       "OnboardingFactsDto": {
         "type": "object",
         "properties": {
@@ -29241,6 +29446,388 @@
           "evidence",
           "confidence",
           "createdAt"
+        ]
+      },
+      "PresignSellerDocumentResponseDto": {
+        "type": "object",
+        "properties": {
+          "documentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "uploadUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "documentId",
+          "uploadUrl",
+          "expiresAt"
+        ]
+      },
+      "PresignSellerDocumentDto": {
+        "type": "object",
+        "properties": {
+          "filename": {
+            "type": "string",
+            "example": "产品目录-2026.pdf"
+          },
+          "mime": {
+            "type": "string",
+            "example": "application/pdf",
+            "description": "pdf / docx / pptx / xlsx / text/plain / text/markdown"
+          },
+          "size": {
+            "type": "number",
+            "description": "字节数（≤50MB，txt/md ≤10MB）",
+            "minimum": 1,
+            "maximum": 52428800
+          }
+        },
+        "required": [
+          "filename",
+          "mime",
+          "size"
+        ]
+      },
+      "SellerDocumentDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "companyId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "mime": {
+            "type": "string"
+          },
+          "sizeBytes": {
+            "type": "string",
+            "description": "字节数（字符串表示，避免 JSON 大整数截断）"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "pdf",
+              "docx",
+              "pptx",
+              "txt",
+              "md",
+              "other"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending_upload",
+              "committing",
+              "queued",
+              "processing",
+              "ready",
+              "failed_terminal",
+              "rejected",
+              "deleted"
+            ]
+          },
+          "processingErrorCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "chunkCount": {
+            "type": "number"
+          },
+          "factsExtractedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "companyId",
+          "filename",
+          "mime",
+          "sizeBytes",
+          "kind",
+          "status",
+          "chunkCount",
+          "createdAt"
+        ]
+      },
+      "DocumentChunkViewDto": {
+        "type": "object",
+        "properties": {
+          "documentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "documentContentHash": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "parseRevision": {
+            "type": "number",
+            "minimum": 1
+          },
+          "chunkSeq": {
+            "type": "number",
+            "minimum": 0
+          },
+          "chunkTextHash": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "text": {
+            "type": "string"
+          },
+          "context": {
+            "type": "object",
+            "nullable": true,
+            "description": "页/章节等结构上下文；未知为 null"
+          }
+        },
+        "required": [
+          "documentId",
+          "documentContentHash",
+          "parseRevision",
+          "chunkSeq",
+          "chunkTextHash",
+          "text"
+        ]
+      },
+      "DocumentClaimPreviewDto": {
+        "type": "object",
+        "properties": {
+          "documentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "documentContentHash": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "parseRevision": {
+            "type": "number",
+            "minimum": 1
+          },
+          "chunkSeq": {
+            "type": "number",
+            "minimum": 0
+          },
+          "quote": {
+            "type": "string"
+          },
+          "quoteStartByte": {
+            "type": "number",
+            "minimum": 0
+          },
+          "quoteEndByte": {
+            "type": "number",
+            "minimum": 0
+          },
+          "quoteDigest": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "statementDigest": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "bindingHash": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "requestDigest": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "context": {
+            "type": "object",
+            "nullable": true,
+            "description": "页/章节等解释上下文；未知为 null"
+          }
+        },
+        "required": [
+          "documentId",
+          "documentContentHash",
+          "parseRevision",
+          "chunkSeq",
+          "quote",
+          "quoteStartByte",
+          "quoteEndByte",
+          "quoteDigest",
+          "statementDigest",
+          "bindingHash",
+          "requestDigest",
+          "context"
+        ]
+      },
+      "DocumentClaimSourceRefDto": {
+        "type": "object",
+        "properties": {
+          "documentId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "当前可读 ready 文档 id（不得跨公司）"
+          },
+          "documentContentHash": {
+            "type": "string",
+            "description": "服务端读取端口返回的文档内容 sha256",
+            "maxLength": 64
+          },
+          "parseRevision": {
+            "type": "number",
+            "description": "发布的解析修订（读取端口返回）",
+            "minimum": 1
+          },
+          "chunkSeq": {
+            "type": "number",
+            "description": "分块序号",
+            "minimum": 0
+          },
+          "chunkTextHash": {
+            "type": "string",
+            "description": "分块文本 sha256（读取端口返回）",
+            "maxLength": 64
+          },
+          "quoteStartByte": {
+            "type": "number",
+            "description": "选区起始字节（UTF-8，服务端核验）",
+            "minimum": 0
+          },
+          "quoteEndByte": {
+            "type": "number",
+            "description": "选区结束字节（UTF-8，不截断多字节）",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "documentId",
+          "documentContentHash",
+          "parseRevision",
+          "chunkSeq",
+          "chunkTextHash",
+          "quoteStartByte",
+          "quoteEndByte"
+        ]
+      },
+      "PreviewDocumentClaimDto": {
+        "type": "object",
+        "properties": {
+          "reference": {
+            "$ref": "#/components/schemas/DocumentClaimSourceRefDto"
+          },
+          "type": {
+            "type": "string",
+            "description": "Claim 类型（1–50，字母数字 ._: -）",
+            "maxLength": 50
+          },
+          "statement": {
+            "type": "string",
+            "description": "人审陈述（≤4000 字符）",
+            "maxLength": 4000
+          }
+        },
+        "required": [
+          "reference",
+          "type",
+          "statement"
+        ]
+      },
+      "DocumentClaimDraftDto": {
+        "type": "object",
+        "properties": {
+          "claimId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "evidenceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "referenceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "bindingHash": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "NEEDS_REVIEW",
+              "APPROVED",
+              "REJECTED",
+              "REVOKED"
+            ]
+          },
+          "claimVersion": {
+            "type": "number",
+            "minimum": 1
+          },
+          "replayed": {
+            "type": "boolean",
+            "description": "同来源/陈述重放返回原件；不重置审批记录"
+          },
+          "available": {
+            "type": "boolean",
+            "description": "当前文档/引用是否仍可读且与绑定一致"
+          }
+        },
+        "required": [
+          "claimId",
+          "evidenceId",
+          "referenceId",
+          "bindingHash",
+          "status",
+          "claimVersion",
+          "replayed",
+          "available"
+        ]
+      },
+      "CreateDocumentClaimDraftDto": {
+        "type": "object",
+        "properties": {
+          "reference": {
+            "$ref": "#/components/schemas/DocumentClaimSourceRefDto"
+          },
+          "type": {
+            "type": "string",
+            "description": "Claim 类型（1–50，字母数字 ._: -）",
+            "maxLength": 50
+          },
+          "statement": {
+            "type": "string",
+            "description": "人审陈述（≤4000 字符）",
+            "maxLength": 4000
+          },
+          "requestDigest": {
+            "type": "string",
+            "description": "preview 返回的规范请求摘要；写入口独立重算",
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "reference",
+          "type",
+          "statement",
+          "requestDigest"
         ]
       },
       "ClaimEvidenceDto": {
@@ -31413,388 +32000,6 @@
           "scope"
         ]
       },
-      "PresignSellerDocumentResponseDto": {
-        "type": "object",
-        "properties": {
-          "documentId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "uploadUrl": {
-            "type": "string",
-            "format": "uri"
-          },
-          "expiresAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "documentId",
-          "uploadUrl",
-          "expiresAt"
-        ]
-      },
-      "PresignSellerDocumentDto": {
-        "type": "object",
-        "properties": {
-          "filename": {
-            "type": "string",
-            "example": "产品目录-2026.pdf"
-          },
-          "mime": {
-            "type": "string",
-            "example": "application/pdf",
-            "description": "pdf / docx / pptx / xlsx / text/plain / text/markdown"
-          },
-          "size": {
-            "type": "number",
-            "description": "字节数（≤50MB，txt/md ≤10MB）",
-            "minimum": 1,
-            "maximum": 52428800
-          }
-        },
-        "required": [
-          "filename",
-          "mime",
-          "size"
-        ]
-      },
-      "SellerDocumentDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "companyId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "filename": {
-            "type": "string"
-          },
-          "mime": {
-            "type": "string"
-          },
-          "sizeBytes": {
-            "type": "string",
-            "description": "字节数（字符串表示，避免 JSON 大整数截断）"
-          },
-          "kind": {
-            "type": "string",
-            "enum": [
-              "pdf",
-              "docx",
-              "pptx",
-              "txt",
-              "md",
-              "other"
-            ]
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "pending_upload",
-              "committing",
-              "queued",
-              "processing",
-              "ready",
-              "failed_terminal",
-              "rejected",
-              "deleted"
-            ]
-          },
-          "processingErrorCode": {
-            "type": "string",
-            "nullable": true
-          },
-          "chunkCount": {
-            "type": "number"
-          },
-          "factsExtractedAt": {
-            "type": "string",
-            "format": "date-time",
-            "nullable": true
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "id",
-          "companyId",
-          "filename",
-          "mime",
-          "sizeBytes",
-          "kind",
-          "status",
-          "chunkCount",
-          "createdAt"
-        ]
-      },
-      "DocumentChunkViewDto": {
-        "type": "object",
-        "properties": {
-          "documentId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "documentContentHash": {
-            "type": "string",
-            "maxLength": 64
-          },
-          "parseRevision": {
-            "type": "number",
-            "minimum": 1
-          },
-          "chunkSeq": {
-            "type": "number",
-            "minimum": 0
-          },
-          "chunkTextHash": {
-            "type": "string",
-            "maxLength": 64
-          },
-          "text": {
-            "type": "string"
-          },
-          "context": {
-            "type": "object",
-            "nullable": true,
-            "description": "页/章节等结构上下文；未知为 null"
-          }
-        },
-        "required": [
-          "documentId",
-          "documentContentHash",
-          "parseRevision",
-          "chunkSeq",
-          "chunkTextHash",
-          "text"
-        ]
-      },
-      "DocumentClaimPreviewDto": {
-        "type": "object",
-        "properties": {
-          "documentId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "documentContentHash": {
-            "type": "string",
-            "maxLength": 64
-          },
-          "parseRevision": {
-            "type": "number",
-            "minimum": 1
-          },
-          "chunkSeq": {
-            "type": "number",
-            "minimum": 0
-          },
-          "quote": {
-            "type": "string"
-          },
-          "quoteStartByte": {
-            "type": "number",
-            "minimum": 0
-          },
-          "quoteEndByte": {
-            "type": "number",
-            "minimum": 0
-          },
-          "quoteDigest": {
-            "type": "string",
-            "maxLength": 64
-          },
-          "statementDigest": {
-            "type": "string",
-            "maxLength": 64
-          },
-          "bindingHash": {
-            "type": "string",
-            "maxLength": 64
-          },
-          "requestDigest": {
-            "type": "string",
-            "maxLength": 64
-          },
-          "context": {
-            "type": "object",
-            "nullable": true,
-            "description": "页/章节等解释上下文；未知为 null"
-          }
-        },
-        "required": [
-          "documentId",
-          "documentContentHash",
-          "parseRevision",
-          "chunkSeq",
-          "quote",
-          "quoteStartByte",
-          "quoteEndByte",
-          "quoteDigest",
-          "statementDigest",
-          "bindingHash",
-          "requestDigest",
-          "context"
-        ]
-      },
-      "DocumentClaimSourceRefDto": {
-        "type": "object",
-        "properties": {
-          "documentId": {
-            "type": "string",
-            "format": "uuid",
-            "description": "当前可读 ready 文档 id（不得跨公司）"
-          },
-          "documentContentHash": {
-            "type": "string",
-            "description": "服务端读取端口返回的文档内容 sha256",
-            "maxLength": 64
-          },
-          "parseRevision": {
-            "type": "number",
-            "description": "发布的解析修订（读取端口返回）",
-            "minimum": 1
-          },
-          "chunkSeq": {
-            "type": "number",
-            "description": "分块序号",
-            "minimum": 0
-          },
-          "chunkTextHash": {
-            "type": "string",
-            "description": "分块文本 sha256（读取端口返回）",
-            "maxLength": 64
-          },
-          "quoteStartByte": {
-            "type": "number",
-            "description": "选区起始字节（UTF-8，服务端核验）",
-            "minimum": 0
-          },
-          "quoteEndByte": {
-            "type": "number",
-            "description": "选区结束字节（UTF-8，不截断多字节）",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "documentId",
-          "documentContentHash",
-          "parseRevision",
-          "chunkSeq",
-          "chunkTextHash",
-          "quoteStartByte",
-          "quoteEndByte"
-        ]
-      },
-      "PreviewDocumentClaimDto": {
-        "type": "object",
-        "properties": {
-          "reference": {
-            "$ref": "#/components/schemas/DocumentClaimSourceRefDto"
-          },
-          "type": {
-            "type": "string",
-            "description": "Claim 类型（1–50，字母数字 ._: -）",
-            "maxLength": 50
-          },
-          "statement": {
-            "type": "string",
-            "description": "人审陈述（≤4000 字符）",
-            "maxLength": 4000
-          }
-        },
-        "required": [
-          "reference",
-          "type",
-          "statement"
-        ]
-      },
-      "DocumentClaimDraftDto": {
-        "type": "object",
-        "properties": {
-          "claimId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "evidenceId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "referenceId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "bindingHash": {
-            "type": "string",
-            "maxLength": 64
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "NEEDS_REVIEW",
-              "APPROVED",
-              "REJECTED",
-              "REVOKED"
-            ]
-          },
-          "claimVersion": {
-            "type": "number",
-            "minimum": 1
-          },
-          "replayed": {
-            "type": "boolean",
-            "description": "同来源/陈述重放返回原件；不重置审批记录"
-          },
-          "available": {
-            "type": "boolean",
-            "description": "当前文档/引用是否仍可读且与绑定一致"
-          }
-        },
-        "required": [
-          "claimId",
-          "evidenceId",
-          "referenceId",
-          "bindingHash",
-          "status",
-          "claimVersion",
-          "replayed",
-          "available"
-        ]
-      },
-      "CreateDocumentClaimDraftDto": {
-        "type": "object",
-        "properties": {
-          "reference": {
-            "$ref": "#/components/schemas/DocumentClaimSourceRefDto"
-          },
-          "type": {
-            "type": "string",
-            "description": "Claim 类型（1–50，字母数字 ._: -）",
-            "maxLength": 50
-          },
-          "statement": {
-            "type": "string",
-            "description": "人审陈述（≤4000 字符）",
-            "maxLength": 4000
-          },
-          "requestDigest": {
-            "type": "string",
-            "description": "preview 返回的规范请求摘要；写入口独立重算",
-            "maxLength": 64
-          }
-        },
-        "required": [
-          "reference",
-          "type",
-          "statement",
-          "requestDigest"
-        ]
-      },
       "MarketCandidateCompanyBasisDto": {
         "type": "object",
         "properties": {
@@ -32717,6 +32922,305 @@
           "intentDigest"
         ],
         "additionalProperties": false
+      },
+      "WorkspaceDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "UpdateWorkspaceDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "Acme Export Co.",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "WorkspaceCompaniesUsageDto": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "number"
+          },
+          "draft": {
+            "type": "number"
+          },
+          "enriching": {
+            "type": "number"
+          },
+          "review": {
+            "type": "number"
+          },
+          "active": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "total",
+          "draft",
+          "enriching",
+          "review",
+          "active"
+        ]
+      },
+      "WorkspaceSellerDocumentQuotaDto": {
+        "type": "object",
+        "properties": {
+          "maxPerWorkspace": {
+            "type": "number"
+          },
+          "maxPerCompany": {
+            "type": "number"
+          },
+          "maxBytesPerWorkspace": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "maxPerWorkspace",
+          "maxPerCompany",
+          "maxBytesPerWorkspace"
+        ]
+      },
+      "WorkspaceSellerDocumentsUsageDto": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "number"
+          },
+          "ready": {
+            "type": "number"
+          },
+          "pendingUpload": {
+            "type": "number"
+          },
+          "processing": {
+            "type": "number"
+          },
+          "failed": {
+            "type": "number"
+          },
+          "totalBytes": {
+            "type": "number"
+          },
+          "readyBytes": {
+            "type": "number"
+          },
+          "pendingUploadBytes": {
+            "type": "number"
+          },
+          "quota": {
+            "$ref": "#/components/schemas/WorkspaceSellerDocumentQuotaDto"
+          }
+        },
+        "required": [
+          "total",
+          "ready",
+          "pendingUpload",
+          "processing",
+          "failed",
+          "totalBytes",
+          "readyBytes",
+          "pendingUploadBytes",
+          "quota"
+        ]
+      },
+      "WorkspaceIcpsUsageDto": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "total"
+        ]
+      },
+      "WorkspaceDiscoveryRunsUsageDto": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "number"
+          },
+          "running": {
+            "type": "number"
+          },
+          "completed": {
+            "type": "number"
+          },
+          "failed": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "total",
+          "running",
+          "completed",
+          "failed"
+        ]
+      },
+      "WorkspaceCanonicalCompaniesUsageDto": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "number"
+          },
+          "suppressed": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "total",
+          "suppressed"
+        ]
+      },
+      "WorkspaceCanonicalContactsUsageDto": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "total"
+        ]
+      },
+      "WorkspaceSiteAssetsUsageDto": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "number"
+          },
+          "totalBytes": {
+            "type": "number"
+          },
+          "variants": {
+            "type": "number"
+          },
+          "variantBytes": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "total",
+          "totalBytes",
+          "variants",
+          "variantBytes"
+        ]
+      },
+      "WorkspaceSiteReleasesUsageDto": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "number"
+          },
+          "ready": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "total",
+          "ready"
+        ]
+      },
+      "WorkspaceOperationArtifactsUsageDto": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "number"
+          },
+          "totalBytes": {
+            "type": "number"
+          },
+          "personalDataCount": {
+            "type": "number"
+          },
+          "personalDataBytes": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "total",
+          "totalBytes",
+          "personalDataCount",
+          "personalDataBytes"
+        ]
+      },
+      "WorkspaceUsageSummaryDto": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "companies": {
+            "$ref": "#/components/schemas/WorkspaceCompaniesUsageDto"
+          },
+          "sellerDocuments": {
+            "$ref": "#/components/schemas/WorkspaceSellerDocumentsUsageDto"
+          },
+          "icps": {
+            "$ref": "#/components/schemas/WorkspaceIcpsUsageDto"
+          },
+          "discoveryRuns": {
+            "$ref": "#/components/schemas/WorkspaceDiscoveryRunsUsageDto"
+          },
+          "canonicalCompanies": {
+            "$ref": "#/components/schemas/WorkspaceCanonicalCompaniesUsageDto"
+          },
+          "canonicalContacts": {
+            "$ref": "#/components/schemas/WorkspaceCanonicalContactsUsageDto"
+          },
+          "siteAssets": {
+            "$ref": "#/components/schemas/WorkspaceSiteAssetsUsageDto"
+          },
+          "siteReleases": {
+            "$ref": "#/components/schemas/WorkspaceSiteReleasesUsageDto"
+          },
+          "operationArtifacts": {
+            "$ref": "#/components/schemas/WorkspaceOperationArtifactsUsageDto"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "companies",
+          "sellerDocuments",
+          "icps",
+          "discoveryRuns",
+          "canonicalCompanies",
+          "canonicalContacts",
+          "siteAssets",
+          "siteReleases",
+          "operationArtifacts"
+        ]
       }
     }
   },
@@ -32761,6 +33265,7 @@
     {
       "name": "系统",
       "tags": [
+        "Workspace",
         "System"
       ]
     }
