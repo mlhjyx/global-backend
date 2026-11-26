@@ -222,16 +222,49 @@ export function localizedCommitteeXrayQuery(company: {
   return plan.serperXrayQueries[0] ?? null;
 }
 
+export interface ContactEmailPointLike {
+  readonly type: string;
+  readonly value?: string | null;
+  readonly status?: string | null;
+  readonly verificationState?: string | null;
+  readonly sourceType?: string | null;
+  readonly verificationMethod?: string | null;
+}
+
+/** 筛选可用于作战触达的邮箱联系点（排除 INVALID 与未证实的 pattern_guess 盲猜邮箱）。 */
+export function isUsableOutreachEmailPoint(point: ContactEmailPointLike): boolean {
+  if (point.type !== 'email') return false;
+  if (point.value !== undefined && !(point.value ?? '').trim()) return false;
+  if (point.status === 'INVALID' || point.verificationState === 'INVALID') return false;
+  const isPatternGuess =
+    point.sourceType === 'pattern_guess' || point.verificationMethod === 'pattern_guess';
+  const isConfirmedValid = point.verificationState === 'VALID' || point.status === 'VALID';
+  return !isPatternGuess || isConfirmedValid;
+}
+
 /**
- * 按 4 轨决策委员会优先级排序并优先保底不同轨道各取 1 人（sourcing → technical → executive → assistant），
- * 再按轨道优先级补足剩余名额，避免有限富集预算浪费在非关键岗位或同一轨道重复联系人上。
+ * 联系人的邮箱质量分档（供作战清表与公司详情排序，数值越小越靠前）：
+ *  - 0：至少有一条已验真 `VALID` 邮箱；
+ *  - 1：有非-INVALID 且非盲猜的可用邮箱（如 `CATCH_ALL_RISKY` / `UNKNOWN` / `UNVERIFIED`）；
+ *  - 2：无可用邮箱（空邮箱、仅 `INVALID` 或仅未证实的 `pattern_guess`）。
  */
-export function prioritizeBuyingCommitteeContacts<T extends { title?: string | null }>(
+export function contactEmailQualityTier(
+  points?: readonly ContactEmailPointLike[] | null,
+): 0 | 1 | 2 {
+  if (!points || points.length === 0) return 2;
+  let hasUsable = false;
+  for (const point of points) {
+    if (!isUsableOutreachEmailPoint(point)) continue;
+    if (point.verificationState === 'VALID' || point.status === 'VALID') return 0;
+    hasUsable = true;
+  }
+  return hasUsable ? 1 : 2;
+}
+
+function prioritizeWithinTier<T extends { title?: string | null }>(
   contacts: readonly T[],
-  limit?: number,
 ): T[] {
-  const cap = limit === undefined ? contacts.length : Math.max(0, limit);
-  if (contacts.length <= 1 || cap === 0) return contacts.slice(0, cap);
+  if (contacts.length <= 1) return [...contacts];
   const indexed = contacts.map((contact, idx) => ({
     contact,
     idx,
@@ -250,7 +283,34 @@ export function prioritizeBuyingCommitteeContacts<T extends { title?: string | n
       rest.push(item);
     }
   }
-  return [...primary, ...rest].slice(0, cap).map((item) => item.contact);
+  return [...primary, ...rest].map((item) => item.contact);
+}
+
+/**
+ * 优先按邮箱质量分档（`VALID` > 非 INVALID 且非盲猜可用邮箱 > 无可用邮箱），
+ * 同档内按 4 轨决策委员会优先级排序并优先保底不同轨道各取 1 人（sourcing → technical → executive → assistant），
+ * 再按轨道优先级补足剩余名额，避免无邮箱高管压过已有验真直邮的真实联系人，同时保证富集预算不浪费在非关键岗位。
+ */
+export function prioritizeBuyingCommitteeContacts<
+  T extends {
+    title?: string | null;
+    points?: readonly ContactEmailPointLike[] | null;
+    contactPoints?: readonly ContactEmailPointLike[] | null;
+  },
+>(contacts: readonly T[], limit?: number): T[] {
+  const cap = limit === undefined ? contacts.length : Math.max(0, limit);
+  if (contacts.length <= 1 || cap === 0) return contacts.slice(0, cap);
+
+  const tiers: [T[], T[], T[]] = [[], [], []];
+  for (const contact of contacts) {
+    const tier = contactEmailQualityTier(contact.points ?? contact.contactPoints);
+    tiers[tier].push(contact);
+  }
+  return [
+    ...prioritizeWithinTier(tiers[0]),
+    ...prioritizeWithinTier(tiers[1]),
+    ...prioritizeWithinTier(tiers[2]),
+  ].slice(0, cap);
 }
 
 /** 将多语种职位头衔归入 4 轨决策委员会之一。 */

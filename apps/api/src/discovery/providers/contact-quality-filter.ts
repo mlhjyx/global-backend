@@ -107,15 +107,25 @@ export function isJunkContactCandidate(candidate: {
   return false;
 }
 
-/** 是否为 `public_web` 生成的通用总机占位记录（非具名决策人）。 */
-export function isGenericSwitchboardContact(contact: {
+const PLACEHOLDER_CONTACT_NAME_RE =
+  /^(?:公开联系点|公开总机|个人邮箱|公司邮箱|企业邮箱|通用邮箱|公开邮箱)(?:$|[\s(（:：-])|^(?:company\s+switchboard|switchboard|public\s+contact(?:\s+point)?|general\s+contact|personal\s+email|company\s+email|corporate\s+email|generic\s+email)(?:$|[\s(（:：-])/iu;
+
+/** 是否为非具名占位联系人（`public_web` 总机/个人邮箱/公司邮箱等历史自动占位记录，非真实具名决策人）。 */
+export function isPlaceholderContact(contact: {
   fullName?: string | null;
   title?: string | null;
 }): boolean {
   const title = (contact.title ?? '').trim().toLowerCase();
   if (title === GENERIC_CONTACT_TITLE) return true;
   const name = (contact.fullName ?? '').trim();
-  if (name.startsWith('公开联系点')) return true;
-  const lowerName = name.toLowerCase();
-  return lowerName === 'company switchboard' || lowerName === 'switchboard';
+  if (!name) return false;
+  return PLACEHOLDER_CONTACT_NAME_RE.test(name);
+}
+
+/** 兼容既有导出名：是否为通用总机或历史非具名邮箱占位记录（非具名决策人）。 */
+export function isGenericSwitchboardContact(contact: {
+  fullName?: string | null;
+  title?: string | null;
+}): boolean {
+  return isPlaceholderContact(contact);
 }

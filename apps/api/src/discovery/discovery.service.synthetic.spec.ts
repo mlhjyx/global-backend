@@ -147,6 +147,13 @@ describe('DiscoveryService synthetic provenance read quarantine', () => {
             { id: 'ct-1', fullName: 'Giulio Rossi', title: 'CEO', contactPoints: [] },
             { id: 'ct-2', fullName: '公开联系点 (info@)', title: 'switchboard', contactPoints: [] },
             { id: 'ct-3', fullName: 'Company Switchboard', title: null, contactPoints: [] },
+            { id: 'ct-4', fullName: '个人邮箱 (servizioclienti@)', title: null, contactPoints: [] },
+            {
+              id: 'ct-5',
+              fullName: "Matteo Dell'Oglio",
+              title: 'Sales Manager Lombardia',
+              contactPoints: [{ type: 'email', value: 'm.delloglio@formesrl.it', status: 'VALID', verificationState: 'VALID' }],
+            },
           ],
         })),
       },
@@ -156,9 +163,9 @@ describe('DiscoveryService synthetic provenance read quarantine', () => {
     };
 
     const result = await serviceWithTx(tx).getCanonicalCompany(ctx, 'company-real');
-    expect(result.company.contacts.map((contact) => contact.id)).toEqual(['ct-1']);
+    expect(result.company.contacts.map((contact) => contact.id)).toEqual(['ct-5', 'ct-1']);
     expect(tx.fieldEvidence.findMany).toHaveBeenCalledWith({
-      where: { entityId: { in: ['company-real', 'ct-1', 'ct-2', 'ct-3'] } },
+      where: { entityId: { in: ['company-real', 'ct-1', 'ct-2', 'ct-3', 'ct-4', 'ct-5'] } },
       orderBy: { fetchedAt: 'desc' },
     });
   });

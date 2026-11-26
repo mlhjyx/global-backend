@@ -112,4 +112,62 @@ describe('Batch 1.3-A Anti-info@ 4-track Buying Committee engine', () => {
     expect(localizedCommitteeXrayQuery({ name: 'Coesa Energy', country: 'IT' })).toContain('Responsabile Acquisti');
     expect(localizedCommitteeXrayQuery({ name: 'Coesa Energy' })).toBeNull();
   });
+
+  it('ranks VALID email contacts strictly ahead of usable non-INVALID emails and no-email contacts, breaking ties by track', () => {
+    const ordered = prioritizeBuyingCommitteeContacts([
+      {
+        id: 'vp-no-email',
+        title: 'Head of Procurement',
+        points: [],
+      },
+      {
+        id: 'exec-invalid-only',
+        title: 'Managing Director',
+        points: [{ type: 'email', value: 'bad@memodo.it', status: 'INVALID', verificationState: 'INVALID' }],
+      },
+      {
+        id: 'tech-guess-only',
+        title: 'Technical Director',
+        points: [
+          {
+            type: 'email',
+            value: 'guess@memodo.it',
+            status: 'RISKY',
+            verificationState: 'CATCH_ALL_RISKY',
+            sourceType: 'pattern_guess',
+          },
+        ],
+      },
+      {
+        id: 'sales-risky',
+        title: 'Sales Manager',
+        points: [{ type: 'email', value: 's@memodo.it', status: 'RISKY', verificationState: 'CATCH_ALL_RISKY' }],
+      },
+      {
+        id: 'buyer-unknown',
+        title: 'Senior Buyer',
+        points: [{ type: 'email', value: 'b@memodo.it', status: 'UNVERIFIED', verificationState: 'UNKNOWN' }],
+      },
+      {
+        id: 'sales-valid',
+        title: 'Sales Manager Lombardia',
+        points: [{ type: 'email', value: 'm.delloglio@memodo.it', status: 'VALID', verificationState: 'VALID' }],
+      },
+      {
+        id: 'exec-valid',
+        title: 'Managing Director',
+        points: [{ type: 'email', value: 'md@memodo.it', status: 'VALID', verificationState: 'VALID' }],
+      },
+    ]);
+
+    expect(ordered.map((c) => c.id)).toEqual([
+      'exec-valid',
+      'sales-valid',
+      'buyer-unknown',
+      'sales-risky',
+      'vp-no-email',
+      'tech-guess-only',
+      'exec-invalid-only',
+    ]);
+  });
 });

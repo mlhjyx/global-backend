@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   extractCompanySocialProfiles,
+  filterDecisionMakerContacts,
   filterReachableCompanyChannels,
   loadLeadListChannelSummaries,
 } from './company-channels';
@@ -70,6 +71,8 @@ describe('lead-channels', () => {
       canonicalContact: {
         findMany: vi.fn(async () => [
           { companyId: 'co-1', fullName: '公开联系点 (info@)', title: 'switchboard', contactPoints: [] },
+          { companyId: 'co-1', fullName: '个人邮箱 (servizioclienti@)', title: null, contactPoints: [] },
+          { companyId: 'co-1', fullName: '公司邮箱 (vendite@)', title: null, contactPoints: [] },
           { companyId: 'co-1', fullName: 'Marco Rossi', title: 'CEO', contactPoints: [{ type: 'email', value: 'm@coenergia.com', status: 'VALID' }] },
         ]),
       },
@@ -91,5 +94,19 @@ describe('lead-channels', () => {
       decisionMakerCount: 1,
       verifiedEmailCount: 1,
     });
+  });
+
+  it('filterDecisionMakerContacts drops legacy placeholder contacts and ranks VALID email contacts first', () => {
+    const out = filterDecisionMakerContacts([
+      { id: 'c-placeholder', fullName: '个人邮箱 (servizioclienti@)', title: null, contactPoints: [] },
+      { id: 'c-vp-none', fullName: 'Tobias Michl', title: 'VP of Procurement', contactPoints: [] },
+      {
+        id: 'c-sales-valid',
+        fullName: "Matteo Dell'Oglio",
+        title: 'Sales Manager Lombardia',
+        contactPoints: [{ type: 'email', value: 'm.delloglio@memodo.it', status: 'VALID', verificationState: 'VALID' }],
+      },
+    ]);
+    expect(out.map((c) => c.id)).toEqual(['c-sales-valid', 'c-vp-none']);
   });
 });
