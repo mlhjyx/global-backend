@@ -150,6 +150,9 @@ export const MAX_DECISION_MAKER_PAGES = 4 as const;
 export const MAX_PUBLIC_WEB_CONTACT_LINKED_PAGES = 4 as const; // A1：法律页固定路径变体需要多个槽位（/impressum, /kontakt, /impressum/, …）
 /** social_presence 索引层：每家最多发出的社媒 dork 数（buildSocialDorks 上限）。 */
 export const MAX_SOCIAL_DORKS = 4 as const;
+/** social_presence 商业找人轨：每家最多 2 次 Serper LinkedIn X-Ray 与 1 次 Exa People。 */
+export const MAX_SOCIAL_SERPER_QUERIES = 2 as const;
+export const MAX_SOCIAL_EXA_PEOPLE_QUERIES = 1 as const;
 /** social_presence 档案/直抓层：每个候选页最多 3 次抓取（Wayback availability + 档案副本 + 直抓）。 */
 export const MAX_SOCIAL_FETCHES_PER_CANDIDATE = 3 as const;
 /** companies_house 联系人发现：公司搜索 + officers 两次调用。 */

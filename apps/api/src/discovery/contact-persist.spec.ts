@@ -583,3 +583,57 @@ describe('A4：contact_point.source_url 形状防护（DB CHECK 同源）', () =
     expect(emailCreateOf(contactPointUpsert)).toMatchObject({ sourceUrl: 'https://new.test/impressum' });
   });
 });
+
+describe('#96-5：contact_persist 渠道电话国家复判与 Art.14 排期防漏', () => {
+  it('当公司 country=null 且 .com 域名无法判定国别，但 company_contact_channel 有 +39 电话时，回填 IT 并排期 Art.14', async () => {
+    const { tx } = fakeTx([], { companyName: 'IO Solar', companyDomain: 'iosolar.com' });
+    const article14Create = vi.fn(async () => ({ id: 'notice-1' }));
+    const companyUpdateMany = vi.fn(async () => ({ count: 1 }));
+    const fullTx = {
+      ...(tx as unknown as Record<string, unknown>),
+      canonicalCompany: { updateMany: companyUpdateMany },
+      companyContactChannel: {
+        findMany: vi.fn(async () => [{ channel: 'phone', value: '+39 0543 097431' }]),
+      },
+      article14Notice: {
+        findFirst: vi.fn(async () => null),
+        create: article14Create,
+      },
+    };
+    const res = await persistDiscoveredContacts(fullTx as never, {
+      workspaceId: WS,
+      company: { id: 'co-iosolar', dedupeKey: 'd:iosolar.com' },
+      adapterKey: 'social_presence',
+      contacts: [
+        {
+          externalId: 'sp:1',
+          fullName: 'Matteo Ferri',
+          title: 'Responsabile Acquisti',
+          email: 'm.ferri@iosolar.com',
+          personalData: true,
+        },
+      ],
+      suppressedEmails: new Set(),
+      lawfulBasis: {
+        basis: 'legitimate_interest',
+        ref: 'lia-it-1',
+        recordedBy: 'tester',
+        recordedAt: new Date().toISOString(),
+      },
+    });
+    expect(res.created).toBe(1);
+    expect(companyUpdateMany).toHaveBeenCalledWith({
+      where: { id: 'co-iosolar', country: null, status: { not: 'SUPPRESSED' } },
+      data: { country: 'IT', version: { increment: 1 } },
+    });
+    expect(article14Create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          workspaceId: WS,
+          subjectType: 'contact',
+          jurisdiction: 'EU',
+        }),
+      }),
+    );
+  });
+});

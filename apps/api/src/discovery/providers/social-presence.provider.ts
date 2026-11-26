@@ -12,15 +12,27 @@ import {
 import {
   MAX_CONTACTS_PER_DISCOVERY_ADAPTER,
   MAX_SOCIAL_DORKS,
+  MAX_SOCIAL_EXA_PEOPLE_QUERIES,
   MAX_SOCIAL_PROFILE_FETCHES,
+  MAX_SOCIAL_SERPER_QUERIES,
 } from '../execution-envelope';
 import type { RuntimeTelemetry } from '../../model-runtime/types';
 import { isExecutionControlError } from '../../execution-budget/execution-control-error';
 import { normalizePersonName } from '../person-name';
 import { cleanEmail, cleanPhone } from '../../acquisition/clean';
-import { localizedCommitteeXrayQuery, prioritizeBuyingCommitteeContacts } from '../../enrichment/buying-committee';
+import {
+  buildBuyingCommitteeQueries,
+  localizedCommitteeXrayQuery,
+  prioritizeBuyingCommitteeContacts,
+} from '../../enrichment/buying-committee';
 import { ExtractedPerson, cleanPersonName, extractPeopleFromPage } from './contact-extraction';
 import { isCrossCompanySocialMismatch, isJunkContactCandidate } from './contact-quality-filter';
+import {
+  companyMatchLevel,
+  hasDistinctiveCompanyEvidence,
+  hasRoleEvidence,
+  matchesCompany,
+} from './social-role-lexicon';
 
 /**
  * 社媒/渠道联系人适配器（M2a 索引层 + M2b 档案/直抓层）。
@@ -112,203 +124,6 @@ export function parseSocialHeadline(title: string): { fullName: string; title?: 
   if (words.length < 2 || words.length > 6) return null;
   const role = segments.length > 1 ? segments[1] : undefined;
   return { fullName, ...(role ? { title: role } : {}) };
-}
-
-/** 公司名比对里无区分度的法律形式/泛词（"GmbH" 不能证明页面属于这家公司）。 */
-const LEGAL_FORM_TOKENS = new Set([
-  'gmbh', 'mbh', 'ag', 'kg', 'ohg', 'ug', 'gbr', 'ek', 'inc', 'incorporated',
-  'ltd', 'limited', 'llc', 'corp', 'corporation', 'co', 'company', 'plc',
-  'sa', 'sas', 'sarl', 'bv', 'nv', 'holding', 'holdings', 'group', 'gruppe',
-  'international', 'und', 'the', 'der', 'die', 'das',
-]);
-
-/**
- * 泛词公司名 token（M5 第四轮，r14 验收残留类）：作为公司名出现时不具备区分度的业务通用词。
- * 泛词**单独命中不算公司佐证**——"Technical Manager at Redline Technical…" 对公司「Technical」
- * 天然命中，收进来的是别家公司的员工。有区分度的 token（BTS、Havlicek）照常放行；公司名本身是
- * 泛词时须升级为完整域名或多词全名短语（{@link hasDistinctiveCompanyEvidence}）。
- * 折叠形（小写、ß→ss、去变音、ae/oe/ue 收敛）；词表刻意保守：只收毫无区分度的业务/职能词，
- * 漏词只会回到原守卫（少收紧），不会误伤。
- */
-const GENERIC_NAME_TOKENS: ReadonlySet<string> = new Set([
-  // 英语
-  'technical', 'technics', 'technology', 'technologies', 'tech',
-  'industry', 'industries', 'industrial',
-  'system', 'systems', 'solution', 'solutions',
-  'consult', 'consulting', 'consultancy', 'consultant', 'consultants',
-  'engineering', 'engineer', 'engineers',
-  'service', 'services', 'partner', 'partners',
-  'global', 'digital', 'media', 'software', 'business', 'management',
-  'agency', 'agencies', 'sales', 'marketing', 'development',
-  'innovation', 'innovations', 'integration', 'automation',
-  'logistics', 'energy', 'construction', 'manufacturing', 'production', 'operations',
-  // 德语（折叠后）
-  'technik', 'industrie', 'systeme', 'losung', 'losungen', 'beratung',
-  'unternehmensberatung', 'dienstleistung', 'dienstleistungen',
-  'produktion', 'fertigung', 'konstruktion', 'entwicklung', 'planung', 'vertrieb',
-]);
-
-/** 公司名的可比 token（≥3 字符、去法律形式）：raw 供包含匹配，folded 供泛词分类。 */
-function companyNameTokens(company: { name: string }): { raw: string; folded: string }[] {
-  return company.name
-    .toLowerCase()
-    .split(/[^\p{L}\p{N}]+/u)
-    .filter((token) => token.length >= 3 && !LEGAL_FORM_TOKENS.has(token))
-    .map((token) => ({ raw: token, folded: foldRoleText(token) }));
-}
-
-type CompanyMatchLevel = 'distinctive' | 'generic' | 'none';
-
-/**
- * 公司佐证强度：命中的是有区分度的公司名 token / 域名词根（distinctive），还是只有泛词（generic），
- * 还是没有（none）。泛词单独命中不构成「这就是这家公司」——L3 对 'generic' 要求升级佐证。
- */
-function companyMatchLevel(
-  text: string,
-  company: { name: string; domain?: string },
-): CompanyMatchLevel {
-  const haystack = text.toLowerCase();
-  let generic = false;
-  for (const token of companyNameTokens(company)) {
-    if (!haystack.includes(token.raw)) continue;
-    if (!GENERIC_NAME_TOKENS.has(token.folded)) return 'distinctive';
-    generic = true;
-  }
-  const root = company.domain?.toLowerCase().split('.')[0];
-  if (root && root.length >= 3 && haystack.includes(root)) {
-    if (!GENERIC_NAME_TOKENS.has(foldRoleText(root))) return 'distinctive';
-    generic = true;
-  }
-  return generic ? 'generic' : 'none';
-}
-
-/** 任何公司名 token / 域名词根出现即算命中（L2 富化门：只为已过 L3 证据门的候选补数据）。 */
-function matchesCompany(text: string, company: { name: string; domain?: string }): boolean {
-  return companyMatchLevel(text, company) !== 'none';
-}
-
-/** 公司域名整体出现（边界匹配：允许 www./路径前缀，拒绝 technical.design 这类同前缀 TLD）。 */
-function textMentionsDomain(text: string, domain: string | undefined): boolean {
-  const needle = domain?.toLowerCase().replace(/^www\./, '');
-  if (!needle) return false;
-  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`(^|[^a-z0-9-])${escaped}(?![a-z0-9-])`, 'i').test(text);
-}
-
-/** 多词公司名的完整短语（折叠后按 token 边界连续出现）：比单个泛词更有区分度。 */
-function textContainsCompanyPhrase(text: string, company: { name: string }): boolean {
-  const tokens = companyNameTokens(company)
-    .map((token) => token.folded)
-    .filter(Boolean);
-  if (tokens.length < 2) return false;
-  return ` ${foldRoleText(text)} `.includes(` ${tokens.join(' ')} `);
-}
-
-/**
- * 泛词命中时的升级佐证：完整域名出现，或多词公司名以完整短语出现。单字泛词名（如「Technical」）
- * 在社媒索引层实际只能靠域名过门——这正是期望的保守边界：它的公司名无法从文本自证，宁缺勿错。
- */
-function hasDistinctiveCompanyEvidence(
-  text: string,
-  company: { name: string; domain?: string },
-): boolean {
-  return textMentionsDomain(text, company.domain) || textContainsCompanyPhrase(text, company);
-}
-
-/**
- * 职位/职能词表（M5 第三轮）：社媒标题里公司名之外的**专业佐证**。
- * 折叠后比对（小写、ß→ss、去变音、德语转写 ae/oe/ue→a/o/u）；≥4 字符按词内子串匹配以覆盖德语复合词
- * （"Einkaufsleiterin" ⊃ leiter），极短 C-level 缩写只认整 token。词表刻意保守：漏词 → 少召回（宁缺勿错），
- * 不收 "professional"/"student" 这类无区分度或非职位的词。
- */
-const ROLE_WORDS: readonly string[] = [
-  // 德语
-  'geschäftsführer', 'geschäftsführerin', 'geschäftsführung', 'geschäftsleitung', 'geschäftsleiter',
-  'vorstand', 'vorständin', 'vorstandsvorsitzender', 'leiter', 'leiterin', 'leitung', 'teamleiter',
-  'teamleitung', 'abteilungsleiter', 'bereichsleiter', 'gruppenleiter', 'projektleiter', 'projektleitung',
-  'produktleiter', 'produktmanagement', 'produktmanager', 'betriebsleiter', 'werkleiter', 'bauleiter',
-  'einkaufsleiter', 'einkauf', 'einkäufer', 'beschaffung', 'beschaffungsleiter', 'vertrieb',
-  'vertriebsleiter', 'vertriebsingenieur', 'verkauf', 'verkäufer', 'marketing', 'marketingleiter',
-  'personalleiter', 'personalreferent', 'personalwesen', 'personalabteilung', 'prokurist', 'inhaber',
-  'gesellschafter', 'gründer', 'mitgründer', 'berater', 'beraterin', 'spezialist', 'spezialistin',
-  'experte', 'expertin', 'sachbearbeiter', 'sachbearbeiterin', 'fachkraft', 'meister', 'techniker',
-  'technikerin', 'technik', 'ingenieur', 'ingenieurin', 'konstrukteur', 'entwicklung', 'entwickler',
-  'entwicklerin', 'softwareentwickler', 'anwendungsentwickler', 'kaufmann', 'kauffrau', 'assistent',
-  'assistentin', 'assistenz', 'sekretariat', 'referent', 'referentin', 'koordinator', 'koordinatorin',
-  'buchhaltung', 'finanzen', 'controlling', 'controller', 'logistik', 'logistikleiter', 'produktion',
-  'produktionsleiter', 'fertigung', 'montage', 'monteur', 'servicetechniker', 'kundenbetreuung',
-  'kundenberater', 'recruiting', 'ausbilder', 'trainee', 'werkstudent', 'praktikant',
-  'mitarbeiter', 'mitarbeiterin', 'angestellte', 'angestellter',
-  // 英语
-  'manager', 'management', 'director', 'managing', 'head', 'lead', 'leader', 'leadership', 'chief',
-  'officer', 'executive', 'president', 'founder', 'owner', 'partner', 'principal', 'consultant',
-  'consulting', 'specialist', 'expert', 'coordinator', 'administrator', 'assistant', 'associate',
-  'analyst', 'architect', 'designer', 'developer', 'engineer', 'engineering', 'technician',
-  'supervisor', 'foreman', 'representative', 'agent', 'advisor', 'adviser', 'strategist', 'planner',
-  'buyer', 'purchasing', 'procurement', 'supply', 'logistics', 'operations', 'finance', 'financial',
-  'accounting', 'accountant', 'auditor', 'legal', 'counsel', 'lawyer', 'attorney', 'sales',
-  'marketing', 'business', 'development', 'research', 'researcher', 'scientist', 'quality', 'product',
-  'program', 'project', 'account', 'customer', 'revenue', 'growth', 'strategy', 'technical',
-  'service', 'support', 'teamlead',
-];
-
-/** 极短 C-level 缩写：只认整 token（子串匹配会撞进普通单词）。 */
-const SHORT_ROLE_WORDS = new Set(['ceo', 'cfo', 'cto', 'coo', 'cio', 'cmo', 'vp', 'svp', 'evp']);
-
-/** 职位词比对折叠：小写、ß→ss、去组合变音、德语转写收敛（ae/oe/ue→a/o/u）、标点→空格。 */
-function foldRoleText(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/ß/g, 'ss')
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .replace(/ae/g, 'a')
-    .replace(/oe/g, 'o')
-    .replace(/ue/g, 'u')
-    .replace(/[^\p{L}\p{N}]+/gu, ' ')
-    .trim();
-}
-
-const ROLE_KEYS: readonly string[] = [...new Set(ROLE_WORDS.map(foldRoleText))];
-// ≥6 字符按词内子串匹配（德语复合词 "Einkaufsleiterin" ⊃ einkauf/leiter）；≤5 字符只认整 token——
-// "headquarters" ⊃ head、"Agentur" ⊃ agent 这类普通词命中会让垃圾档案原路漏回（审查实测）。
-const ROLE_SUBSTRING_KEYS: readonly string[] = ROLE_KEYS.filter((key) => key.length >= 6);
-const ROLE_EXACT_KEYS = new Set(ROLE_KEYS.filter((key) => key.length < 6));
-
-/** 公司名的匹配 token（与 {@link matchesCompany} 同源：≥3 字符、去法律形式）+ 域名词根分词，折叠形。 */
-function companyRoleMatchTokens(company: { name: string; domain?: string }): Set<string> {
-  const tokens = new Set<string>();
-  for (const raw of company.name.toLowerCase().split(/[^\p{L}\p{N}]+/u)) {
-    if (raw.length >= 3 && !LEGAL_FORM_TOKENS.has(raw)) tokens.add(foldRoleText(raw));
-  }
-  const root = company.domain?.toLowerCase().split('.')[0];
-  if (root && root.length >= 3) {
-    // 域名词根按词逐个收（"it-service.de" → it + service）：整串折叠后会带空格，永远匹配不到单个 token。
-    for (const part of foldRoleText(root).split(' ').filter(Boolean)) tokens.add(part);
-  }
-  return tokens;
-}
-
-/**
- * headline 里是否除**人名与公司名**之外仍有职位/职能词（M5 第三轮收紧，`social_uninformative_dropped`）。
- * 与 #744 的公司佐证互补：只管"这像不像一个真实职场人的自述"，不管"是不是这家公司"。
- */
-function hasRoleEvidence(
-  headline: string,
-  personName: string,
-  company: { name: string; domain?: string },
-): boolean {
-  const drop = new Set<string>([...foldRoleText(personName).split(' '), ...companyRoleMatchTokens(company)]);
-  drop.delete('');
-  const residual = foldRoleText(headline)
-    .split(' ')
-    .filter((token) => token && !drop.has(token));
-  return residual.some(
-    (token) =>
-      SHORT_ROLE_WORDS.has(token) ||
-      ROLE_EXACT_KEYS.has(token) ||
-      ROLE_SUBSTRING_KEYS.some((key) => token.includes(key)),
-  );
 }
 
 /**
@@ -662,98 +477,174 @@ export class SocialPresenceContactAdapter implements ContactDiscoveryAdapter {
       );
   }
 
+  private ingestSocialHits(
+    hits: readonly SearxResultLike[],
+    company: { name: string; domain?: string; country?: string },
+    seen: Map<string, ProviderContactRecord>,
+    bump: (name: string) => void,
+  ): void {
+    for (const contact of parseSocialResults(hits, company, (reason) => bump(`social_${reason}_dropped`))) {
+      if (!seen.has(contact.externalId)) seen.set(contact.externalId, contact);
+    }
+  }
+
+  /**
+   * 4 轨社媒商业搜人编排（Batch 1.8A）：
+   *  1) Exa People（1 次，`social.search_exa_people`）；
+   *  2) Serper LinkedIn X-Ray（≤2 次，`social.search_serper`，累计命中 ≥8 提前收敛）；
+   *  3) 仅当两者均降级/失败或累计去重命中 <3 时，再走 SearXNG `social.search` 兜底（DE/AT/CH 保留 Xing）。
+   */
+  private async runMultiTrackSocialSearch(
+    broker: ExecutionBroker,
+    company: { name: string; domain?: string; country?: string },
+    ctx: ExecutionContext,
+    sellerCtx: ContactDiscoveryContext | undefined,
+    seen: Map<string, ProviderContactRecord>,
+    bump: (name: string) => void,
+  ): Promise<number> {
+    let costCents = 0;
+    const plan = buildBuyingCommitteeQueries({
+      companyName: company.name,
+      domain: company.domain,
+      country: company.country,
+    });
+    const gl = company.country && /^[a-z]{2}$/iu.test(company.country.trim())
+      ? company.country.trim().toLowerCase()
+      : undefined;
+
+    let exaSucceeded = false;
+    if (MAX_SOCIAL_EXA_PEOPLE_QUERIES > 0 && plan.exaPeopleQuery) {
+      try {
+        const output = await broker.invoke<
+          { query: string; numResults?: number },
+          { results: SearxResultLike[] }
+        >('social.search_exa_people', { query: plan.exaPeopleQuery, numResults: 10 }, this.toolCtx(ctx));
+        costCents += typeof output.costCents === 'number' ? output.costCents : 0;
+        exaSucceeded = output.degraded !== true;
+        this.ingestSocialHits(output.data?.results ?? [], company, seen, bump);
+      } catch (err) {
+        rethrowIfTerminal(err);
+      }
+    }
+
+    let serperSucceeded = false;
+    for (const query of plan.serperXrayQueries.slice(0, MAX_SOCIAL_SERPER_QUERIES)) {
+      if (seen.size >= 8 || seen.size >= MAX_CONTACTS_PER_DISCOVERY_ADAPTER) break;
+      try {
+        const output = await broker.invoke<
+          { query: string; num?: number; gl?: string },
+          { results: SearxResultLike[] }
+        >('social.search_serper', { query, num: 10, ...(gl ? { gl } : {}) }, this.toolCtx(ctx));
+        costCents += typeof output.costCents === 'number' ? output.costCents : 0;
+        if (output.degraded !== true) serperSucceeded = true;
+        this.ingestSocialHits(output.data?.results ?? [], company, seen, bump);
+      } catch (err) {
+        rethrowIfTerminal(err);
+      }
+    }
+
+    if ((!exaSucceeded && !serperSucceeded) || seen.size < 3) {
+      const queries = buildSocialDorks(company, sellerCtx?.targetRoles ?? []);
+      for (const q of queries) {
+        if (seen.size >= MAX_CONTACTS_PER_DISCOVERY_ADAPTER) break;
+        try {
+          const output = await broker.invoke<
+            { q: string; pages?: number },
+            { results: SearxResultLike[] }
+          >('social.search', { q, pages: 1 }, this.toolCtx(ctx));
+          costCents += typeof output.costCents === 'number' ? output.costCents : 0;
+          this.ingestSocialHits(output.data?.results ?? [], company, seen, bump);
+        } catch (err) {
+          rethrowIfTerminal(err);
+        }
+      }
+    }
+
+    return costCents;
+  }
+
+  private async enrichCandidateProfile(
+    candidate: ProviderContactRecord,
+    company: { name: string; domain?: string; country?: string },
+    ctx: ExecutionContext,
+    sellerCtx: ContactDiscoveryContext | undefined,
+    extractor: NonNullable<ReturnType<SocialPresenceContactAdapter['extractor']>>,
+    bump: (name: string) => void,
+  ): Promise<ProviderContactRecord | null> {
+    if (!candidate.sourcePage) return null;
+    let hostname: string;
+    try {
+      hostname = new URL(candidate.sourcePage).hostname;
+    } catch {
+      return null;
+    }
+    bump('social_fetches');
+    const page = await this.fetchProfilePage(candidate.sourcePage, hostname, socialHostKey(hostname), ctx, bump);
+    if (!page || !matchesCompany(page.text, company) || !pageTextMentionsName(page.text, candidate.fullName)) {
+      return null;
+    }
+    let people: ExtractedPerson[];
+    try {
+      people = await extractor(page.sourcePage, page.text, ctx, sellerCtx);
+    } catch (err) {
+      rethrowIfTerminal(err);
+      return null;
+    }
+    const person = pickCandidatePerson(people, candidate.fullName);
+    if (!person) return null;
+    const clean = (value?: string): string | undefined => value?.trim() || undefined;
+    const email = cleanEmail(person.email)?.value ?? candidate.email;
+    const phone = cleanPhone(person.phone) ?? candidate.phone;
+    bump(page.kind === 'archive' ? 'social_archive_hits' : 'social_live_hits');
+    return {
+      ...candidate,
+      title: choosePersonTitle(candidate.title, person.title),
+      department: clean(person.department) ?? candidate.department,
+      seniority: clean(person.seniority) ?? candidate.seniority,
+      buyingRole: clean(person.buying_role) ?? candidate.buyingRole,
+      isTargetRole:
+        typeof person.is_target_role === 'boolean' ? person.is_target_role : candidate.isTargetRole,
+      ...(email ? { email } : {}),
+      ...(phone ? { phone } : {}),
+      personalData: true,
+      sourcePage: page.sourcePage,
+      license: page.kind === 'archive' ? 'public-archive' : 'public-page',
+    };
+  }
+
   async discoverContacts(
     company: { name: string; domain?: string; country?: string },
     ctx: ExecutionContext,
     sellerCtx?: ContactDiscoveryContext,
   ): Promise<ContactDiscoveryResult> {
-    if (!this.deps.broker) return { contacts: [], costCents: 0 };
-    const broker = this.deps.broker;
+    if (!this.deps.broker || !company.name.trim()) return { contacts: [], costCents: 0 };
     const diagnostics: Record<string, number> = {};
     const bump = (name: string): void => {
       diagnostics[name] = (diagnostics[name] ?? 0) + 1;
     };
 
-    // L3 索引层（M2a）：social.search 只回个人主页 URL+标题（personalData:true 的独立工具，
-    // searxng.search 会把这些 URL 全部过滤掉）。
-    const queries = buildSocialDorks(company, sellerCtx?.targetRoles ?? []);
     const seen = new Map<string, ProviderContactRecord>();
-    for (const q of queries) {
-      if (seen.size >= MAX_CONTACTS_PER_DISCOVERY_ADAPTER) break;
-      try {
-        const output = await broker.invoke<
-          { q: string; pages?: number },
-          { results: SearxResultLike[] }
-        >('social.search', { q, pages: 1 }, this.toolCtx(ctx));
-        for (const contact of parseSocialResults(
-          output.data?.results ?? [],
-          company,
-          (reason) => bump(`social_${reason}_dropped`),
-        )) {
-          if (!seen.has(contact.externalId)) seen.set(contact.externalId, contact);
-        }
-      } catch (err) {
-        rethrowIfTerminal(err);
-        /* 单条 dork 失败不影响其余查询 */
-      }
-    }
+    const costCents = await this.runMultiTrackSocialSearch(
+      this.deps.broker,
+      company,
+      ctx,
+      sellerCtx,
+      seen,
+      bump,
+    );
 
     // L1/L2 层（M2b）：对候选个人页补档案副本→直抓，抽到的职务/部门/邮箱并入同一人记录。
-    // 没有抽取器（无 gateway/测试注入）时整段跳过——不发任何无意义的外部请求。
     const extractor = this.extractor();
     if (extractor) {
-      const candidates = [...seen.values()].slice(0, MAX_SOCIAL_PROFILE_FETCHES);
-      for (const candidate of candidates) {
-        if (!candidate.sourcePage) continue;
-        let hostname: string;
-        try {
-          hostname = new URL(candidate.sourcePage).hostname;
-        } catch {
-          continue;
-        }
-        bump('social_fetches');
-        const hostKey = socialHostKey(hostname);
-        const page = await this.fetchProfilePage(candidate.sourcePage, hostname, hostKey, ctx, bump);
-        if (!page) continue;
-        // 富化门只服务已过 L3 证据门的候选，弱匹配（含泛词）即可；收录与否由 L3 决定。
-        if (!matchesCompany(page.text, company)) continue;
-        if (!pageTextMentionsName(page.text, candidate.fullName)) continue;
-        let people: ExtractedPerson[];
-        try {
-          people = await extractor(page.sourcePage, page.text, ctx, sellerCtx);
-        } catch (err) {
-          rethrowIfTerminal(err);
-          continue;
-        }
-        const person = pickCandidatePerson(people, candidate.fullName);
-        if (!person) continue;
-        const clean = (value?: string): string | undefined => value?.trim() || undefined;
-        // 邮箱/电话先在本地校验：持久化对「带不可解析邮箱」的候选整条 fail-closed，
-        // 不能因为模型抄了个乱码邮箱把可靠的姓名/职务一起丢掉。
-        const email = cleanEmail(person.email)?.value ?? candidate.email;
-        const phone = cleanPhone(person.phone) ?? candidate.phone;
-        const enriched: ProviderContactRecord = {
-          ...candidate,
-          title: choosePersonTitle(candidate.title, person.title),
-          department: clean(person.department) ?? candidate.department,
-          seniority: clean(person.seniority) ?? candidate.seniority,
-          buyingRole: clean(person.buying_role) ?? candidate.buyingRole,
-          isTargetRole:
-            typeof person.is_target_role === 'boolean' ? person.is_target_role : candidate.isTargetRole,
-          ...(email ? { email } : {}),
-          ...(phone ? { phone } : {}),
-          personalData: true,
-          sourcePage: page.sourcePage,
-          license: page.kind === 'archive' ? 'public-archive' : 'public-page',
-        };
-        seen.set(candidate.externalId, enriched);
-        bump(page.kind === 'archive' ? 'social_archive_hits' : 'social_live_hits');
+      for (const candidate of [...seen.values()].slice(0, MAX_SOCIAL_PROFILE_FETCHES)) {
+        const enriched = await this.enrichCandidateProfile(candidate, company, ctx, sellerCtx, extractor, bump);
+        if (enriched) seen.set(candidate.externalId, enriched);
       }
     }
 
     return {
       contacts: prioritizeBuyingCommitteeContacts([...seen.values()], MAX_CONTACTS_PER_DISCOVERY_ADAPTER),
-      costCents: 0,
+      costCents,
       ...(Object.keys(diagnostics).length ? { diagnostics } : {}),
     };
   }

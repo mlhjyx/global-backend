@@ -10,9 +10,13 @@ import {
   createExaSearchTool,
   createGooglePlacesSearchTool,
   createSerperSearchTool,
+  createSocialExaPeopleTool,
+  createSocialSerperSearchTool,
   exaSearchTool,
   googlePlacesSearchTool,
   serperSearchTool,
+  socialExaPeopleTool,
+  socialSerperSearchTool,
 } from './search-provider-tools';
 import { registerBuiltinTools } from './builtin-tools';
 import { ToolRegistry } from './tool-registry';
@@ -199,11 +203,103 @@ describe('L0 search provider tools (serper.search / exa.search / google_places.s
     ).toEqual(res);
   });
 
-  it('registers all four tools through registerBuiltinTools', () => {
+  it('social.search_serper & social.search_exa_people keep only person profile URLs, preserve full replay, and degrade cleanly', async () => {
+    const ctx: ToolContext = { workspaceId: 'ws', purpose: 'discovery' };
+    const noKeySerper = createSocialSerperSearchTool({
+      serperSearch: vi.fn(),
+      resolveApiKey: () => undefined,
+    });
+    const noKeyExa = createSocialExaPeopleTool({
+      exaSearch: vi.fn(),
+      resolveApiKey: () => undefined,
+    });
+    expect(await noKeySerper.execute({ query: 'site:linkedin.com/in "Coenergia"' }, ctx)).toEqual({
+      data: { results: [] },
+      costCents: 0,
+      degraded: true,
+    });
+    expect(await noKeyExa.execute({ query: 'Coenergia Responsabile Acquisti' }, ctx)).toEqual({
+      data: { results: [] },
+      costCents: 0,
+      degraded: true,
+    });
+
+    const beforePhysicalWire = vi.fn(async () => undefined);
+    const serper = createSocialSerperSearchTool({
+      resolveApiKey: () => 'serper-key',
+      serperSearch: vi.fn(async (_input, deps) => {
+        await deps?.beforeRequest?.();
+        return {
+          billed: true,
+          hits: [
+            { url: 'https://it.linkedin.com/in/marco-rossi', title: 'Marco Rossi - Responsabile Acquisti - Coenergia Srl' },
+            { url: 'https://www.linkedin.com/company/coenergia', title: 'Coenergia Srl | LinkedIn' },
+            { url: 'https://www.linkedin.com/posts/coenergia_pv-123', title: 'Coenergia post' },
+            { url: 'https://www.xing.com/profile/Max_Mustermann', title: 'Max Mustermann - Einkauf - Coenergia' },
+          ],
+        };
+      }),
+    });
+    const serperRes = await serper.execute(
+      { query: 'site:linkedin.com/in "Coenergia"', gl: 'it', num: 10 },
+      { workspaceId: 'ws', purpose: 'enrichment', beforePhysicalWire },
+    );
+    expect(beforePhysicalWire).toHaveBeenCalledTimes(1);
+    expect(serperRes).toEqual({
+      data: {
+        results: [
+          { url: 'https://it.linkedin.com/in/marco-rossi', title: 'Marco Rossi - Responsabile Acquisti - Coenergia Srl' },
+          { url: 'https://www.xing.com/profile/Max_Mustermann', title: 'Max Mustermann - Einkauf - Coenergia' },
+        ],
+      },
+      costCents: 1,
+    });
+    expect(
+      projectionRegistry().project(CATALOG_RESULT_PROJECTION_SCHEMAS['social.search_serper'], serperRes).data,
+    ).toEqual(serperRes);
+    expect(serper.durableReplayResult?.(serperRes)).toEqual(serperRes);
+
+    const exaSearchMock = vi.fn(async (input, deps) => {
+      expect(input.category).toBe('people');
+      await deps?.beforeRequest?.();
+      return {
+        billed: true,
+        hits: [
+          { url: 'https://www.linkedin.com/in/elena-conti', title: 'Elena Conti - Direttore Tecnico - ReFeel EPC' },
+          { url: 'https://www.linkedin.com/posts/refeel_solar', title: 'Post' },
+        ],
+      };
+    });
+    const exa = createSocialExaPeopleTool({
+      resolveApiKey: () => 'exa-key',
+      exaSearch: exaSearchMock,
+    });
+    const exaRes = await exa.execute(
+      { query: 'ReFeel EPC Direttore Tecnico', numResults: 10 },
+      { workspaceId: 'ws', purpose: 'enrichment', beforePhysicalWire },
+    );
+    expect(beforePhysicalWire).toHaveBeenCalledTimes(2);
+    expect(exaRes).toEqual({
+      data: {
+        results: [
+          { url: 'https://www.linkedin.com/in/elena-conti', title: 'Elena Conti - Direttore Tecnico - ReFeel EPC' },
+        ],
+      },
+      costCents: 1,
+    });
+    expect(
+      projectionRegistry().project(CATALOG_RESULT_PROJECTION_SCHEMAS['social.search_exa_people'], exaRes).data,
+    ).toEqual(exaRes);
+    expect(exa.durableReplayResult?.(exaRes)).toEqual(exaRes);
+  });
+
+  it('registers all six search provider tools through registerBuiltinTools', () => {
     const registry = registerBuiltinTools(new ToolRegistry());
     expect(registry.get('serper.search')).toBe(serperSearchTool);
     expect(registry.get('brave.search')).toBe(braveSearchTool);
     expect(registry.get('exa.search')).toBe(exaSearchTool);
     expect(registry.get('google_places.search')).toBe(googlePlacesSearchTool);
+    expect(registry.get('social.search_serper')).toBe(socialSerperSearchTool);
+    expect(registry.get('social.search_exa_people')).toBe(socialExaPeopleTool);
   });
 });

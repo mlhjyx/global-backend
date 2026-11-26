@@ -1,25 +1,34 @@
 /**
- * 19 列受审计多通道作战清表（Battle CSV）行构造器（Batch 1.4-C）。
+ * 21 列受审计多通道作战清表（Battle CSV）行构造器（Batch 1.4-C + Batch 1.8A 升级）。
  *
  * 将已过 DataRights EXPORT / 制裁 / 合成隔离 / 抑制过滤后的线索、决策人、公司联络点、
- * Art.14/LIA 合规记录组装为 `BattleCsvRow`，并经 `renderBattleCsv()` 输出带 UTF-8 BOM
- * 与 CWE-1236 公式中和的正式 CSV。
+ * 真实公司信号（Trigger）、评审准则证据、Art.14/LIA 合规记录组装为 `BattleCsvRow`，
+ * 并经 `renderBattleCsv()` 输出带 UTF-8 BOM 与 CWE-1236 公式中和的正式 CSV。
  */
 import type { Prisma } from '@prisma/client';
 import { classifyContactEmail } from '../discovery/contact-classifier';
 import { resolveCompanyJurisdiction } from '../discovery/jurisdiction-resolver';
 import {
+  buildForwardableBlurb,
   buildLinkedInCoPilotPlaybook,
   buildReferralFirstInfoDraft,
   classifyBuyingCommitteeTrack,
   classifyContactChannelTier,
+  countryOutreachWindow,
   effectiveEmailVerificationState,
   isUsableOutreachEmailPoint,
+  localizedDepartmentLabel,
   prioritizeBuyingCommitteeContacts,
+  validateLinkedInConnectionNote,
 } from '../enrichment/buying-committee';
 import { evaluateMultiChannelOutreachPolicy } from '../outreach/multi-channel-playbook';
 import { isPlaceholderContact } from '../discovery/providers/contact-quality-filter';
 import { extractCompanySocialProfiles } from '../discovery/company-channels';
+import {
+  projectStoredAndFallbackSignals,
+  type LeadPackageCompanySignal,
+} from '../signals/enrichment-signal-projection';
+import { buildSignalIcebreakers, type SignalIcebreakerSuggestion } from '../signals/signal-icebreaker';
 import { renderBattleCsv, type BattleCsvRow } from './battle-csv';
 export type { BattleCsvRow } from './battle-csv';
 
@@ -62,6 +71,11 @@ export interface BattleCompanyChannel {
   readonly status?: string;
 }
 
+export interface BattleJudgmentRecord {
+  readonly verdict?: string | null;
+  readonly criteria?: Prisma.JsonValue;
+}
+
 export interface BattleRowBuildInput {
   readonly lead: BattleLeadFact;
   readonly company: BattleCompanyFact;
@@ -69,6 +83,8 @@ export interface BattleRowBuildInput {
   readonly companyContactChannels?: readonly BattleCompanyChannel[];
   readonly decisionMakers: readonly BattleDecisionMaker[];
   readonly draft: { subject: string; body: string } | null;
+  readonly judgmentRecord?: BattleJudgmentRecord | null;
+  readonly companySignals?: readonly LeadPackageCompanySignal[];
   readonly article14StatusByContactId?: ReadonlyMap<string, string>;
   readonly hasActiveWorkspaceLia?: boolean;
   readonly sellerName?: string | null;
@@ -76,25 +92,173 @@ export interface BattleRowBuildInput {
   readonly sellerInboundFooter?: string | null;
 }
 
-function summarizeEvidence(lead: BattleLeadFact, company: BattleCompanyFact): string {
+const NOISE_SCORE_NOTE_RE = /无(?:真实)?意图信号|暂无意图信号|未检测到(?:真实)?意图信号|no intent signal/iu;
+const CJK_SCRIPT_RE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+const STRIP_LINKEDIN_URL_RE = /\b(?:https?:\/\/|www\.)\S+/giu;
+const STRIP_LINKEDIN_PLACEHOLDER_RE = /\[[^\]]{1,40}\]|\{[^}]{1,40}\}|<[^>]{1,40}>/gu;
+const MAX_EVIDENCE_CHARS = 260;
+
+const FUNCTIONAL_A_TIER_PRIORITY: Readonly<Record<string, number>> = Object.freeze({
+  procurement: 0,
+  generic_sales: 1,
+  management: 2,
+  support: 3,
+  finance: 4,
+});
+
+function parseLinkedinPathname(rawUrl: string): string | null {
+  const trimmed = rawUrl.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = /^https?:\/\//iu.test(trimmed) ? new URL(trimmed) : new URL(`https://${trimmed}`);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null;
+    const host = parsed.hostname.toLowerCase();
+    if (host !== 'linkedin.com' && !host.endsWith('.linkedin.com')) return null;
+    return parsed.pathname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function isPersonalLinkedinUrl(url: string): boolean {
+  const path = parseLinkedinPathname(url);
+  return path !== null && (path.startsWith('/in/') || path.startsWith('/pub/'));
+}
+
+function isCompanyLinkedinUrl(url: string): boolean {
+  const path = parseLinkedinPathname(url);
+  return path !== null && (path.startsWith('/company/') || path.startsWith('/showcase/'));
+}
+
+const DEFAULT_PRODUCT_BY_LANGUAGE: Readonly<Record<string, string>> = Object.freeze({
+  it: 'componenti e prodotti industriali OEM/ODM',
+  de: 'Industrieprodukte (OEM/ODM)',
+  es: 'productos industriales OEM/ODM',
+  fr: 'produits industriels OEM/ODM',
+  pt: 'produtos industriais OEM/ODM',
+  en: 'industrial OEM/ODM products',
+});
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function extractCarriedBrands(attrs: Record<string, unknown>): string[] {
+  const profile = asRecord(attrs.website_profile);
+  if (!Array.isArray(profile.carried_brands)) return [];
+  const names: string[] = [];
+  for (const item of profile.carried_brands) {
+    if (typeof item === 'string' && item.trim()) {
+      names.push(item.trim());
+    } else if (item && typeof item === 'object' && !Array.isArray(item)) {
+      const name = (item as { name?: unknown }).name;
+      if (typeof name === 'string' && name.trim()) names.push(name.trim());
+    }
+  }
+  return [...new Set(names)];
+}
+
+function judgmentLabelRank(label: string): number {
+  const normalized = label.toLowerCase();
+  if (normalized === 'pass') return 3;
+  if (normalized === 'unclear') return 2;
+  if (normalized === 'fail') return 1;
+  return 0;
+}
+
+function extractJudgmentRationales(judgmentRecord: BattleJudgmentRecord | null | undefined): string[] {
+  if (!judgmentRecord || !Array.isArray(judgmentRecord.criteria)) return [];
+  const items: Array<{
+    id: string;
+    label: string;
+    labelRank: number;
+    rationale: string;
+    score: number | null;
+    index: number;
+  }> = [];
+  judgmentRecord.criteria.forEach((raw, index) => {
+    const rec = asRecord(raw);
+    if (rec.applicable === false) return;
+    const label = typeof rec.label === 'string' ? rec.label.replace(/\s+/gu, ' ').trim() : '';
+    if (label.toLowerCase() === 'not_applicable') return;
+    const rationale = typeof rec.rationale === 'string' ? rec.rationale.replace(/\s+/gu, ' ').trim() : '';
+    if (!rationale) return;
+    const id = typeof rec.id === 'string' ? rec.id.replace(/\s+/gu, ' ').trim() : '';
+    const score = typeof rec.score === 'number' && Number.isFinite(rec.score) ? rec.score : null;
+    items.push({ id, label, labelRank: judgmentLabelRank(label), rationale, score, index });
+  });
+  items.sort((a, b) => {
+    if (a.score !== null && b.score !== null && a.score !== b.score) return b.score - a.score;
+    if (a.labelRank !== b.labelRank) return b.labelRank - a.labelRank;
+    if ((b.score !== null) !== (a.score !== null)) return (b.score !== null ? 1 : 0) - (a.score !== null ? 1 : 0);
+    return a.index - b.index;
+  });
+  return items.slice(0, 3).map((item) => {
+    const clipped = item.rationale.slice(0, 80);
+    if (item.id && item.label) return `${item.id}(${item.label}): ${clipped}`;
+    if (item.id) return `${item.id}: ${clipped}`;
+    return item.label ? `${item.label}: ${clipped}` : clipped;
+  });
+}
+
+function clipText(value: string, maxChars: number): string {
+  const chars = Array.from(value);
+  return chars.length <= maxChars ? value : `${chars.slice(0, maxChars - 1).join('').trimEnd()}…`;
+}
+
+function summarizeEvidence(
+  lead: BattleLeadFact,
+  company: BattleCompanyFact,
+  judgmentRecord?: BattleJudgmentRecord | null,
+): string {
   const parts: string[] = [];
-  if (lead.fitVerdict) parts.push(`fit=${lead.fitVerdict}`);
-  const detail = lead.scoreDetail;
-  if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
-    const rec = detail as Record<string, unknown>;
-    if (typeof rec.summary === 'string' && rec.summary.trim()) {
-      parts.push(rec.summary.trim().slice(0, 180));
-    } else if (typeof rec.reason === 'string' && rec.reason.trim()) {
-      parts.push(rec.reason.trim().slice(0, 180));
+  const seen = new Set<string>();
+  const push = (raw: string): void => {
+    const clean = raw.replace(/\s+/gu, ' ').trim();
+    if (!clean) return;
+    const key = clean.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    parts.push(clean);
+  };
+
+  if (lead.fitVerdict) push(`fit=${lead.fitVerdict}`);
+  for (const rationale of extractJudgmentRationales(judgmentRecord)) push(rationale);
+
+  const detail = asRecord(lead.scoreDetail);
+  if (typeof detail.summary === 'string' && detail.summary.trim()) {
+    push(detail.summary.trim().slice(0, 140));
+  } else if (typeof detail.reason === 'string' && detail.reason.trim()) {
+    push(detail.reason.trim().slice(0, 140));
+  }
+  if (Array.isArray(detail.notes)) {
+    let addedNotes = 0;
+    for (const note of detail.notes) {
+      if (addedNotes >= 2) break;
+      if (typeof note !== 'string') continue;
+      const trimmed = note.trim();
+      if (!trimmed || NOISE_SCORE_NOTE_RE.test(trimmed)) continue;
+      push(trimmed.slice(0, 100));
+      addedNotes += 1;
     }
   }
-  if (parts.length === 0 && company.attributes && typeof company.attributes === 'object' && !Array.isArray(company.attributes)) {
-    const attrs = company.attributes as Record<string, unknown>;
-    if (typeof attrs.industry === 'string' && attrs.industry.trim()) {
-      parts.push(attrs.industry.trim().slice(0, 120));
-    }
+
+  const attrs = asRecord(company.attributes);
+  const profile = asRecord(attrs.website_profile);
+  if (typeof profile.trade_role === 'string' && profile.trade_role.trim()) {
+    push(`role=${profile.trade_role.trim()}`);
   }
-  return parts.join(' | ') || '已通过匹配与合规校验';
+  const brands = extractCarriedBrands(attrs);
+  if (brands.length > 0) {
+    push(`brands=${brands.slice(0, 4).join(', ')}`);
+  }
+  if (parts.length === 0 && typeof attrs.industry === 'string' && attrs.industry.trim()) {
+    push(attrs.industry.trim().slice(0, 120));
+  }
+  const combined = parts.join(' | ');
+  return combined ? clipText(combined, MAX_EVIDENCE_CHARS) : '已通过匹配与合规校验';
 }
 
 function languageForCountry(country: string | null): string {
@@ -135,6 +299,29 @@ function collectSwitchboardChannels(switchboardContacts: readonly BattleDecision
   };
 }
 
+/** 仅按 A 级职能箱（采购>销售>管理>客服>财务）→ 标准总机 role（info@ 等）→ 其余 other 顺序挑选公司回退箱。 */
+function pickCompanyFallbackEmail(companyEmails: readonly string[]): string | null {
+  let bestFunctional: { email: string; rank: number } | null = null;
+  let firstRole: string | null = null;
+  let firstOther: string | null = null;
+  for (const email of companyEmails) {
+    const type = classifyContactEmail(email).emailType;
+    const functionalRank = FUNCTIONAL_A_TIER_PRIORITY[type];
+    if (functionalRank !== undefined) {
+      if (!bestFunctional || functionalRank < bestFunctional.rank) {
+        bestFunctional = { email, rank: functionalRank };
+      }
+      continue;
+    }
+    if (type === 'role') {
+      if (!firstRole) firstRole = email;
+      continue;
+    }
+    if (!firstOther) firstOther = email;
+  }
+  return bestFunctional?.email ?? firstRole ?? firstOther ?? null;
+}
+
 function resolveBattleChannels(
   companyContactPoints: readonly { kind: string; value: string; status?: string }[],
   companyContactChannels: readonly BattleCompanyChannel[],
@@ -143,12 +330,21 @@ function resolveBattleChannels(
   leadContact: BattleDecisionMaker | null,
 ) {
   const contactEmailPoint = leadContact ? pickBestEmailPoint(leadContact.points) : null;
-  const contactLinkedin = leadContact?.points.find((p) => p.type === 'linkedin')?.value ?? null;
+  const contactLinkedinPoints = leadContact?.points.filter((p) => p.type === 'linkedin') ?? [];
+  // #96-6：用 URL 主机与路径严格区分个人领英（/in/ 或 /pub/）与公司领英（/company/ 或 /showcase/）。
+  const contactLinkedin =
+    contactLinkedinPoints.find((p) => isPersonalLinkedinUrl(p.value))?.value ?? null;
+  const contactCompanyLinkedin =
+    contactLinkedinPoints.find((p) => isCompanyLinkedinUrl(p.value))?.value ?? null;
+
   const socials = extractCompanySocialProfiles(
     companyContactPoints.map((p) => ({ kind: p.kind, value: p.value, status: p.status ?? 'UNVERIFIED' })),
     companyAttributes,
   );
-  const companyLinkedin = socials.find((s) => s.platform === 'linkedin')?.url ?? null;
+  const socialLinkedin = socials.find((s) => s.platform === 'linkedin')?.url ?? null;
+  const companyLinkedin =
+    (socialLinkedin && isCompanyLinkedinUrl(socialLinkedin) ? socialLinkedin : null) ??
+    contactCompanyLinkedin;
   const socialWhatsapp = socials.find((s) => s.platform === 'whatsapp')?.url ?? null;
   const extraSocials = socials
     .filter((s) => s.platform !== 'linkedin' && s.platform !== 'whatsapp')
@@ -164,41 +360,35 @@ function resolveBattleChannels(
     companyContactChannels.find((c) => c.channel === 'phone' && c.status !== 'INVALID')?.value ??
     switchboard.phones[0] ??
     null;
-  const functionalCompanyEmail =
-    companyEmails.find((e) => classifyContactEmail(e).emailType !== 'role') ?? null;
-  const chosenEmail = contactEmailPoint?.value ?? functionalCompanyEmail ?? companyEmails[0] ?? null;
+  const chosenEmail = contactEmailPoint?.value ?? pickCompanyFallbackEmail(companyEmails);
+  const isContactOwnedEmail = contactEmailPoint !== null;
   const chosenVerificationState = effectiveEmailVerificationState(contactEmailPoint);
   const emailClass = chosenEmail ? classifyContactEmail(chosenEmail).emailType : null;
-  const vendorPortal =
-    companyContactPoints.find((p) => p.kind === 'supplier_page')?.value ??
+  const isPersonalOrOtherEmail = emailClass === 'personal' || emailClass === 'other';
+  // #96-2：只有真正的 supplier_page 才作为供应商门户升级 B 级；普通 contact_form/form_url/contact_page 仅作备选展示。
+  const supplierPortalUrl =
+    companyContactPoints.find((p) => p.kind === 'supplier_page')?.value ?? null;
+  const contactFormOrPageUrl =
     companyContactPoints.find((p) => p.kind === 'contact_form')?.value ??
     companyContactChannels.find((c) => c.channel === 'form_url' && c.status !== 'INVALID')?.value ??
     companyContactPoints.find((p) => p.kind === 'contact_page')?.value ??
     null;
   return {
     contactLinkedin,
-    displayLinkedin: contactLinkedin ?? companyLinkedin,
-    vendorPortal,
+    companyLinkedin,
+    supplierPortalUrl,
+    contactFormOrPageUrl,
     companyPhone,
     publicWhatsapp: companyContactPoints.find((p) => p.kind === 'whatsapp')?.value ?? socialWhatsapp,
     extraSocials,
     chosenEmail,
+    isContactOwnedEmail,
     chosenVerificationState,
     emailClass,
-    isPersonalEmail: emailClass === 'personal' || emailClass === 'other',
+    isPersonalEmailForPolicy: isPersonalOrOtherEmail,
+    isNamedPersonalEmail: isContactOwnedEmail && isPersonalOrOtherEmail,
   };
 }
-
-const CJK_SCRIPT_RE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
-
-const DEFAULT_PRODUCT_BY_LANGUAGE: Readonly<Record<string, string>> = Object.freeze({
-  it: 'componenti e prodotti industriali OEM/ODM',
-  de: 'Industrieprodukte (OEM/ODM)',
-  es: 'productos industriales OEM/ODM',
-  fr: 'produits industriels OEM/ODM',
-  pt: 'produtos industriais OEM/ODM',
-  en: 'industrial OEM/ODM products',
-});
 
 /** 避免把中文 ICP 名/中文主体名直接拼进意/德/英等外语开发信或 LinkedIn 附言。 */
 export function sanitizeOutreachTextForLanguage(
@@ -212,6 +402,104 @@ export function sanitizeOutreachTextForLanguage(
   return CJK_SCRIPT_RE.test(trimmed) ? fallback : trimmed;
 }
 
+function englishHookForSignal(signal: SignalIcebreakerSuggestion): string {
+  const cleaned = signal.signalTitle
+    .replace(STRIP_LINKEDIN_URL_RE, '')
+    .replace(STRIP_LINKEDIN_PLACEHOLDER_RE, '')
+    .replace(/\s+/gu, ' ')
+    .trim();
+  if (cleaned && !CJK_SCRIPT_RE.test(cleaned)) {
+    return clipText(cleaned, 90);
+  }
+  switch (signal.signalType) {
+    case 'TENDER_AWARDED':
+      return 'your recent public tender award';
+    case 'TENDER_PUBLISHED':
+    case 'SOURCING_OPENED':
+      return 'your recent public sourcing update';
+    case 'HIRING_BUYING_ROLE':
+      return 'your open procurement and supply chain roles';
+    case 'HIRING_UP':
+      return 'your recent team expansion';
+    case 'AD_CAMPAIGN_ACTIVE':
+      return 'your active online product campaigns';
+    case 'NEWS_MENTION':
+      return 'your recent company news';
+    default:
+      return 'your recent website and product updates';
+  }
+}
+
+function resolveTriggerHook(
+  company: BattleCompanyFact,
+  companySignals: readonly LeadPackageCompanySignal[] | undefined,
+  draft: { subject: string; body: string } | null,
+): { triggerHook: string | null; commonGroundHook: string | null } {
+  const attrs = asRecord(company.attributes);
+  const projected = projectStoredAndFallbackSignals(attrs, companySignals, company.name);
+  const icebreakers = buildSignalIcebreakers({
+    companyName: company.name,
+    signals: projected,
+    maxSuggestions: 1,
+  });
+  const top = icebreakers[0];
+  if (top) {
+    const datePart = top.detectedAt.slice(0, 10);
+    return {
+      triggerHook: `[${top.signalType}] ${top.signalTitle} (${datePart}) | ${top.openerEn}`,
+      commonGroundHook: englishHookForSignal(top),
+    };
+  }
+  const brands = extractCarriedBrands(attrs);
+  if (brands.length > 0) {
+    return {
+      triggerHook: `官网在售品牌: ${brands.slice(0, 5).join(', ')}`,
+      commonGroundHook: null,
+    };
+  }
+  return {
+    triggerHook: draft?.subject ?? null,
+    commonGroundHook: null,
+  };
+}
+
+function cleanLinkedInFragment(raw: string): string {
+  return raw
+    .replace(STRIP_LINKEDIN_URL_RE, '')
+    .replace(STRIP_LINKEDIN_PLACEHOLDER_RE, '')
+    .replace(/\b(?:pdf|brochure|catalog(?:ue)?|price\s*list|quotation|quote\s+attached)\b/giu, '')
+    .replace(/\s+/gu, ' ')
+    .trim();
+}
+
+function buildValidatedLinkedInNote(args: {
+  firstName: string;
+  companyName: string;
+  sellerValueProp: string;
+  commonGroundHook: string | null;
+}): string | null {
+  const playbook = buildLinkedInCoPilotPlaybook({
+    firstName: args.firstName,
+    companyName: args.companyName,
+    sellerValueProp: args.sellerValueProp,
+    commonGroundHook: args.commonGroundHook,
+  });
+  const primary = args.commonGroundHook
+    ? playbook.templates.common_ground
+    : playbook.templates.differentiated_cold;
+  if (validateLinkedInConnectionNote(primary).ok) return primary;
+
+  const safeProp = cleanLinkedInFragment(args.sellerValueProp) || DEFAULT_PRODUCT_BY_LANGUAGE.en;
+  const fallback = cleanLinkedInFragment(
+    buildLinkedInCoPilotPlaybook({
+      firstName: cleanLinkedInFragment(args.firstName) || 'there',
+      companyName: cleanLinkedInFragment(args.companyName) || 'your company',
+      sellerValueProp: safeProp,
+    }).templates.differentiated_cold,
+  );
+  return validateLinkedInConnectionNote(fallback).ok ? fallback : null;
+}
+
 function buildBattleOutreachCopy(args: {
   input: BattleRowBuildInput;
   effectiveCountry: string | null;
@@ -219,9 +507,21 @@ function buildBattleOutreachCopy(args: {
   track: ReturnType<typeof classifyBuyingCommitteeTrack>;
   channelTier: ReturnType<typeof classifyContactChannelTier>;
   emailClass: ReturnType<typeof classifyContactEmail>['emailType'] | null;
+  isPersonalEmail: boolean;
   contactLinkedin: string | null;
-}): { linkedinNote: string | null; referralInfoDraft: string | null } {
-  const { input, effectiveCountry, leadContact, track, channelTier, emailClass, contactLinkedin } = args;
+  commonGroundHook: string | null;
+}): { linkedinNote: string | null; referralInfoDraft: string | null; forwardableBlurb: string } {
+  const {
+    input,
+    effectiveCountry,
+    leadContact,
+    track,
+    channelTier,
+    emailClass,
+    isPersonalEmail,
+    contactLinkedin,
+    commonGroundHook,
+  } = args;
   const language = languageForCountry(effectiveCountry);
   const productFallback = DEFAULT_PRODUCT_BY_LANGUAGE[language] ?? DEFAULT_PRODUCT_BY_LANGUAGE.en;
   const sellerName = sanitizeOutreachTextForLanguage(input.sellerName, language, 'Our Manufacturing Team');
@@ -231,30 +531,42 @@ function buildBattleOutreachCopy(args: {
     'en',
     DEFAULT_PRODUCT_BY_LANGUAGE.en,
   );
+  // #96-1：按语种映射部门称呼（零汉字），绝不把中文 track.label 写进外语信。
+  const targetDepartmentLabel = localizedDepartmentLabel(track.track, language);
   const firstName = leadContact?.fullName?.trim().split(/\s+/u)[0] ?? '';
   const linkedinNote =
     contactLinkedin && firstName
-      ? buildLinkedInCoPilotPlaybook({
+      ? buildValidatedLinkedInNote({
           firstName,
           companyName: input.company.name,
           sellerValueProp: linkedinValueProp,
-        }).templates.differentiated_cold
+          commonGroundHook,
+        })
       : null;
+  // #96-1：具名个人邮箱绝不生成 C 级 info@ 转介请求信。
   const referralDraft =
-    channelTier === 'C' || emailClass === 'role'
+    !isPersonalEmail && (channelTier === 'C' || emailClass === 'role')
       ? buildReferralFirstInfoDraft({
           language,
           buyerCompanyName: input.company.name,
-          targetDepartmentLabel: track.track === 'other' ? 'Procurement / Purchasing' : track.label,
+          targetDepartmentLabel,
           sellerProductSummary: sellerProduct,
           sellerLegalName: sellerName,
         })
       : null;
+  const forwardableBlurb = buildForwardableBlurb({
+    language,
+    buyerCompanyName: input.company.name,
+    targetDept: targetDepartmentLabel,
+    sellerProductSummary: sellerProduct,
+    sellerLegalName: sellerName,
+  });
   return {
     linkedinNote,
     referralInfoDraft: referralDraft
       ? `${referralDraft.subject} — ${referralDraft.body.replace(/\n+/gu, ' ')}`
       : null,
+    forwardableBlurb,
   };
 }
 
@@ -262,12 +574,24 @@ function formatBattleComplianceAndAltChannels(args: {
   input: BattleRowBuildInput;
   leadContact: BattleDecisionMaker | null;
   d3: ReturnType<typeof evaluateMultiChannelOutreachPolicy>;
-  vendorPortal: string | null;
+  supplierPortalUrl: string | null;
+  contactFormOrPageUrl: string | null;
+  companyLinkedin: string | null;
   companyPhone: string | null;
   publicWhatsapp: string | null;
   extraSocials: readonly string[];
 }): { legalNoticeStatus: string; vendorPortalOrWhatsapp: string | null } {
-  const { input, leadContact, d3, vendorPortal, companyPhone, publicWhatsapp, extraSocials } = args;
+  const {
+    input,
+    leadContact,
+    d3,
+    supplierPortalUrl,
+    contactFormOrPageUrl,
+    companyLinkedin,
+    companyPhone,
+    publicWhatsapp,
+    extraSocials,
+  } = args;
   const recordedArt14 = leadContact?.id ? input.article14StatusByContactId?.get(leadContact.id) : undefined;
   const art14Status = recordedArt14
     ? `Art.14:${recordedArt14}`
@@ -280,7 +604,11 @@ function formatBattleComplianceAndAltChannels(args: {
       : 'LIA:PENDING'
     : 'LIA:N/A';
   const portalOrWa = [
-    vendorPortal ? `Portal:${vendorPortal}` : null,
+    supplierPortalUrl ? `Portal:${supplierPortalUrl}` : null,
+    contactFormOrPageUrl && contactFormOrPageUrl !== supplierPortalUrl
+      ? `Contact:${contactFormOrPageUrl}`
+      : null,
+    companyLinkedin ? `Co-LI:${companyLinkedin}` : null,
     companyPhone ? `Tel:${companyPhone}` : null,
     d3.manualOutboundWhatsappAllowed && publicWhatsapp ? `WA:${publicWhatsapp}` : null,
     ...extraSocials,
@@ -293,7 +621,7 @@ function formatBattleComplianceAndAltChannels(args: {
   };
 }
 
-/** 将单条已核准线索转换为 19 列作战表行。 */
+/** 将单条已核准线索转换为 21 列作战表行。 */
 export function buildBattleCsvRow(input: BattleRowBuildInput): BattleCsvRow {
   const { lead, company, companyContactPoints, companyContactChannels = [], decisionMakers } = input;
   const namedDecisionMakers = decisionMakers.filter((dm) => !isPlaceholderContact(dm));
@@ -308,12 +636,14 @@ export function buildBattleCsvRow(input: BattleRowBuildInput): BattleCsvRow {
   );
   const track = classifyBuyingCommitteeTrack(leadContact?.title ?? null);
   const channelTier = classifyContactChannelTier({
-    fullName: leadContact?.fullName ?? null,
+    // 仅当 chosenEmail 确属具名联系人个人邮箱时按具名直邮分级，避免把公司回退 other 箱误抬为 B 级个人直邮。
+    fullName: channels.isContactOwnedEmail ? (leadContact?.fullName ?? null) : null,
     title: leadContact?.title ?? null,
     email: channels.chosenEmail,
     emailVerificationState: channels.chosenVerificationState,
     linkedinUrl: channels.contactLinkedin,
-    vendorPortalUrl: channels.vendorPortal,
+    // #96-2：仅真正的 supplier_page 才升级 B 级，普通联系页不虚抬分层。
+    vendorPortalUrl: channels.supplierPortalUrl,
     publicWhatsappUrl: channels.publicWhatsapp,
   });
   const effectiveCountry =
@@ -323,14 +653,17 @@ export function buildBattleCsvRow(input: BattleRowBuildInput): BattleCsvRow {
       domain: company.domain,
       country: company.country,
       attributes: company.attributes,
+      // #96-5：传入公司渠道表电话，闭合 +39/+49 电话仍判 UNKNOWN 的 Art.14 Fail-Open 漏洞。
+      contactChannels: companyContactChannels,
     })?.iso ||
     null;
   const d3 = evaluateMultiChannelOutreachPolicy({
     country: effectiveCountry,
     companyName: company.name,
-    isPersonalEmail: channels.isPersonalEmail,
+    isPersonalEmail: channels.isPersonalEmailForPolicy,
     publicBusinessWhatsappUrl: channels.publicWhatsapp,
   });
+  const trigger = resolveTriggerHook(company, input.companySignals, input.draft);
   const copy = buildBattleOutreachCopy({
     input,
     effectiveCountry,
@@ -338,13 +671,17 @@ export function buildBattleCsvRow(input: BattleRowBuildInput): BattleCsvRow {
     track,
     channelTier,
     emailClass: channels.emailClass,
+    isPersonalEmail: channels.isNamedPersonalEmail,
     contactLinkedin: channels.contactLinkedin,
+    commonGroundHook: trigger.commonGroundHook,
   });
   const compliance = formatBattleComplianceAndAltChannels({
     input,
     leadContact,
     d3,
-    vendorPortal: channels.vendorPortal,
+    supplierPortalUrl: channels.supplierPortalUrl,
+    contactFormOrPageUrl: channels.contactFormOrPageUrl,
+    companyLinkedin: channels.companyLinkedin,
     companyPhone: channels.companyPhone,
     publicWhatsapp: channels.publicWhatsapp,
     extraSocials: channels.extraSocials,
@@ -354,21 +691,24 @@ export function buildBattleCsvRow(input: BattleRowBuildInput): BattleCsvRow {
     country: effectiveCountry || 'UNKNOWN',
     domain: company.domain,
     fitScore: lead.totalScore,
-    evidenceSummary: summarizeEvidence(lead, company),
+    evidenceSummary: summarizeEvidence(lead, company, input.judgmentRecord),
     channelTier,
     contactName: leadContact?.fullName ?? null,
     contactTitle: leadContact?.title ?? null,
     committeeTrack: track.label,
     contactEmail: channels.chosenEmail,
     emailVerificationState: channels.chosenVerificationState,
-    linkedinUrl: channels.displayLinkedin,
-    triggerHook: input.draft?.subject ?? null,
+    // #96-6：LinkedIn 主页列仅展示个人领英（/in/ 或 /pub/），公司领英迁至备选通道 Co-LI。
+    linkedinUrl: channels.contactLinkedin,
+    triggerHook: trigger.triggerHook,
     linkedinNote: copy.linkedinNote,
     referralInfoDraft: copy.referralInfoDraft,
     vendorPortalOrWhatsapp: compliance.vendorPortalOrWhatsapp,
     complianceTag: d3.complianceTag,
     legalNoticeStatus: compliance.legalNoticeStatus,
     sellerInboundFooter: input.sellerInboundFooter ?? null,
+    forwardableBlurb: copy.forwardableBlurb,
+    outreachWindow: countryOutreachWindow(effectiveCountry),
   };
 }
 

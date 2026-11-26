@@ -19,6 +19,7 @@ import { assertProductDiscoveryProvenance, resolveEvidenceLicense } from './evid
 import { sourceTypeForContactObservation } from './contact-point-verification-state';
 import { upsertObservedContactPoint } from './contact-point-writer';
 import {
+  backfillCompanyCountryFromChannels,
   conservativeCountryCodeForFallback,
   inferConservativeEuUkFallback,
   resolveCompanyJurisdiction,
@@ -276,6 +277,7 @@ export async function persistDiscoveredContacts(
     }
     await maybeScheduleContactArticle14(tx, {
       workspaceId: args.workspaceId,
+      companyId: args.company.id,
       contactId,
       name: locked[0].name,
       country: locked[0].country,
@@ -296,6 +298,7 @@ async function maybeScheduleContactArticle14(
   tx: Prisma.TransactionClient,
   args: {
     workspaceId: string;
+    companyId: string;
     contactId: string;
     name?: string | null;
     country?: string | null;
@@ -313,12 +316,26 @@ async function maybeScheduleContactArticle14(
   const noticeModel = (tx as { article14Notice?: { findFirst?: unknown } }).article14Notice;
   if (typeof noticeModel?.findFirst !== 'function') return;
 
-  const resolvedCountry = resolveCompanyJurisdiction({
+  const directResolved = resolveCompanyJurisdiction({
     name: args.name,
     domain: args.domain,
     country: args.country,
     attributes: args.attributes,
   })?.iso;
+  const resolvedCountry =
+    directResolved ??
+    (
+      await backfillCompanyCountryFromChannels(tx, {
+        workspaceId: args.workspaceId,
+        company: {
+          id: args.companyId,
+          name: args.name,
+          domain: args.domain,
+          country: args.country,
+          attributes: args.attributes,
+        },
+      })
+    )?.iso;
 
   let effectiveCountry: string | undefined = resolvedCountry;
   let sourceCategory = args.adapterKey;

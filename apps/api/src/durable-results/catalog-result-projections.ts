@@ -22,6 +22,7 @@ export const CATALOG_RESULT_TOOL_IDS = Object.freeze([
   'google_patents.search', 'tradefair.algolia', 'mapyourshow.fetch',
   'deepseek.search', 'deepseek.fetch',
   'serper.search', 'brave.search', 'exa.search', 'google_places.search', 'vies.check',
+  'social.search_serper', 'social.search_exa_people',
 ] as const);
 export type CatalogResultToolId = (typeof CATALOG_RESULT_TOOL_IDS)[number];
 export const CATALOG_RESULT_PROJECTION_SCHEMAS = Object.freeze({
@@ -44,6 +45,7 @@ export const CATALOG_RESULT_PROJECTION_SCHEMAS = Object.freeze({
   'exa.search': 'exa-search/v1',
   'google_places.search': 'google-places-search/v1',
   'vies.check': 'vies-check/v1',
+  'social.search_serper': 'social-search-serper/v1', 'social.search_exa_people': 'social-search-exa-people/v1',
 } satisfies Readonly<Record<CatalogResultToolId, TypedProjectionSchema>>);
 const TOOL_RESULT_KEYS = ['data', 'costCents', 'degraded'] as const;
 const TOOL_RESULT_WITH_PROVENANCE_KEYS = [...TOOL_RESULT_KEYS, 'provenance'] as const;
@@ -932,9 +934,6 @@ const deepseekFetchDefinition = definition(
   objectSchema({ url: stringSchema(2048), title: stringSchema(2000), content: stringSchema(32_000) }, ['url', 'content']),
   (value) => mapClosedRecord(value, ['url', 'title', 'content'], ['url', 'content']),
 );
-const serperSearchDefinition = searchResultDefinition('serper-search/v1');
-const braveSearchDefinition = searchResultDefinition('brave-search/v1');
-const exaSearchDefinition = searchResultDefinition('exa-search/v1');
 const GOOGLE_PLACE_KEYS = ['placeId', 'name', 'websiteUri', 'countryCode'] as const;
 const googlePlaceSchema = objectSchema(
   { placeId: stringSchema(256), name: stringSchema(500), websiteUri: stringSchema(2048), countryCode: stringSchema(16) },
@@ -947,13 +946,14 @@ const googlePlacesSearchDefinition = definition(
     places: (items) => mapArray(items, (item) => mapClosedRecord(item, GOOGLE_PLACE_KEYS, ['placeId'])),
   }),
 );
-
 export const CATALOG_RESULT_PROJECTION_DEFINITIONS = Object.freeze([
   searxDefinition, socialSearchDefinition, socialFetchDefinition, wikidataSparqlDefinition,
   osmDefinition, wikidataEntityDefinition, gleifDefinition, companiesHouseDefinition,
   inpiDefinition, googlePatentsDefinition, tradeFairDefinition, mapYourShowDefinition,
   deepseekSearchDefinition, deepseekFetchDefinition,
-  serperSearchDefinition, braveSearchDefinition, exaSearchDefinition, googlePlacesSearchDefinition, viesCheckResultProjection,
+  searchResultDefinition('serper-search/v1'), searchResultDefinition('brave-search/v1'),
+  searchResultDefinition('exa-search/v1'), googlePlacesSearchDefinition, viesCheckResultProjection,
+  searchResultDefinition('social-search-serper/v1'), searchResultDefinition('social-search-exa-people/v1'),
 ] as const);
 
 export function getCatalogResultProjectionSchema(toolId: string): TypedProjectionSchema {

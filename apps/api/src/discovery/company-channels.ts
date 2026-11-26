@@ -11,6 +11,7 @@ import {
 
 type SuppressionRow = { readonly type: string; readonly value: string };
 import { isPlaceholderContact } from './providers/contact-quality-filter';
+import { isStrictContactPageUrl } from './impressum/find-legal-pages';
 import {
   prioritizeBuyingCommitteeContacts,
   type ContactEmailPointLike,
@@ -140,7 +141,13 @@ export function filterReachableCompanyChannels(
       const host = email ? canonicalizeSuppressionValue('domain', email.split('@')[1]) : null;
       if (!email || suppressedEmails.has(email) || (host && suppressedDomains.has(host))) continue;
     } else if (row.channel === 'form_url') {
-      if (!isHttpsUrl(value) || contactPointHostSuppressed(value, suppressedDomains)) continue;
+      if (
+        !isHttpsUrl(value) ||
+        contactPointHostSuppressed(value, suppressedDomains) ||
+        !isStrictContactPageUrl(value)
+      ) {
+        continue;
+      }
     }
     const dedupeKey = `${row.channel}\n${value.toLowerCase()}`;
     if (seen.has(dedupeKey)) continue;

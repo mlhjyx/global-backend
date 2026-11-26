@@ -77,7 +77,7 @@ describe('collectCompanyChannels', () => {
       pages: [{
         url: 'https://mueller-pumpen.de/kontakt',
         kind: 'contact',
-        html: '<form action="/kontakt/send"><input name="email"/></form>',
+        html: '<form action="/kontakt/send"><input name="email" required /><textarea name="msg"></textarea><button type="submit">Senden</button></form>',
         text: 'E-Mail: anfrage@mail.mueller-pumpen.de',
       }],
     });
@@ -87,6 +87,27 @@ describe('collectCompanyChannels', () => {
     ]));
     const form = channels.find((c) => c.channel === 'form_url');
     expect(form?.emailType).toBeUndefined();
+  });
+
+  it('#96-2 回归：电商搜索/购物车表单与 phoenix-contact 商品页不产出 form_url', () => {
+    const channels = collectCompanyChannels({
+      domain: 'memodo.it',
+      pages: [
+        {
+          url: 'https://memodo.it/fotovoltaico/accessori/phoenix-contact/',
+          kind: 'contact',
+          html: '<form action="/search"><input type="search" name="q" required /><button type="submit">Search</button></form>',
+          text: 'Phoenix Contact',
+        },
+        {
+          url: 'https://memodo.it/contatti',
+          kind: 'contact',
+          html: '<form action="/cart/add"><input name="sku" required /><button type="submit">Add</button></form>',
+          text: 'Contatti',
+        },
+      ],
+    });
+    expect(channels.some((c) => c.channel === 'form_url')).toBe(false);
   });
 
   it('同一邮箱出现在两页 → 只留一条（先出现的页），cap 生效', () => {

@@ -60,7 +60,7 @@ describe('planContactCompletion', () => {
         {
           url: 'https://acme-pumpen.de/kontakt',
           kind: 'contact',
-          html: '<form><input name="email"></form>',
+          html: '<form><input type="email" name="email" required><textarea name="message"></textarea><button type="submit">Senden</button></form>',
           text: 'Kontaktformular',
         },
       ],

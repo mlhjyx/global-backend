@@ -348,7 +348,7 @@ export interface ExaSearchInput {
   numResults?: number;
   excludeDomains?: readonly string[];
   includeDomains?: readonly string[];
-  category?: 'company';
+  category?: 'company' | 'people';
 }
 
 export interface ExaFindSimilarInput {
@@ -357,13 +357,115 @@ export interface ExaFindSimilarInput {
   excludeDomains?: readonly string[];
 }
 
-function parseExaHits(bytes: Buffer, errorCode: string): SearchProviderHit[] {
+const EXA_TITLE_SUFFIX_RE = /\s*[|–—-]\s*Exa\s*$/iu;
+const EXA_HEADLINE_SPLIT_RE = /\s*[|·]\s*|\s+[–—-]\s+/u;
+
+function firstNonEmptyString(...values: readonly unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim().length > 0) return value.trim();
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const named = (value as { name?: unknown }).name;
+      if (typeof named === 'string' && named.trim().length > 0) return named.trim();
+    }
+  }
+  return undefined;
+}
+
+function isExaLibraryPersonUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase().replace(/^www\./u, '');
+    return (host === 'exa.ai' || host.endsWith('.exa.ai')) && /^\/library\/person\//iu.test(parsed.pathname);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 解析 Exa People 搜人命中：兼容标准 `{ url, title }`（剥离尾部 `| Exa` / `- Exa`）
+ * 与 `entities[0].properties` / `author` 结构化字段；若 `url` 为 `exa.ai/library/person/...`
+ * 则优先取实体里的 `linkedinUrl` / `profileUrl`；若标题缺职位或公司段则拼合为
+ * `"{name} - {role} - {company}"` 以对齐现有三段社媒校验器。
+ */
+export function parseExaPeopleHit(item: unknown): SearchProviderHit | null {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
+  const record = item as Record<string, unknown>;
+  const entities = Array.isArray(record.entities) ? record.entities : [];
+  const firstEntity = entities.find((entry) => entry && typeof entry === 'object' && !Array.isArray(entry)) as
+    | Record<string, unknown>
+    | undefined;
+  const props =
+    firstEntity?.properties && typeof firstEntity.properties === 'object' && !Array.isArray(firstEntity.properties)
+      ? (firstEntity.properties as Record<string, unknown>)
+      : undefined;
+
+  const rawUrl = sanitizeSearchProviderUrl(record.url);
+  const entityUrl = sanitizeSearchProviderUrl(
+    firstNonEmptyString(
+      props?.linkedinUrl,
+      props?.linkedin_url,
+      props?.profileUrl,
+      props?.profile_url,
+      props?.url,
+    ),
+  );
+  const url = rawUrl && !isExaLibraryPersonUrl(rawUrl) ? rawUrl : (entityUrl ?? rawUrl);
+  if (!url) return null;
+
+  const rawTitle =
+    typeof record.title === 'string' ? record.title.replace(EXA_TITLE_SUFFIX_RE, '').trim() : '';
+  const segments = rawTitle
+    ? rawTitle
+        .split(EXA_HEADLINE_SPLIT_RE)
+        .map((segment) => segment.trim())
+        .filter((segment) => segment.length > 0 && !/^(linkedin|xing|exa)$/iu.test(segment))
+    : [];
+
+  const entityName = firstNonEmptyString(props?.name, props?.fullName, props?.full_name, record.author);
+  const entityRole = firstNonEmptyString(
+    props?.role,
+    props?.title,
+    props?.jobTitle,
+    props?.job_title,
+    props?.position,
+    props?.headline,
+  );
+  const entityCompany = firstNonEmptyString(
+    props?.company,
+    props?.organization,
+    props?.companyName,
+    props?.company_name,
+    props?.employer,
+  );
+
+  let title: string | undefined;
+  if (segments.length >= 3) {
+    title = rawTitle;
+  } else if (entityRole || entityCompany) {
+    const name = entityName ?? segments[0];
+    const role = entityRole ?? (segments.length >= 2 ? segments[1] : undefined);
+    const company = entityCompany ?? (segments.length >= 2 && entityRole ? segments[1] : undefined);
+    const composed = [name, role, company].filter((part): part is string => Boolean(part && part.trim())).join(' - ');
+    title = composed || rawTitle || undefined;
+  } else {
+    title = rawTitle || entityName || undefined;
+  }
+
+  return title ? { url, title } : { url };
+}
+
+function parseExaHits(bytes: Buffer, errorCode: string, peopleMode = false): SearchProviderHit[] {
   const payload = decodeJsonBytes<{ results?: unknown }>(bytes, errorCode);
   if (!payload || typeof payload !== 'object' || !Array.isArray(payload.results)) {
     throw new Error(errorCode);
   }
   const hits: SearchProviderHit[] = [];
   for (const item of payload.results) {
+    if (peopleMode) {
+      const hit = parseExaPeopleHit(item);
+      if (hit) hits.push(hit);
+      continue;
+    }
     if (!item || typeof item !== 'object') continue;
     const url = sanitizeSearchProviderUrl((item as { url?: unknown }).url);
     if (!url) continue;
@@ -377,7 +479,7 @@ function parseExaHits(bytes: Buffer, errorCode: string): SearchProviderHit[] {
   return hits;
 }
 
-/** Exa 神经语义搜索（personalData:false，仅保留 url + title）。 */
+/** Exa 神经语义搜索（支持 company / people；仅保留 url + title）。 */
 export async function exaSearch(
   input: ExaSearchInput,
   deps: SearchProviderDeps = {},
@@ -392,7 +494,10 @@ export async function exaSearch(
   };
   if (input.category) body.category = input.category;
   if (input.includeDomains?.length) body.includeDomains = [...input.includeDomains].slice(0, 20);
-  if (input.excludeDomains?.length) body.excludeDomains = [...input.excludeDomains].slice(0, 20);
+  // Exa 官方 /search 在 category:"people" 下传 excludeDomains 直接报 HTTP 400，必须跳过。
+  if (input.category !== 'people' && input.excludeDomains?.length) {
+    body.excludeDomains = [...input.excludeDomains].slice(0, 20);
+  }
 
   const bytes = await postJson({
     url: `${base}/search`,
@@ -401,7 +506,10 @@ export async function exaSearch(
     prefix: 'EXA_SEARCH',
     deps,
   });
-  return { hits: parseExaHits(bytes, 'EXA_SEARCH_RESPONSE_INVALID'), billed: true };
+  return {
+    hits: parseExaHits(bytes, 'EXA_SEARCH_RESPONSE_INVALID', input.category === 'people'),
+    billed: true,
+  };
 }
 
 /** Exa Lookalike 相似公司发现（以标杆客户/官网为种子扩展同类买方）。 */

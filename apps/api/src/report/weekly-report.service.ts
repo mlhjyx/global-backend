@@ -37,9 +37,11 @@ import {
   renderBattleCsvFromRows,
   type BattleCsvRow,
   type BattleDecisionMaker,
+  type BattleJudgmentRecord,
 } from './battle-csv-builder';
-import { filterOfferingNames } from '../discovery/offering-noise-filter';
+import { loadBattleSellerContext } from './battle-seller-context';
 import { filterReachableCompanyChannels, loadCompanyContactChannels } from '../discovery/company-channels';
+import type { LeadPackageCompanySignal } from '../signals/enrichment-signal-projection';
 
 /** A week's accepted leads are reviewed by hand; more than this is refused, never truncated. */
 export const WEEKLY_REPORT_MAX_LEADS = 1_000;
@@ -246,7 +248,7 @@ export class WeeklyReportService {
   }
 
   /**
-   * 19 列受审计多通道作战清表（Batch 1.4-C）：
+   * 21 列受审计多通道作战清表（Batch 1.4-C + Batch 1.8A 升级）：
    * 复用与周报完全一致的 DataRights EXPORT 判定留痕、制裁拦截、合成隔离与抑制过滤。
    * `week` 缺省时导出该 ICP 下全部已交付线索（QUALIFIED/CONTACTED/CONVERTED，上限 WEEKLY_REPORT_MAX_LEADS）；
    * 传 `week` 时仅导出该 ISO 周 accept 的线索。
@@ -413,7 +415,7 @@ export class WeeklyReportService {
   ) {
     const icp = await tx.icpDefinition.findUnique({
       where: { id: icpId },
-      select: { id: true, companyId: true, name: true },
+      select: { id: true, companyId: true, name: true, valueProps: true },
     });
     if (!icp) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'icp not found' } });
 
@@ -515,29 +517,65 @@ export class WeeklyReportService {
             select: { id: true },
           })
         : null;
-    const seller =
-      icp.companyId &&
-      typeof (tx as { companyProfile?: { findUnique?: unknown } }).companyProfile?.findUnique === 'function'
-        ? await tx.companyProfile.findUnique({
-            where: { id: icp.companyId },
-            select: { name: true, summary: true, industry: true },
-          })
-        : null;
-    const offerings =
-      icp.companyId &&
-      typeof (tx as { offering?: { findMany?: unknown } }).offering?.findMany === 'function'
-        ? await tx.offering.findMany({
-            where: { companyId: icp.companyId },
-            select: { name: true },
-            orderBy: { createdAt: 'asc' },
-            take: 8,
+    const judgmentRows =
+      companyIds.length > 0 &&
+      typeof (tx as { judgmentRecord?: { findMany?: unknown } }).judgmentRecord?.findMany === 'function'
+        ? await tx.judgmentRecord.findMany({
+            where: { icpId, canonicalCompanyId: { in: companyIds } },
+            distinct: ['canonicalCompanyId'],
+            select: { canonicalCompanyId: true, verdict: true, criteria: true },
+            orderBy: [{ canonicalCompanyId: 'asc' }, { createdAt: 'desc' }, { id: 'desc' }],
+            take: companyIds.length,
           })
         : [];
-    const offeringSummary = filterOfferingNames(offerings.map((item) => item.name))
-      .slice(0, 3)
-      .join(', ');
-    const sellerProductSummary =
-      offeringSummary || seller?.summary?.trim() || seller?.industry?.trim() || null;
+    const latestJudgmentByCompany = new Map<string, BattleJudgmentRecord>();
+    for (const row of judgmentRows) {
+      if (!latestJudgmentByCompany.has(row.canonicalCompanyId)) {
+        latestJudgmentByCompany.set(row.canonicalCompanyId, {
+          verdict: row.verdict,
+          criteria: row.criteria,
+        });
+      }
+    }
+    const signalRows =
+      companyIds.length > 0 &&
+      typeof (tx as { companySignal?: { findMany?: unknown } }).companySignal?.findMany === 'function'
+        ? await tx.companySignal.findMany({
+            where: { companyId: { in: companyIds } },
+            distinct: ['companyId', 'providerKey', 'signalKind'],
+            select: {
+              companyId: true,
+              providerKey: true,
+              signalKind: true,
+              sourceUrl: true,
+              title: true,
+              excerpt: true,
+              observedAt: true,
+            },
+            orderBy: [
+              { companyId: 'asc' },
+              { providerKey: 'asc' },
+              { signalKind: 'asc' },
+              { observedAt: 'desc' },
+              { id: 'desc' },
+            ],
+            take: companyIds.length * 6,
+          })
+        : [];
+    const signalsByCompany = new Map<string, LeadPackageCompanySignal[]>();
+    for (const row of signalRows) {
+      if (!row.companyId) continue;
+      const list = signalsByCompany.get(row.companyId) ?? [];
+      list.push(row);
+      signalsByCompany.set(row.companyId, list);
+    }
+    for (const list of signalsByCompany.values()) {
+      list.sort((a, b) => Date.parse(String(b.observedAt)) - Date.parse(String(a.observedAt)));
+    }
+    const sellerContext = await loadBattleSellerContext(tx, {
+      companyId: icp.companyId,
+      icpValueProps: icp.valueProps,
+    });
 
     const battleDecisionMakers = new Map<string, BattleDecisionMaker[]>();
     for (const c of battleContacts) {
@@ -556,10 +594,13 @@ export class WeeklyReportService {
       leads,
       facts,
       battleDecisionMakers,
+      latestJudgmentByCompany,
+      signalsByCompany,
       article14StatusByContactId,
       hasActiveWorkspaceLia: Boolean(activeLia),
-      sellerName: seller?.name ?? null,
-      sellerProductSummary,
+      sellerName: sellerContext.sellerName,
+      sellerProductSummary: sellerContext.sellerProductSummary,
+      sellerInboundFooter: sellerContext.sellerInboundFooter,
     };
   }
 
@@ -610,10 +651,13 @@ export class WeeklyReportService {
           companyContactChannels: facts.reachableChannels(company),
           decisionMakers: snapshot.battleDecisionMakers.get(company.id) ?? [],
           draft: facts.draftsByLead.get(lead.id) ?? null,
+          judgmentRecord: snapshot.latestJudgmentByCompany.get(company.id) ?? null,
+          companySignals: snapshot.signalsByCompany.get(company.id) ?? [],
           article14StatusByContactId: snapshot.article14StatusByContactId,
           hasActiveWorkspaceLia: snapshot.hasActiveWorkspaceLia,
           sellerName: snapshot.sellerName,
           sellerProductSummary: snapshot.sellerProductSummary,
+          sellerInboundFooter: snapshot.sellerInboundFooter,
         }),
       );
     }

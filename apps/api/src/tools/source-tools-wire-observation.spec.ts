@@ -52,6 +52,8 @@ const DECLARED = [
   "sanctions.download",
   "serper.search",
   "social.fetch",
+  "social.search_exa_people",
+  "social.search_serper",
   "tradefair.algolia",
   "vies.check",
   "wikidata.entity",

@@ -988,6 +988,10 @@
       "to": "sanctions"
     },
     {
+      "from": "report",
+      "to": "signals"
+    },
+    {
       "from": "runtime",
       "to": "adapters"
     },

@@ -545,6 +545,38 @@
       }
     },
     {
+      "id": "social.search_serper",
+      "declarationPath": "apps/api/src/tools/search-provider-tools.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "social-search-serper/v1",
+      "operationIdentity": "tool:social.search_serper:<version>:<idempotencyKey>",
+      "privacyClass": "PERSONAL_DATA",
+      "domainAck": {
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
+        "consumer": "SocialPresenceContactAdapter",
+        "domainAggregateType": "SearchResultEvidence",
+        "identitySource": "result-url-and-query-digest",
+        "subjectRefRequired": true,
+        "personalDataDsrCompatible": true
+      }
+    },
+    {
+      "id": "social.search_exa_people",
+      "declarationPath": "apps/api/src/tools/search-provider-tools.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "social-search-exa-people/v1",
+      "operationIdentity": "tool:social.search_exa_people:<version>:<idempotencyKey>",
+      "privacyClass": "PERSONAL_DATA",
+      "domainAck": {
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
+        "consumer": "SocialPresenceContactAdapter",
+        "domainAggregateType": "SearchResultEvidence",
+        "identitySource": "result-url-and-query-digest",
+        "subjectRefRequired": true,
+        "personalDataDsrCompatible": true
+      }
+    },
+    {
       "id": "contact_email.find.hunter",
       "declarationPath": "apps/api/src/tools/contact-enrichment-safety-tools.ts",
       "resultStrategy": "artifact_reference",

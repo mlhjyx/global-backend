@@ -27,6 +27,8 @@ export interface BattleCsvRow {
   readonly complianceTag: string;
   readonly legalNoticeStatus: string;
   readonly sellerInboundFooter: string | null;
+  readonly forwardableBlurb?: string | null;
+  readonly outreachWindow?: string | null;
 }
 
 export const BATTLE_CSV_HEADERS: readonly string[] = Object.freeze([
@@ -49,6 +51,8 @@ export const BATTLE_CSV_HEADERS: readonly string[] = Object.freeze([
   'D3法域合规标签',
   'Art.14/LIA合规状态',
   '卖方入站回复页脚',
+  '同事内推转介包(<=60词)',
+  '当地工作时区与拨号提示',
 ]);
 
 /** 个人邮箱局部脱敏（用于对外审计/汇报；真实试点作战导出传 maskPersonalEmails: false）。 */
@@ -88,6 +92,8 @@ export function renderBattleCsv(
     row.complianceTag,
     row.legalNoticeStatus,
     row.sellerInboundFooter ?? '',
+    row.forwardableBlurb ?? '',
+    row.outreachWindow ?? '',
   ]);
   return encodeCsv(BATTLE_CSV_HEADERS, encodedRows);
 }

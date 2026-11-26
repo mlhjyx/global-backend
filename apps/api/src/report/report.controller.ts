@@ -99,7 +99,7 @@ export class ReportController {
   @Get('battle-csv')
   @ApiOperation({
     summary:
-      '19 列受审计多通道作战清表 CSV：含决策委员会轨道、S/A/B/C 通道分层、D3 法域合规标签、Art.14/LIA 状态与 C 级转交信，复用 DataRights EXPORT 审计、制裁与隔离闸门',
+      '21 列受审计多通道作战清表 CSV：含决策委员会轨道、S/A/B/C 通道分层、真实 Trigger 破冰钩子、60 词同事内推转介包、当地工作时区与拨号提示、D3 法域合规标签、Art.14/LIA 状态与 C 级转交信，复用 DataRights EXPORT 审计、制裁与隔离闸门',
   })
   @ApiQuery({ name: 'icpId', required: true, schema: { type: 'string', format: 'uuid' } })
   @ApiQuery({
@@ -122,7 +122,7 @@ export class ReportController {
   })
   @ApiResponse({
     status: 200,
-    description: 'UTF-8（带 BOM）19 列作战 CSV，带 CWE-1236 公式注入防护',
+    description: 'UTF-8（带 BOM）21 列作战 CSV，带 CWE-1236 公式注入防护',
     content: { 'text/csv': { schema: { type: 'string' } } },
     headers: {
       'Content-Disposition': { description: '附件文件名', schema: { type: 'string' } },

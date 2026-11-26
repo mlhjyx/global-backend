@@ -24,10 +24,10 @@ import {
 
 const repositoryRoot = fileURLToPath(new URL('../', import.meta.url));
 
-test('inventory is locked to 33 Tools and 16 product Model tasks', () => {
-  assert.equal(EXPECTED_TOOL_IDS.length, 33);
+test('inventory is locked to 35 Tools and 16 product Model tasks', () => {
+  assert.equal(EXPECTED_TOOL_IDS.length, 35);
   assert.equal(EXPECTED_MODEL_TASKS.length, 16);
-  assert.equal(new Set(EXPECTED_TOOL_IDS).size, 33);
+  assert.equal(new Set(EXPECTED_TOOL_IDS).size, 35);
   assert.equal(new Set(EXPECTED_MODEL_TASKS.map((entry) => entry.taskId)).size, 16);
   assert.equal(EXPECTED_GENERIC_MODEL_TASK_LOOKUPS.length, 4);
   assert.deepEqual(EXPECTED_MODEL_GATEWAY_BOUNDARIES, [
@@ -294,8 +294,8 @@ test('artifact bounds are read only from the durableResultStrategy object and mu
 test('pure contracts preserve typed authority wiring under REVIEW_ONLY and the artifact pre-wire hold', async () => {
   const result = await verifyExecutionAuthorityPolicy({ repoRoot: repositoryRoot });
   assert.deepEqual(result.issues, []);
-  // 获客 vNext W4 + contact-enrichment safety (含 Prospeo v2) + L0 实时搜索 4 工具 + Batch 1.7B-1 EU VIES (vies.check) = 33 tools，按 policy 源真值锁定。
-  assert.equal(result.toolCount, 33);
+  // 获客 vNext W4 + contact-enrichment safety (含 Prospeo v2) + L0 实时搜索 4 工具 + Batch 1.7B-1 EU VIES (vies.check) + Batch 1.8A 社媒商业找人 2 工具 = 35 tools，按 policy 源真值锁定。
+  assert.equal(result.toolCount, 35);
   assert.equal(result.modelTaskCount, 16);
   assert.equal(result.physicalExecutionWiring, 'REVIEW_ONLY');
   assert.ok(result.physicalToolCallsiteCount >= EXPECTED_TOOL_CALLSITES.length);

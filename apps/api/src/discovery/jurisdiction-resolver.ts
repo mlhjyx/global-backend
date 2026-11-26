@@ -9,6 +9,7 @@
  *     德语/欧盟跨国企业形态如 `GmbH`/`KGaA`/`SE`/`UG`/`mbH`，或所属工作区目标市场全部为 EU/UK 时
  *     触发，绝不误伤美国/中东/拉美/亚太市场）。
  */
+import type { Prisma } from '@prisma/client';
 import { normalizeJurisdiction } from '../compliance/jurisdiction';
 import {
   inferPrefilterCountry,
@@ -18,6 +19,99 @@ import {
 import { normalizeMarketIsos } from './judgment/gates';
 
 export type ResolvedCompanyJurisdiction = PrefilterCountryInference;
+
+export interface CompanyPhoneChannelLike {
+  readonly channel: string;
+  readonly value: string;
+  readonly status?: string | null;
+}
+
+/** 宽容读取公司在 `company_contact_channel` 中的有效电话渠道（兼容未 mock 该表的旧单测）。 */
+export async function loadCompanyPhoneChannels(
+  tx: Prisma.TransactionClient,
+  companyId: string,
+): Promise<CompanyPhoneChannelLike[]> {
+  const delegate = (tx as unknown as {
+    companyContactChannel?: {
+      findMany?: (args: unknown) => Promise<CompanyPhoneChannelLike[]>;
+    };
+  }).companyContactChannel;
+  if (typeof delegate?.findMany !== 'function') return [];
+  return delegate.findMany({
+    where: { companyId, channel: 'phone', status: { not: 'INVALID' } },
+    select: { channel: true, value: true, status: true },
+    take: 20,
+  });
+}
+
+/**
+ * 若公司 `country` 仍为空，结合 `company_contact_channel(channel='phone')` 复判国别并回填
+ * `canonical_company.country` + `field_evidence(providerKey='jurisdiction_resolver')`。
+ */
+export async function backfillCompanyCountryFromChannels(
+  tx: Prisma.TransactionClient,
+  args: {
+    readonly workspaceId: string;
+    readonly company: {
+      readonly id: string;
+      readonly name?: string | null;
+      readonly domain?: string | null;
+      readonly country?: string | null;
+      readonly attributes?: unknown;
+    };
+    readonly extraChannels?: readonly CompanyPhoneChannelLike[];
+  },
+): Promise<ResolvedCompanyJurisdiction | null> {
+  if (typeof args.company.country === 'string' && args.company.country.trim()) {
+    return resolveCompanyJurisdiction(args.company);
+  }
+  const dbChannels = await loadCompanyPhoneChannels(tx, args.company.id);
+  const contactChannels = [...(args.extraChannels ?? []), ...dbChannels];
+  const resolved = resolveCompanyJurisdiction({
+    name: args.company.name,
+    domain: args.company.domain,
+    country: args.company.country,
+    attributes: args.company.attributes,
+    contactChannels,
+  });
+  if (!resolved) return null;
+
+  const companyRepo = (tx as unknown as {
+    canonicalCompany?: {
+      updateMany?: (input: unknown) => Promise<{ count: number }>;
+    };
+  }).canonicalCompany;
+  if (typeof companyRepo?.updateMany === 'function') {
+    const updated = await companyRepo.updateMany({
+      where: { id: args.company.id, country: null, status: { not: 'SUPPRESSED' } },
+      data: { country: resolved.iso, version: { increment: 1 } },
+    });
+    const evidenceRepo = (tx as unknown as {
+      fieldEvidence?: { create?: (input: unknown) => Promise<unknown> };
+    }).fieldEvidence;
+    if (updated.count === 1 && typeof evidenceRepo?.create === 'function') {
+      await evidenceRepo.create({
+        data: {
+          workspaceId: args.workspaceId,
+          entityType: 'company',
+          entityId: args.company.id,
+          field: 'country',
+          value: {
+            iso: resolved.iso,
+            source: resolved.source,
+            evidence: resolved.evidence,
+          } as Prisma.InputJsonValue,
+          providerKey: 'jurisdiction_resolver',
+          confidence: 0.9,
+          license: 'public',
+          allowedActions: ['display', 'match'] as Prisma.InputJsonValue,
+          dataClass: 'green',
+        },
+      });
+    }
+  }
+  return resolved;
+}
 
 /** 多国共用但均落入 EU/EEA/CH 高保护法域的企业后缀（如 GmbH 跨 DE/AT/CH，不可定单国但必受 GDPR/FADP 约束）。 */
 const EU_BLOC_LEGAL_SUFFIX_RE =
