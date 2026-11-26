@@ -10,7 +10,11 @@ import {
 } from './suppression-value';
 
 type SuppressionRow = { readonly type: string; readonly value: string };
-import { isGenericSwitchboardContact } from './providers/contact-quality-filter';
+import { isPlaceholderContact } from './providers/contact-quality-filter';
+import {
+  prioritizeBuyingCommitteeContacts,
+  type ContactEmailPointLike,
+} from '../enrichment/buying-committee';
 
 /**
  * 公司全渠道联系方式与社媒账号读模型聚合器（Batch 1.6）：
@@ -397,7 +401,7 @@ export async function loadLeadListChannelSummaries(
       company,
     );
     const coContacts = contactsByCo.get(company.id) ?? [];
-    const namedContacts = coContacts.filter((ct) => !isGenericSwitchboardContact(ct));
+    const namedContacts = coContacts.filter((ct) => !isPlaceholderContact(ct));
     const emails = new Set<string>(
       safeChannels.filter((c) => c.channel === 'email').map((c) => c.value),
     );
@@ -431,11 +435,18 @@ export async function loadLeadListChannelSummaries(
   return summaries;
 }
 
-/** 过滤历史总机占位行，只保留具名决策人联系人（供 `GET /canonical-companies/:id` 复用）。 */
+/** 过滤历史总机/非具名邮箱占位行，并按邮箱质量与决策委员会优先级排序（供 `GET /canonical-companies/:id` 复用）。 */
 export function filterDecisionMakerContacts<
-  T extends { fullName?: string | null; title?: string | null },
+  T extends {
+    fullName?: string | null;
+    title?: string | null;
+    points?: readonly ContactEmailPointLike[] | null;
+    contactPoints?: readonly ContactEmailPointLike[] | null;
+  },
 >(contacts: readonly T[]): T[] {
-  return contacts.filter((contact) => !isGenericSwitchboardContact(contact));
+  return prioritizeBuyingCommitteeContacts(
+    contacts.filter((contact) => !isPlaceholderContact(contact)),
+  );
 }
 
 /** 读出单家公司的全渠道联系点与社媒（供 `GET /canonical-companies/:id` 复用，不污染主服务行数预算）。 */

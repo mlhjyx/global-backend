@@ -3,6 +3,7 @@ import {
   isCrossCompanySocialMismatch,
   isGenericSwitchboardContact,
   isJunkContactCandidate,
+  isPlaceholderContact,
 } from './contact-quality-filter';
 
 describe('contact-quality-filter', () => {
@@ -55,13 +56,33 @@ describe('contact-quality-filter', () => {
     ).toBe(false);
   });
 
-  it('identifies generic switchboard placeholder contacts', () => {
+  it('identifies generic switchboard and legacy email placeholder contacts without filtering human names', () => {
     expect(isGenericSwitchboardContact({ fullName: '公开联系点 (info@)', title: 'switchboard' })).toBe(true);
     expect(isGenericSwitchboardContact({ fullName: 'Any Label', title: 'Switchboard' })).toBe(true);
     expect(isGenericSwitchboardContact({ fullName: '公开联系点 (sales@)', title: null })).toBe(true);
+    expect(isGenericSwitchboardContact({ fullName: '公开联系点（info@）', title: null })).toBe(true);
+    expect(isGenericSwitchboardContact({ fullName: '公开总机', title: null })).toBe(true);
+    expect(isGenericSwitchboardContact({ fullName: '个人邮箱 (servizioclienti@)', title: null })).toBe(true);
+    expect(isGenericSwitchboardContact({ fullName: '个人邮箱 (max@)', title: undefined })).toBe(true);
+    expect(isGenericSwitchboardContact({ fullName: '个人邮箱（max@）', title: null })).toBe(true);
+    expect(isGenericSwitchboardContact({ fullName: '公司邮箱 (info@)', title: null })).toBe(true);
+    expect(isGenericSwitchboardContact({ fullName: '企业邮箱 (contact@)', title: null })).toBe(true);
     expect(isGenericSwitchboardContact({ fullName: 'Company Switchboard', title: null })).toBe(true);
     expect(isGenericSwitchboardContact({ fullName: 'Switchboard', title: null })).toBe(true);
+    expect(isGenericSwitchboardContact({ fullName: 'Personal Email (max@)', title: null })).toBe(true);
+    expect(isGenericSwitchboardContact({ fullName: 'Company Email (info@)', title: null })).toBe(true);
+    expect(isGenericSwitchboardContact({ fullName: 'Corporate Email (sales@)', title: null })).toBe(true);
+    expect(isGenericSwitchboardContact({ fullName: 'Public Contact (info@)', title: null })).toBe(true);
+
+    // Must never filter real human names (Western or CJK)
     expect(isGenericSwitchboardContact({ fullName: 'Marco Rossi', title: 'CEO' })).toBe(false);
     expect(isGenericSwitchboardContact({ fullName: 'Marco Rossi', title: null })).toBe(false);
+    expect(isGenericSwitchboardContact({ fullName: "Matteo Dell'Oglio", title: 'Sales Manager Lombardia' })).toBe(false);
+    expect(isGenericSwitchboardContact({ fullName: 'Tobias Michl', title: 'Teamleiter' })).toBe(false);
+    expect(isGenericSwitchboardContact({ fullName: '张伟', title: '采购总监' })).toBe(false);
+    expect(isGenericSwitchboardContact({ fullName: '李娜', title: null })).toBe(false);
+    expect(isPlaceholderContact({ fullName: '个人邮箱 (servizioclienti@)', title: null })).toBe(true);
+    expect(isPlaceholderContact({ fullName: 'Marco Rossi', title: 'CEO' })).toBe(false);
+    expect(isGenericSwitchboardContact({ fullName: 'Dr. Klaus Müller', title: 'Geschäftsführer' })).toBe(false);
   });
 });

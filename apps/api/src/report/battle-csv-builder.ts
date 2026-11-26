@@ -13,10 +13,12 @@ import {
   buildReferralFirstInfoDraft,
   classifyBuyingCommitteeTrack,
   classifyContactChannelTier,
+  effectiveEmailVerificationState,
+  isUsableOutreachEmailPoint,
   prioritizeBuyingCommitteeContacts,
 } from '../enrichment/buying-committee';
 import { evaluateMultiChannelOutreachPolicy } from '../outreach/multi-channel-playbook';
-import { isGenericSwitchboardContact } from '../discovery/providers/contact-quality-filter';
+import { isPlaceholderContact } from '../discovery/providers/contact-quality-filter';
 import { extractCompanySocialProfiles } from '../discovery/company-channels';
 import { renderBattleCsv, type BattleCsvRow } from './battle-csv';
 export type { BattleCsvRow } from './battle-csv';
@@ -107,19 +109,31 @@ function languageForCountry(country: string | null): string {
 
 function pickBestEmailPoint(points: readonly BattleContactPoint[]): BattleContactPoint | null {
   // 禁止把未证实的 pattern_guess 盲猜邮箱选为作战清表首选触达邮箱，防止外贸团队对假地址退信。
-  const emails = points.filter((p) => {
-    if (p.type !== 'email' || p.status === 'INVALID' || p.verificationState === 'INVALID') return false;
-    const isPatternGuess = p.sourceType === 'pattern_guess' || p.verificationMethod === 'pattern_guess';
-    const isConfirmedValid = p.verificationState === 'VALID' || p.status === 'VALID';
-    return !isPatternGuess || isConfirmedValid;
-  });
+  const emails = points.filter(isUsableOutreachEmailPoint);
   if (emails.length === 0) return null;
-  const rank = (state?: string | null): number =>
-    state === 'VALID' ? 4 : state === 'CATCH_ALL_RISKY' ? 3 : state === 'UNKNOWN' ? 2 : 1;
-  return [...emails].sort((a, b) => rank(b.verificationState) - rank(a.verificationState))[0] ?? null;
+  const rank = (point: BattleContactPoint): number => {
+    const state = effectiveEmailVerificationState(point);
+    if (state === 'VALID') return 4;
+    if (state === 'CATCH_ALL_RISKY') return 3;
+    if (state === 'UNKNOWN') return 2;
+    return 1;
+  };
+  return [...emails].sort((a, b) => rank(b) - rank(a))[0] ?? null;
 }
 
-type EmailVerificationStateLike = 'VALID' | 'CATCH_ALL_RISKY' | 'UNKNOWN' | 'INVALID' | null;
+function collectSwitchboardChannels(switchboardContacts: readonly BattleDecisionMaker[]): {
+  emails: string[];
+  phones: string[];
+} {
+  return {
+    emails: switchboardContacts.flatMap((c) =>
+      c.points.filter(isUsableOutreachEmailPoint).map((p) => p.value),
+    ),
+    phones: switchboardContacts.flatMap((c) =>
+      c.points.filter((p) => p.type === 'phone' && p.status !== 'INVALID').map((p) => p.value),
+    ),
+  };
+}
 
 function resolveBattleChannels(
   companyContactPoints: readonly { kind: string; value: string; status?: string }[],
@@ -140,26 +154,20 @@ function resolveBattleChannels(
     .filter((s) => s.platform !== 'linkedin' && s.platform !== 'whatsapp')
     .slice(0, 3)
     .map((s) => `${s.platform.toUpperCase()}:${s.url}`);
-  const switchboardEmails = switchboardContacts.flatMap((c) =>
-    c.points.filter((p) => p.type === 'email').map((p) => p.value),
-  );
-  const switchboardPhones = switchboardContacts.flatMap((c) =>
-    c.points.filter((p) => p.type === 'phone').map((p) => p.value),
-  );
+  const switchboard = collectSwitchboardChannels(switchboardContacts);
   const companyEmails = [
     ...companyContactChannels.filter((c) => c.channel === 'email' && c.status !== 'INVALID').map((c) => c.value),
     ...companyContactPoints.filter((p) => p.kind === 'email').map((p) => p.value),
-    ...switchboardEmails,
+    ...switchboard.emails,
   ];
   const companyPhone =
     companyContactChannels.find((c) => c.channel === 'phone' && c.status !== 'INVALID')?.value ??
-    switchboardPhones[0] ??
+    switchboard.phones[0] ??
     null;
   const functionalCompanyEmail =
     companyEmails.find((e) => classifyContactEmail(e).emailType !== 'role') ?? null;
   const chosenEmail = contactEmailPoint?.value ?? functionalCompanyEmail ?? companyEmails[0] ?? null;
-  const chosenVerificationState =
-    (contactEmailPoint?.verificationState as EmailVerificationStateLike) ?? null;
+  const chosenVerificationState = effectiveEmailVerificationState(contactEmailPoint);
   const emailClass = chosenEmail ? classifyContactEmail(chosenEmail).emailType : null;
   const vendorPortal =
     companyContactPoints.find((p) => p.kind === 'supplier_page')?.value ??
@@ -288,8 +296,8 @@ function formatBattleComplianceAndAltChannels(args: {
 /** 将单条已核准线索转换为 19 列作战表行。 */
 export function buildBattleCsvRow(input: BattleRowBuildInput): BattleCsvRow {
   const { lead, company, companyContactPoints, companyContactChannels = [], decisionMakers } = input;
-  const namedDecisionMakers = decisionMakers.filter((dm) => !isGenericSwitchboardContact(dm));
-  const switchboardContacts = decisionMakers.filter((dm) => isGenericSwitchboardContact(dm));
+  const namedDecisionMakers = decisionMakers.filter((dm) => !isPlaceholderContact(dm));
+  const switchboardContacts = decisionMakers.filter((dm) => isPlaceholderContact(dm));
   const leadContact = prioritizeBuyingCommitteeContacts(namedDecisionMakers, 1)[0] ?? null;
   const channels = resolveBattleChannels(
     companyContactPoints,

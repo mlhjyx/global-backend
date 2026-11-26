@@ -686,6 +686,66 @@ describe('WeeklyReportService (BI-22)', () => {
     });
     expect(tx.policyDecisionLog.createMany).not.toHaveBeenCalled();
   });
+
+  it('battleCsv prefers a VALID-email Sales Manager over a no-email Teamleiter and excludes legacy 个人邮箱 placeholders', async () => {
+    const companyId = '44444444-4444-4444-8444-444444444401';
+    const { service } = harness(
+      baseFixture({
+        companies: [company(companyId, { name: 'Memodo Italia S.r.l.', domain: 'memodo.it', country: 'IT' })],
+        contacts: [
+          {
+            id: 'ct-placeholder',
+            companyId,
+            fullName: '个人邮箱 (servizioclienti@)',
+            title: null,
+            department: null,
+            contactPoints: [
+              {
+                type: 'email',
+                value: 'servizioclienti@memodo.it',
+                status: 'VALID',
+                verificationState: 'VALID',
+                sourceType: 'homepage',
+                verificationMethod: null,
+              },
+            ],
+          },
+          {
+            id: 'ct-teamleiter',
+            companyId,
+            fullName: 'Tobias Michl',
+            title: 'Teamleiter',
+            department: null,
+            contactPoints: [],
+          },
+          {
+            id: 'ct-sales',
+            companyId,
+            fullName: "Matteo Dell'Oglio",
+            title: 'Sales Manager Lombardia',
+            department: 'Sales',
+            contactPoints: [
+              {
+                type: 'email',
+                value: 'm.delloglio@memodo.it',
+                status: 'VALID',
+                verificationState: 'VALID',
+                sourceType: 'provider',
+                verificationMethod: null,
+              },
+            ],
+          },
+        ],
+      }),
+    );
+
+    const report = await service.battleCsv(ctx, { icpId: ICP, maskEmails: false });
+    const rows = parse(report.csv, { bom: true, columns: true }) as Array<Record<string, string>>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!['决策人姓名']).toBe("Matteo Dell'Oglio");
+    expect(rows[0]!['触达邮箱']).toBe('m.delloglio@memodo.it');
+    expect(rows[0]!['触达通道分级(S/A/B/C)']).toBe('S');
+  });
 });
 
 describe('sanctionsDelivery — 与 qualify、accept 同一张真值表（#665）', () => {
