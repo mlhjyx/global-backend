@@ -7,6 +7,8 @@
 > 本仓 as-built 架构见 [architecture/current.md](architecture/current.md)；决策注册表见 [adr/registry.md](adr/registry.md)；当前状态与待拍板见 [status/current.md](status/current.md)；路线见 [status/release-plan.md](status/release-plan.md)。
 > **2026-08-04 补**：本文主体定义**获客后端**产品范围（止于 LeadQualifiedPackage）。获客侧冻结已解除，Site Builder M1 也已完成阶段收口；下一施工任务须重新审计后选择，产品边界不变。Site Builder 范围/边界/决策见本文 §4A、[status/current.md](status/current.md)、「活文档」[site-builder/](site-builder/) 00–14 和 [adr/registry.md](adr/registry.md) **ADR-013~019**。
 
+> 最后核验：2026-11-27（跨仓责任与预付积分边界）。
+
 ## 0. 术语表
 
 | 术语                     | 意思                                                                                                                                                             |
@@ -128,7 +130,7 @@ Goal（业务目标：如进入德国市场）
 - 交付模式：Managed/Collaborative 起步，逐步 Self-service。
 - MVP 假设：「对上述企业，输入官网、产品和目标市场后，平台在可解释成本内持续产出有证据、可联系的海外进口商/采购企业，并在 **30 天内形成至少一个人工确认 QGO**。」北极星保持“每活跃 Workspace 每月新增 QGO”，SAO 只作为后续商业验证。
 - 首版不做：4 个发布平台、完整视频、全渠道 Inbox、专家市场、多行业同时商业化、多触点归因。
-- 客户 subscription、Billing、Credits、usage 与 pricing 的独立状态为 `PRODUCT=DEFERRED; UX=NONE; SOURCE=NOT_IMPLEMENTED; TEST=NOT_IMPLEMENTED; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=NOT_IMPLEMENTED; PILOT_GA=NOT_AUTHORIZED; UAT=NOT_RUN; UX_GAP=NOT_IMPLEMENTED`；`cap_microusd` 只是平台执行安全包络，不是客户余额、quota、价格、Credit 或发票。
+- SaaS 已合入预付积分钱包、流水和运营管理。具体计价、支持的消费路径及运行验收见 [SaaS 当前状态与钱包说明入口](https://github.com/mlhjyx/gain-saas/blob/main/docs/status/current.md)。客户订阅、自助收款和商业验收分别记录；引擎负责技术限额与实际供应商用量。
 
 ## 8. 文档权威关系
 

@@ -29,8 +29,8 @@
 2. **设计**：模块 `technical.md` + ADR（对象归属/边界/安全/数据合同）。
 3. **计划**：`docs/superpowers/plans/YYYY-MM-DD-<topic>.md`（生命周期字段、验收、回退）。
 4. **TDD**：RED → GREEN → refactor；安全/RLS/预算/幂等用例优先；80%+ 覆盖。
-5. **PR**：独立自审（`/code-review` 或逐文件）；5 项必需检查全绿；squash 合并（DEC-AIDEV-004）。
-6. **dev 自动发布**：main 构建镜像 → `gctl switch-backend`（dry-run 后执行）→ 健康检查 → 失败回滚。
+5. **PR**。完成独立审查，核对 [必需检查清单](../../.github/required-contexts.json) 与当前分支生效规则，按现行授权 squash 合并。
+6. **发布**。使用独立授权的发布窗口。受保护发布环境由拥有审批权的负责人处理；回读制品采用、运行检查与回退证据。
 7. **验收**：Playwright 主链路 + 真数据有界样本；RuntimeEvidence；不把 dev 观察当生产证据。
 8. **文档回写**：changelog 片段 + `status/current.md` + 模块矩阵状态。
 9. **发版列车**：pilot/prod 人工审批；Release Bundle。
@@ -84,7 +84,7 @@ ADR 的 `ACCEPTED` 只表示决定生效，不等于实现或验收；`docs/evid
 
 **拆不动怎么办**：先把纯重构或 expand 步骤单独合入（与行为变化分开）；宽范围机械改动（整文件删除、自动重命名）按 Google 规则视为小改动。
 
-**PR 生命周期**：`git fetch` → worktree（`pnpm worktree:new`，分支 `codex/<topic>` 或 `claude/<topic>`）→ Conventional Commits → 开 PR（「给产品负责人的说明」四行 + 已执行/未执行检查）→ 独立自审 → 必需检查在**当前 head** 全绿 → squash 合并（DEC-AIDEV-004）→ 删 worktree/分支并用 `node scripts/governance-main-worktree-sync.mjs apply` 同步 main。部署与发布是独立门，不在 PR 内完成。PR 正文必须如实列：已执行的检查、未执行或因环境跳过的检查、关联计划/ADR、回退方式。
+**PR 生命周期**。核对基线 → [创建隔离工作树](../backend/worktree-management.md) → 按授权提交与开 PR → 独立审查并核对当前 head 的必需检查 → 按现行授权 squash 合并 → 执行各自获授权的同步与清理。部署与发布各有独立门。PR 正文必须
 
 ### 2B-2 本地验证阶梯（推送前）
 
@@ -97,7 +97,7 @@ ADR 的 `ACCEPTED` 只表示决定生效，不等于实现或验收；`docs/evid
 | DB / schema / 迁移 | 上述 + `node scripts/run-db-tests.mjs --group service`（一次性库） | 相关 RLS disposable 组 | 真库全量 |
 | 功能 / 接口联调 | 源码热重载：`gctl up core` + `pnpm api:dev` | Playwright 主链路（如可用） | managed runtime 镜像切换 |
 
-- 新 worktree 用 `pnpm worktree:new <topic>`：自动 `gctl link-env` 并后台 `pnpm install`；装完前推送会被 pre-push 明确拦截（不再静默跳过本地门）。
+- 新工作树按 [运行手册](../backend/worktree-management.md#2-创建新-worktree) 准备环境。依赖装在任务工作树内；验证前先确认使用的是该工作树的工具链。
 - `GLOBAL_PREPUSH_FULL=1` 把本地门升为全量（含零容器单测）；`GLOBAL_SKIP_PREPUSH=1` 只跳检查、仍扫密钥。
 - 本地镜像构建不替代 CI 制品门：运行镜像必须来自发布工作流（build-once + 构建证明），本地构建没有 provenance。
 

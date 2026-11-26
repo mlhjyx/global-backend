@@ -4,6 +4,7 @@
 > 生命周期：`DRAFT`
 > 生命周期依据：S0 已按批准设计落地（`docs/superpowers/plans/2026-11-08-skill-runtime-s0.md`，产品负责人 2026-11-08 批准 D-a~D-h）；S1 Pack v1 尚未开始。
 > 模块产品说明：[product.md](product.md)
+> 模型网络出口与技术限额见[运行架构](../../architecture/current.md#运行模式与开关)。客户积分与引擎成本由各自账本承载，实际调用与阶段证据按[当前状态](../../status/current.md)核对。
 
 ## 1. 变更历史
 

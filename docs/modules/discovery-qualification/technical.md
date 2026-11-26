@@ -4,6 +4,7 @@
 > 生命周期：`DRAFT`（依据 2026-11-02 已批准方案起草）
 > 生命周期依据：承接已批准方案 D3/D4 与 §3.5；实现事实以代码与 status 为准。
 > 模块产品说明：[product.md](product.md)
+> SaaS 任务和后端 run 各有状态，以事务事件投影终态。近期开关与终态修复见[当前状态](../../status/current.md)；旧计划中的性能数字和验收批次按原日期解读。
 
 ## 1. 变更历史
 
@@ -35,6 +36,8 @@
 - 六维评分（fit/role/intent/dataQuality/reachability/engagement）；规则版本随 Lead 存；制裁第五门；禁联与权利检查。
 - LeadQualifiedPackage 不可变快照（scores/evidence/rights/suppression/recommended_action/valid_until）。
 - 事件：`LeadQualified` 等 10 个集成事件经 outbox + ACK；SaaS 消费。
+
+Wave 1 的来源证据与人工接受门已进入 main。明确记录的 `mismatch` 或 C1/C2 失败会被接受接口拒绝，保持 409 合同。流式寻源仍按既有租约执行并送出终态。试点统计与发布验收按[当前状态](../../status/current.md)核对，F1–F12 的合成测试边界见[验收入口](../../../apps/api/test/e2e-precision-intel/README.md)。
 
 ## 5. 性能改造（Phase 2b）
 

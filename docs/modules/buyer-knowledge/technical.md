@@ -4,6 +4,7 @@
 > 生命周期：`DRAFT`（依据 2026-11-02 已批准方案起草）
 > 生命周期依据：承接已批准方案 §3.6 与 contact-discovery；实现事实以代码与 status 为准。
 > 模块产品说明：[product.md](product.md)
+> 共享无个人数据的企业事实与租户投影分开，联系人数据受 PII 与访问规则约束。当前持久化和权限见[数据平面](../../architecture/current.md#3-数据平面与最小权限)，阶段性覆盖见[当前状态](../../status/current.md)。
 
 ## 1. 变更历史
 
@@ -35,10 +36,12 @@
 - 信号：TED/openFDA/SAM/海关（Comtrade 国家级）；共享源 ingest-once（指纹 × 6h 窗口）。
 - 背调（新）：Temporal workflow 多源并行（searxng/Google Maps/Wayback/WHOIS/官网/社媒/平台），每源限速与缓存，证据入库 `field_evidence` + 背调报告表（新）。
 
+渠道目录按渠道分页召回，优先使用通过审核的企业记录。写入共享绿色事实前核验来源许可与记录内容版本。有效官网证据优先，过期时允许仍有效的目录事实补位。命中目录候选后仍走受控网站核查。未验证展会继续停用，撤销后的存量回收与共享投影重试仍待验证。[渠道变更](../../roadmap/changelog.d/2026-11-27-mainline-a-channel-synergy.md)
+
 ## 5. 实现状态与缺口
 
 **已实现**：canonical/identity/证据；公司级联系路径；联系人 M1–M4（十班车验收 4 名决策人）；信号 ingest-once；禁联；provider registry。
-**缺口**：公司级 customs 源（仅 Comtrade 国家级）；背调工作流与报告表（Phase 3）；平台绿色事实与租户私有边界；contact 表 PII 保留期；`GET /suppressions` scope 调整待 gain-saas 跟进。
+**缺口**：公司级 customs 源（仅 Comtrade 国家级）；背调工作流与报告表（Phase 3）；共享事实后续撤销与冷却接线；contact 表 PII 保留期；`GET /suppressions` scope 调整待 gain-saas 跟进。
 
 ## 6. 测试
 

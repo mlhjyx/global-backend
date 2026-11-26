@@ -3,7 +3,7 @@
 本文件只保留跨会话、低漂移的执行规则。当前提交、在途工作、阻塞和下一决策见 [`docs/status/current.md`](docs/status/current.md)；历史事实见 [`docs/roadmap/changelog.md`](docs/roadmap/changelog.md) 与 [`docs/evidence/README.md`](docs/evidence/README.md)。不要把本文件扩写成日期化实施日志。
 
 ## 0. 最小工作循环
-开工读 §1 与 [`docs/status/current.md`](docs/status/current.md)、按任务查 [`docs/README.md`](docs/README.md) 第 3 节、跑 `gctl doctor`；一个任务一个 worktree、先写 RED、不越 §2 no-go；收尾跑 `pnpm docs:verify`、写 changelog 片段、如实披露未验证项。全文见 [`docs/shared/development-process.md`](docs/shared/development-process.md)。
+开工读取工作区规则、§1 与 [`docs/status/current.md`](docs/status/current.md)、按任务查 [`docs/README.md`](docs/README.md) 第 3 节、跑 `gctl doctor`；一个任务一个 worktree、先写 RED、不越 §2 no-go；收尾跑 `pnpm docs:verify`、写 changelog 片段、如实披露未验证项。全文见 [`docs/shared/development-process.md`](docs/shared/development-process.md)。
 
 ## 1. 权威顺序
 
@@ -26,27 +26,11 @@
 - MCP 是传输，不是授权。任何第三方能力必须位于 ProviderAdapter、ToolBroker、预算、来源政策和审计之后。
 - 不以 mock、目录可见、配置存在、测试 anchor、历史真测或开发机通过冒充生产部署、当前运行健康或用户可用。
 
-## 3. 当前开发环境的稳定约束
+## 3. 本机开发与运行
 
-- 唯一施工仓库是 `/global/backend`。开发宿主为 **xin，原生 Ubuntu 26.04**；WSL 已于 2026-09-23 停用，xin 是唯一开发与运行机器。仓库以 `origin` 为准，不存在 `server` remote。
-- global 容器位于原生 dockerd 的 `default` context；root 的 currentContext 指向空的 Docker Desktop，工作区工具固定使用 `DOCKER_CONTEXT=default`。Compose 一律使用 `docker compose -p global ...`，且必须经 launcher 注入 `--env-file`：日常用工作区工具 `gctl up <core|ai|growthos|runtime|all>`（`/global/local-config/bin/gctl`，封装 `/global/local-config/global/infra.sh` 等 launcher，见 `/global/CLAUDE.md`）；**直接裸跑 `docker compose` 会因缺少必需变量失败**。不得未经迁移审计执行 `down -v`、删除固定 `global-*` 容器或卷；先读 [`docs/backend/compose-project-migration.md`](docs/backend/compose-project-migration.md)。
-- Temporal 由容器 `global-temporal-dev` 提供，定义在仓外 `/global/local-config/global/infra.local.yaml`，不在仓库 `docker-compose.yml` 中；旧 `temporal-dev.service` 已 disable 并停止。不另起手工开发服务。
-- 基础设施容器的 `restart` 策略为 `no`，而 managed runtime 编排（`infra/backend-runtime.compose.yml`）里 API/Worker 为 `unless-stopped`：宿主重启后 API/Worker 会先于数据库和 Temporal 自行启动并报未就绪。恢复顺序是 `gctl up core` → `gctl up platform`（GrowthOS 已于 2026-10-31 P8 退役，不再属于恢复顺序），然后重启 API/Worker（或直接 `gctl up all`）。
-- 开发端口只绑定 `127.0.0.1`；跨主机访问使用 SSH 转发，不向 Tailscale 或公网直接暴露。
-- 密钥只进入环境变量或 secret store；不得读取、打印、提交或在文档中保存 token、密码、凭据指纹之外的秘密。
-
-最小启动与验证序列：
-
-```bash
-gctl link-env "$PWD"                                # 新 worktree 先链接两个 .env；全新克隆从 .env.example 复制
-pnpm install --frozen-lockfile
-pnpm --filter @global/db generate
-pnpm --filter @global/contracts build
-pnpm --filter @global/api build
-APP_DATABASE_URL= pnpm --filter @global/api test   # 单测零容器；开发循环三档见 README「本地起步」
-gctl up core                                        # 需要数据库时再起
-pnpm --filter @global/db exec prisma migrate deploy # 读 packages/db/.env
-```
+- 宿主机、托管服务、端口和环境准备见 `/global/CLAUDE.md` 与工作区 RUNBOOK。代码在独立 worktree 验证，依赖、生成和构建步骤见 [README](README.md#本地起步)。
+- 使用工作区 launcher 管理本机服务。启动、迁移、切换和恢复按对应运维手册及独立授权操作。开发监听使用 loopback。
+- 密钥只进入环境变量或 secret store。记录验证证据时保留环境、提交、时间和结果，隐藏凭据和个人信息。
 
 ## 4. 单一产品运行路径（Production Parity）
 
@@ -61,8 +45,8 @@ pnpm --filter @global/db exec prisma migrate deploy # 读 packages/db/.env
 - 明确、已授权的本地任务持续推进到可审查交付；普通技术选择不重复确认。先查可发现的事实，只暂停依赖未决信息或权限的部分，继续独立工作；同一动作、目标和范围的有效授权跨步骤沿用，变化部分另行确认。只读请求仍不授权修改。
 - 正式架构或安全方向变更保留书面规格、独立 review 和用户明确确认；已批准的同一规格不因切换 Skill 或执行阶段重复审批。Skill 不得新增操作权限、强制无关收尾或取消项目门。
 - 当前开发主体是本机的 Claude Code 代理（2026-09-21 起接替 Codex）；Codex 只在 Claude Code 指派下执行边界明确的任务；旧 Claude/Codex 会话、分支和 worktree 只作待审计 provenance，不代表当前 owner，也不得因失联而删除。
-- `/global/backend` 主工作区只作 main 与现场审计；功能施工遵循「一个任务一个 writer 一个 worktree」。`pnpm worktree:new` 在 `.claude/worktrees/<topic>` 创建 `claude/<topic>`；`.codex/worktrees/<topic>` 与 `codex/<topic>` 只剩 2026-11-04 迁移前已在飞的 worktree，不再新建。
-- 远端 PR 合入后，根 `main` 以 `node scripts/governance-main-worktree-sync.mjs status` 只读检查、以同一脚本的 `apply` 动作受控跟随；后者只允许 fetch 后把 `origin/main` 解析成精确 commit，再对该 commit 执行 `merge --ff-only`，必须证明入站路径不触碰本地 tracked/untracked/ignored 现场，并在操作前后保持完整 status 一致。它不代替 PR/CI/review/用户合并授权，也不 stash、reset、clean 或清理分支/worktree。
+- `/global/backend` 承载 main 与现场审计；本工作区在 `/global/.agy-worktrees/backend/<topic>` 从已核验的主线创建独立分支。一个任务一个 writer。创建和根 checkout 同步的操作见 [worktree 手册](docs/backend/worktree-management.md)。
+- 远端 PR 合入、根 checkout 同步和工作树清理分别执行。按工作区 fast-forward 规则保留本地现场；用同步脚本的 `status` 在根 checkout 检查。
 - 开始修改前运行 `pnpm worktree:inventory`，核对分支、worktree、任务与文件 owner。与其他 writer 重叠是硬停止条件；共享工作区中不得回退他人改动。
 - 保留用户删除、未跟踪文件、脏工作区、独有提交和历史证据。不得使用 `git reset --hard`、`git clean -fdx` 或未经明确授权的递归删除。
 - 网络工具默认只读。push、开/改 PR、发消息、发布、部署、合并、由 Codex/operator 发起的付费调用或 evaluation、远程任务、第三方配置与凭据变更都需要用户对该动作的明确授权。正常产品请求携带有效 SaaS 签名 Budget Grant 时，该 Grant 是本次 BuildRun 的产品费用授权，不再要求聊天式逐次批准；它不授权开发者额外探测、评测或扩大额度。
@@ -87,9 +71,9 @@ pnpm --filter @global/db exec prisma migrate deploy # 读 packages/db/.env
 ## 8. 模型、评测与费用
 - 当前非运行时候选合同只认 `site-builder-model-candidate-baseline/2026-08-07-v3` 及其[生成页](docs/site-builder/model-candidate-baseline.md)；这个 ID 不是 active route、质量 evidence 或 dispatch 授权。
 - 生产路由、评测基础设施、评测 evidence、promotion 和 runtime adoption 必须分开变更。
-- 正常产品 BuildRun 的费用权威来自 SaaS Control Plane 签发的一次性、短期、请求绑定 Budget Grant；本仓只验签、原子消费、reserve/settle/reconcile 并回报，不另设隐藏的产品总金额门。缺失、非法、过期、跨 workspace/operation/request（已有 Site 时还必须绑定 site）或重复挪用的 Grant 必须在创建 Run、启动 Workflow 和调用模型前拒绝。
+- 按 [运行架构](docs/architecture/current.md#运行模式与开关) 区分旧执行预算模式、技术安全上限和 SaaS 商业计费。执行预算处于 `enforce` 时，适用请求须先验证短效、请求绑定的 Grant 并原子消费；`bypass` 只覆盖代码登记的分支，平台与模型安全门按实际接线。
 - “暂不调用模型”仍表示 Codex/operator/evaluation 的零费用、离线或 create-only 边界。此类 ad-hoc/evaluation 真实 dispatch 前必须有精确 alias/protocol/credential scope、有限额度、冻结价格、请求与 campaign cap、durable settlement 和用户明确费用授权；正常产品 Grant 与该授权不能互相推导。
-- 有效输出已经持久取得但精确费用暂不可得时，按完整 reservation 上界保守扣减、允许 BuildRun 继续并异步追加对账，不得冒充精确费用。没有有效输出，或物理调用/ACK 状态未知时，完整 reservation 保持占用、禁止自动发起第二次物理请求，并按稳定 request/operation identity 恢复事实。唯一例外是确定失败、因而网关没有计费的请求（HTTP 429 与除 504/524 超时外的 5xx、连接从未建立、Tool 在第一次物理请求之前失败；流式失败一律不算：首字节之前的失败由 new-api 回可重试的 HTTP 502、按 5xx 释放，仍以流式失败到达的都在 new-api 写出首字节（数据块或 keepalive ping）之后，即使还没有输出也可能已按估算计费）：reservation 释放，同一 operation key 最多再预留到第 3 次（账本计数，网关 RetryTimes=1 时最多 6 次物理请求）；机器声明见 `durable-result-strategies.json` 的 `resultDisposition`。
+- 费用未知、重复物理调用、保守结算和有限重试按 [执行预算账本](docs/backend/execution-budget-ledger-states.md) 与 [durable result 策略](docs/governance/durable-result-strategies.json) 核对。
 - Provider kill switch、单次 task/wire/token/output 上限、幂等和异常停用继续保留；24 小时人工 settlement attestation 不得作为正常产品运行授权或调用门。
 
 ## 9. 文档与交付

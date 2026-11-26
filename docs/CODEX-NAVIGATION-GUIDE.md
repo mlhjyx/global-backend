@@ -41,7 +41,7 @@ Before editing:
 - stop writes on overlapping ownership, an unexplained change to the intended write surface, a base mismatch, or reuse of unique commits whose owner is unknown; preserve unrelated dirty state and isolate the task rather than stopping independent read-only investigation;
 - preserve `main`, other worktrees, historical branches, user deletions and untracked files.
 
-One task has one writer and one isolated worktree. `pnpm worktree:new` creates `.claude/worktrees/<topic>` with `claude/<topic>`; `.codex/worktrees/<topic>` with `codex/<topic>` remains only for pre-2026-11-04 in-flight worktrees and receives no new ones. Read-only audits may inspect other refs, but they do not edit, rebase, clean, delete, or reuse another task's worktree. Branch, worktree and PR state are transient and must never be copied from an old status note without live verification.
+One task has one writer and one isolated worktree. On xin, put new worktrees under `/global/.agy-worktrees/backend/`; the repository helper still targets `.claude/worktrees/`. See the [worktree runbook](backend/worktree-management.md) for ownership, creation and root synchronization.
 
 ## 3. Module map
 
@@ -102,30 +102,15 @@ Never persist or report secrets, bearer values, credentials, personal data, prom
 
 ### 5.1 Inventory and create
 
-From the canonical Ubuntu checkout:
-
-```bash
-cd /global/backend
-pnpm --silent worktree:inventory
-
-TASK_SLUG=short-lowercase-topic
-pnpm worktree:new "$TASK_SLUG" --dry-run
-pnpm worktree:new "$TASK_SLUG"
-cd "/global/backend/.claude/worktrees/$TASK_SLUG"
-```
-
-`worktree:inventory` emits one deterministic `git-worktree-inventory/v1` JSON document. Every entry includes its upstream state; `ahead`, `behind`, relationship and merge base relative to the locally available `origin/main`; typed dirty/untracked and last-commit observations; and explicit `owner`, `activeTask` and `pullRequest` provenance. This repository currently has no local ownership registry, so those three provenance fields must remain structured `UNKNOWN` rather than being inferred from a branch name. Missing paths and local Git failures remain typed `UNAVAILABLE`; a configured upstream whose local ref has disappeared is `GONE`. These states are evidence for review, never permission to prune.
-
-The commands above use the `.claude/worktrees/` convention. `worktree:new` fetches `origin`, requires exactly one `main` worktree, rejects existing paths or branches, creates `claude/<topic>` from the then-current `origin/main`, and verifies the new worktree is clean. When an approved task specifies a fixed base, create from that exact commit instead and verify it before any edit:
+Run `pnpm worktree:inventory` from the repository, check the path and writer, then use the [xin worktree creation steps](backend/worktree-management.md#2-创建新-worktree). Inspect the remote main object before selecting it as a base. For a fixed-base task, keep the approved commit and verify the new tree:
 
 ```bash
 git rev-parse HEAD
 git branch --show-current
 git status --short --branch
-test "$(git rev-parse HEAD)" = "<approved-full-commit>"
 ```
 
-Do not silently move a fixed-base task to newer `main`.
+The inventory reports local upstream and main relationships plus owned and untracked working state. The cached `origin/main` needs a separate readback when current remote state matters.
 
 ### 5.2 Prepare worktree-local evidence
 

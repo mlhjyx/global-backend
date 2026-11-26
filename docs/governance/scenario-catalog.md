@@ -11,6 +11,8 @@
 
 含 `AXIS=value` 的详细场景状态遵循[唯一七轴模型](terminology-and-status.md#6-多轴交付状态) `PRODUCT / UX / SOURCE / TEST / RUNTIME / RELEASE / PILOT_GA`；`UAT` 是证据限定词，其他 `*_EVIDENCE / *_GAP / *_QUALIFIER` 不得代替基态。旧 `TARGET_NOT_RUNNABLE` 等场景目录标签仍可用于不含轴的历史/目录行；一旦写详细轴，必须使用闭集基态。
 
+本页定义场景及固定参照。SaaS 事件接收、幂等投影和验收覆盖读 [SaaS 状态](https://github.com/mlhjyx/gain-saas/blob/main/docs/status/current.md)。
+
 ## 1. Fixture 安全规则
 
 - 所有公司、域名、人员、邮箱、认证、询盘和商业结果必须明确合成；禁止复制真实客户、联系人或生产数据。
