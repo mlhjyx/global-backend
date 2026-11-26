@@ -212,6 +212,7 @@ describe('extractCompanyWebsiteStreaming single-activity flow', () => {
       companyId: COMPANY_ID,
       runId: RUN_ID,
       domain: 'solare-italia.it',
+      inspectPassiveDns: async () => null,
     });
 
     expect(result.fetchMethod).toBe('raw_http');
@@ -250,6 +251,7 @@ describe('extractCompanyWebsiteStreaming single-activity flow', () => {
       companyId: COMPANY_ID,
       runId: RUN_ID,
       domain: 'solargrid.de',
+      inspectPassiveDns: async () => null,
     });
 
     expect(result.fetchMethod).toBe('crawl4ai');
@@ -287,6 +289,7 @@ describe('extractCompanyWebsiteStreaming single-activity flow', () => {
       companyId: COMPANY_ID,
       runId: RUN_ID,
       domain: 'solare-italia.it',
+      inspectPassiveDns: async () => null,
     });
 
     expect(result.fetchMethod).toBe('raw_http');
@@ -326,6 +329,7 @@ describe('extractCompanyWebsiteStreaming single-activity flow', () => {
       runId: RUN_ID,
       domain: 'acme.de',
       homepageUrl: 'https://acme.de/download?id=1',
+      inspectPassiveDns: async () => null,
     });
     expect(bodySkip.pdfSkipped).toBe(true);
     expect(bodySkip.fetchMethod).toBe('skipped');
@@ -356,10 +360,93 @@ describe('extractCompanyWebsiteStreaming single-activity flow', () => {
       companyId: COMPANY_ID,
       runId: RUN_ID,
       domain: 'private-site.de',
+      inspectPassiveDns: async () => null,
     });
 
     expect(result.robotsBlocked).toBe(true);
     expect(result.fetchMethod).toBe('skipped');
     expect(calls).toEqual(['http.get:https://private-site.de/robots.txt']);
+  });
+
+  it('does not attribute a legal representative from an off-site redirect to the company', async () => {
+    const home = 'https://sunforge.example';
+    const broker = createMockBroker(async (_toolId, input) => {
+      const url = String(input.url);
+      if (url.endsWith('/robots.txt')) {
+        return { data: { status: 404, ok: false, mediaType: 'text/plain', text: '' } };
+      }
+      if (url === `${home}/`) {
+        return {
+          data: {
+            status: 200, ok: true, mediaType: 'text/plain', finalUrl: url,
+            text: `<main>${'Industrial pumps. '.repeat(20)}<a href="/impressum">Legal notice</a></main>`,
+          },
+        };
+      }
+      if (url === `${home}/impressum`) {
+        return {
+          data: {
+            status: 200, ok: true, mediaType: 'text/plain',
+            finalUrl: 'https://other-company.example/impressum',
+            text: '<p>Geschäftsführer: Mira Levin</p>',
+          },
+        };
+      }
+      throw new Error('unexpected URL');
+    });
+    const result = await extractCompanyWebsiteStreaming({
+      broker, workspaceId: WORKSPACE_ID, companyId: COMPANY_ID, runId: RUN_ID,
+      domain: 'sunforge.example', inspectPassiveDns: async () => null,
+    });
+    expect(result.statutoryDirectors).toEqual([]);
+    expect(result.pagesFetched).not.toContain('https://other-company.example/impressum');
+  });
+
+  it('F4 & F5: extracts statutory directors from footer & /informativa-privacy hop while running passive DNS in parallel', async () => {
+    const homeWithFooterAndPrivacy = `<!doctype html><html><head><title>Novacrest S.r.l.</title></head><body>
+      <main><p>${'Distributore fotovoltaico e sistemi di accumulo per installatori e EPC in Italia. '.repeat(4)}</p>
+      <a href="/contatti">Contatti</a><a href="/informativa-privacy">Privacy</a></main>
+      <footer><p>Amministratore Delegato: Mira Levin</p></footer>
+    </body></html>`;
+    const privacyHtml = `<html><body><p>Titolare del trattamento: Dott. Marco Verdi</p></body></html>`;
+    const broker = createMockBroker(async (_toolId, input) => {
+      const url = String(input.url);
+      if (url.endsWith('/robots.txt')) {
+        return { data: { status: 404, ok: false, mediaType: 'text/plain', text: '' } };
+      }
+      if (url === 'https://novacrest.example/') {
+        return { data: { status: 200, ok: true, mediaType: 'text/plain', text: homeWithFooterAndPrivacy, finalUrl: url } };
+      }
+      if (url === 'https://novacrest.example/contatti') {
+        return { data: { status: 200, ok: true, mediaType: 'text/plain', text: CONTACT_PAGE_HTML, finalUrl: url } };
+      }
+      if (url === 'https://novacrest.example/informativa-privacy') {
+        return { data: { status: 200, ok: true, mediaType: 'text/plain', text: privacyHtml, finalUrl: url } };
+      }
+      throw new Error(`unexpected url ${url}`);
+    });
+
+    const result = await extractCompanyWebsiteStreaming({
+      broker,
+      workspaceId: WORKSPACE_ID,
+      companyId: COMPANY_ID,
+      runId: RUN_ID,
+      domain: 'novacrest.example',
+      inspectPassiveDns: async () => ({
+        mxProvider: 'google_workspace',
+        mxHosts: ['aspmx.l.google.com'],
+        segVendors: [],
+        spfIncludes: ['_spf.google.com', 'spf.hubspotemail.net'],
+        dmarcPolicy: 'quarantine',
+        verificationTokens: ['google'],
+        techSignals: ['hubspot'],
+      }),
+    });
+
+    expect(result.channels.impressumUrl).toBeNull();
+    expect(result.channels.statutoryDisclosureUrl).toBe('https://novacrest.example/informativa-privacy');
+    expect(result.statutoryDirectors?.map((d) => d.name)).toEqual(['Mira Levin']);
+    expect(result.passiveDns?.mxProvider).toBe('google_workspace');
+    expect(result.passiveDns?.techSignals).toEqual(['hubspot']);
   });
 });

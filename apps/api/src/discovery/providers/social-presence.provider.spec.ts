@@ -5,6 +5,7 @@ import {
   buildSocialDorks,
   choosePersonTitle,
   htmlToVisibleText,
+  isEuOrUkLinkedinBlocked,
   isSocialLoginWall,
   pageTextMentionsName,
   parseSocialHeadline,
@@ -17,12 +18,18 @@ import {
 } from './social-presence.provider';
 
 const COMPANY = { name: 'Pumpen Schmid GmbH', domain: 'pumpen-schmid.de' };
+const US_COMPANY = { name: 'Pumpen Schmid Inc', domain: 'pumpen-schmid.com', country: 'US' };
 const NOW = Date.UTC(2026, 10, 1);
 
 const PROFILE_TEXT =
   'Max Mustermann ist Einkaufsleiter bei der Pumpen Schmid GmbH in Stuttgart. ' +
   'Er verantwortet die Beschaffung von Industriepumpen und berichtet an die Geschäftsführung. ' +
   'Kontakt: max.mustermann@pumpen-schmid.de';
+
+const US_PROFILE_TEXT =
+  'Max Mustermann is Purchasing Director at Pumpen Schmid Inc in Chicago. ' +
+  'He oversees industrial pump procurement and reports to executive leadership. ' +
+  'Contact: max.mustermann@pumpen-schmid.com';
 
 const SNAPSHOT = 'https://web.archive.org/web/20260101/https://www.xing.com/profile/Max_Mustermann';
 
@@ -579,7 +586,7 @@ describe('social presence M2b: archive copies and live public pages (D1)', () =>
     expect(result.diagnostics).toMatchObject({ social_fetches: 1, social_archive_hits: 1 });
   });
 
-  it('falls back to the live LinkedIn page and keeps chrome-heavy pages', async () => {
+  it('falls back to the live LinkedIn page for non-EU/UK companies and keeps chrome-heavy pages', async () => {
     let liveCalls = 0;
     const invoke = vi.fn(async (tool: string, input: { q?: string; url?: string }) => {
       if (tool === 'social.search') {
@@ -588,7 +595,7 @@ describe('social presence M2b: archive copies and live public pages (D1)', () =>
             results: [
               {
                 url: 'https://www.linkedin.com/in/max-mustermann',
-                title: 'Max Mustermann – Einkaufsleiter – Pumpen Schmid GmbH | LinkedIn',
+                title: 'Max Mustermann – Einkaufsleiter – Pumpen Schmid Inc | LinkedIn',
               },
             ],
           },
@@ -604,7 +611,7 @@ describe('social presence M2b: archive copies and live public pages (D1)', () =>
           data: {
             status: 200,
             ok: true,
-            text: `<html><body>LinkedIn Home Jobs Games Join now Sign in ${PROFILE_TEXT}</body></html>`,
+            text: `<html><body>LinkedIn Home Jobs Games Join now Sign in ${US_PROFILE_TEXT}</body></html>`,
           },
           costCents: 0,
         };
@@ -617,7 +624,7 @@ describe('social presence M2b: archive copies and live public pages (D1)', () =>
       extract,
     });
 
-    const result = await adapter.discoverContacts(COMPANY, { workspaceId: 'ws-1', runId: 'run-1' } as never);
+    const result = await adapter.discoverContacts(US_COMPANY, { workspaceId: 'ws-1', runId: 'run-1' } as never);
 
     expect(liveCalls).toBe(1);
     expect(result.contacts[0]).toMatchObject({
@@ -628,13 +635,13 @@ describe('social presence M2b: archive copies and live public pages (D1)', () =>
     expect(result.diagnostics?.social_blocked).toBeUndefined();
   });
 
-  it('counts only target refusals (403/429/999, login wall) into the circuit', async () => {
+  it('counts only target refusals (403/429/999, login wall) into the circuit for non-EU/UK companies', async () => {
     const refusalInvoke = vi.fn(async (tool: string, input: { q?: string; url?: string }) => {
       if (tool === 'social.search') {
         return {
           data: {
             results: [
-              { url: 'https://www.linkedin.com/in/max-mustermann', title: 'Max Mustermann – Einkaufsleiter – Pumpen Schmid GmbH | LinkedIn' },
+              { url: 'https://www.linkedin.com/in/max-mustermann', title: 'Max Mustermann – Einkaufsleiter – Pumpen Schmid Inc | LinkedIn' },
             ],
           },
           costCents: 0,
@@ -651,7 +658,7 @@ describe('social presence M2b: archive copies and live public pages (D1)', () =>
       extract: async () => [{ full_name: 'Max Mustermann', title: 'Einkaufsleiter' }],
       circuit,
     });
-    const first = await adapter.discoverContacts(COMPANY, { workspaceId: 'ws-1', runId: 'run-1' } as never);
+    const first = await adapter.discoverContacts(US_COMPANY, { workspaceId: 'ws-1', runId: 'run-1' } as never);
     expect(first.diagnostics).toMatchObject({ social_blocked: 1 });
     // 索引层的姓名/职务仍保留，只是没有被富化。
     expect(first.contacts[0]).toMatchObject({ title: 'Einkaufsleiter', license: 'public-index' });
@@ -662,7 +669,7 @@ describe('social presence M2b: archive copies and live public pages (D1)', () =>
         return {
           data: {
             results: [
-              { url: 'https://www.linkedin.com/in/max-mustermann', title: 'Max Mustermann – Einkaufsleiter – Pumpen Schmid GmbH | LinkedIn' },
+              { url: 'https://www.linkedin.com/in/max-mustermann', title: 'Max Mustermann – Einkaufsleiter – Pumpen Schmid Inc | LinkedIn' },
             ],
           },
           costCents: 0,
@@ -677,7 +684,7 @@ describe('social presence M2b: archive copies and live public pages (D1)', () =>
       broker: { invoke: blockedInvoke } as never,
       extract: async () => [],
       circuit: new SocialHostCircuit(),
-    }).discoverContacts(COMPANY, { workspaceId: 'ws-1', runId: 'run-1' } as never);
+    }).discoverContacts(US_COMPANY, { workspaceId: 'ws-1', runId: 'run-1' } as never);
     expect(blockedResult.diagnostics?.social_blocked).toBeUndefined();
   });
 
@@ -695,8 +702,8 @@ describe('social presence M2b: archive copies and live public pages (D1)', () =>
         return {
           data: {
             results: [
-              { url: 'https://www.linkedin.com/in/max-mustermann', title: 'Max Mustermann – Einkaufsleiter – Pumpen Schmid GmbH | LinkedIn' },
-              { url: 'https://www.linkedin.com/in/erika-musterfrau', title: 'Erika Musterfrau – Einkauf – Pumpen Schmid GmbH | LinkedIn' },
+              { url: 'https://www.linkedin.com/in/max-mustermann', title: 'Max Mustermann – Einkaufsleiter – Pumpen Schmid Inc | LinkedIn' },
+              { url: 'https://www.linkedin.com/in/erika-musterfrau', title: 'Erika Musterfrau – Einkauf – Pumpen Schmid Inc | LinkedIn' },
             ],
           },
           costCents: 0,
@@ -716,10 +723,10 @@ describe('social presence M2b: archive copies and live public pages (D1)', () =>
         };
       }
       if (input.url?.startsWith('https://web.archive.org/')) {
-        return { data: { status: 200, ok: true, text: `<html><body>${PROFILE_TEXT}</body></html>` }, costCents: 0 };
+        return { data: { status: 200, ok: true, text: `<html><body>${US_PROFILE_TEXT}</body></html>` }, costCents: 0 };
       }
       if (tool === 'social.fetch') liveCalls += 1;
-      return { data: { status: 200, ok: true, text: `<html><body>${PROFILE_TEXT}</body></html>` }, costCents: 0 };
+      return { data: { status: 200, ok: true, text: `<html><body>${US_PROFILE_TEXT}</body></html>` }, costCents: 0 };
     });
     const adapter = new SocialPresenceContactAdapter({
       broker: { invoke } as never,
@@ -729,7 +736,7 @@ describe('social presence M2b: archive copies and live public pages (D1)', () =>
       circuit,
     });
 
-    const result = await adapter.discoverContacts(COMPANY, { workspaceId: 'ws-1', runId: 'run-1' } as never);
+    const result = await adapter.discoverContacts(US_COMPANY, { workspaceId: 'ws-1', runId: 'run-1' } as never);
 
     // 候选 1 有档案 → 熔断不影响档案层；候选 2 无档案 → L2 被熔断跳过。
     expect(liveCalls).toBe(0);
@@ -801,5 +808,53 @@ describe('social presence M2b: archive copies and live public pages (D1)', () =>
     expect(textMentionsDomain('See technical.design for details', 'technical.de')).toBe(false);
     expect(textMentionsDomain('mycoenergia.com is another firm', 'coenergia.com')).toBe(false);
     expect(textMentionsDomain('sub-coenergia.com is another firm', 'coenergia.com')).toBe(false);
+  });
+
+  it('prohibits live L2 LinkedIn social.fetch for DE/IT/GB/EU companies while allowing L1 archive', async () => {
+    expect(isEuOrUkLinkedinBlocked({ name: 'Novacrest S.r.l.', domain: 'novacrest.example' }, 'www.linkedin.com')).toBe(true);
+    expect(isEuOrUkLinkedinBlocked({ name: 'Acme Ltd', domain: 'acme.co.uk', country: 'GB' }, 'www.linkedin.com')).toBe(true);
+    expect(isEuOrUkLinkedinBlocked({ name: 'Solar Bloc', domain: 'solarbloc.eu' }, 'www.linkedin.com')).toBe(true);
+    expect(isEuOrUkLinkedinBlocked(US_COMPANY, 'de.linkedin.com')).toBe(true);
+    expect(isEuOrUkLinkedinBlocked(US_COMPANY, 'www.linkedin.com')).toBe(false);
+
+    for (const euCompany of [
+      { name: 'Pumpen Schmid GmbH', domain: 'pumpen-schmid.de', country: 'DE' },
+      { name: 'Novacrest S.r.l.', domain: 'novacrest.example', country: 'IT' },
+      { name: 'BritSolar Ltd', domain: 'britsolar.co.uk', country: 'GB' },
+    ]) {
+      let liveCalls = 0;
+      const invoke = vi.fn(async (tool: string, input: { url?: string }) => {
+        if (tool === 'social.search') {
+          return {
+            data: {
+              results: [
+                {
+                  url: 'https://www.linkedin.com/in/mario-rossi',
+                  title: `Mario Rossi - Purchasing Manager - ${euCompany.name} | LinkedIn`,
+                },
+              ],
+            },
+            costCents: 0,
+          };
+        }
+        if (tool === 'social.fetch' && input.url?.startsWith('https://archive.org/wayback/available')) {
+          return { data: { status: 200, ok: true, text: '{"archived_snapshots":{}}' }, costCents: 0 };
+        }
+        if (tool === 'social.fetch') {
+          liveCalls += 1;
+          return { data: { status: 200, ok: true, text: 'should never be called' }, costCents: 0 };
+        }
+        return { data: { results: [] }, costCents: 0, degraded: true };
+      });
+
+      const adapter = new SocialPresenceContactAdapter({
+        broker: { invoke } as never,
+        extract: async () => [{ full_name: 'Mario Rossi', title: 'Purchasing Manager' }],
+      });
+      const result = await adapter.discoverContacts(euCompany, { workspaceId: 'ws-1', runId: 'run-1' } as never);
+      expect(liveCalls).toBe(0);
+      expect(result.diagnostics).toMatchObject({ social_l2_jurisdiction_blocked: 1 });
+      expect(result.contacts[0]).toMatchObject({ fullName: 'Mario Rossi', license: 'public-index' });
+    }
   });
 });

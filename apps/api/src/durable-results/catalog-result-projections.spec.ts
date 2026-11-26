@@ -134,6 +134,21 @@ const SEARX_RAW: RawToolResult = {
   degraded: true,
 };
 
+const SOCIAL_PERSON_RAW: RawToolResult = {
+  data: {
+    results: Array.from({ length: 20 }, (_, index) => ({
+      url: index === 0 ? URL_2048 : `https://it.linkedin.com/in/person-${index}`,
+      title: index === 0 ? 't'.repeat(2000) : `Person ${index} - Buyer`,
+      snippet: index === 0 ? 's'.repeat(240) : `Snippet ${index}`,
+      highlights: Array.from({ length: 3 }, (_, hIdx) =>
+        index === 0 && hIdx === 0 ? 'h'.repeat(240) : `Highlight ${hIdx}`,
+      ),
+    })),
+  },
+  costCents: 1_000_000_000,
+  degraded: true,
+};
+
 const WIKIDATA_SPARQL_RAW: RawToolResult = {
   data: {
     companies: Array.from({ length: 200 }, (_, index) => ({
@@ -576,8 +591,8 @@ const REPRESENTATIVE_LEGAL_BOUNDARY_FIXTURES: readonly ProjectionFixture[] = [
   { toolId: 'exa.search', schema: 'exa-search/v1', raw: EXA_SEARCH_RAW },
   { toolId: 'google_places.search', schema: 'google-places-search/v1', raw: GOOGLE_PLACES_RAW },
   { toolId: 'vies.check', schema: 'vies-check/v1', raw: VIES_CHECK_RAW },
-  { toolId: 'social.search_serper', schema: 'social-search-serper/v1', raw: SEARX_RAW },
-  { toolId: 'social.search_exa_people', schema: 'social-search-exa-people/v1', raw: SEARX_RAW },
+  { toolId: 'social.search_serper', schema: 'social-search-serper/v1', raw: SOCIAL_PERSON_RAW },
+  { toolId: 'social.search_exa_people', schema: 'social-search-exa-people/v1', raw: SOCIAL_PERSON_RAW },
 ];
 
 function schemaTypes(node: JsonRecord): readonly string[] {
@@ -859,12 +874,18 @@ const EXPECTED_BOUNDS: Readonly<Record<string, JsonRecord>> = {
     '$.data.results.maxItems': 20,
     '$.data.results[].url.maxLength': 2048,
     '$.data.results[].title.maxLength': 2000,
+    '$.data.results[].snippet.maxLength': 240,
+    '$.data.results[].highlights.maxItems': 3,
+    '$.data.results[].highlights[].maxLength': 240,
   },
   'social-search-exa-people/v1': {
     ...COMMON_RESULT_BOUNDS,
     '$.data.results.maxItems': 20,
     '$.data.results[].url.maxLength': 2048,
     '$.data.results[].title.maxLength': 2000,
+    '$.data.results[].snippet.maxLength': 240,
+    '$.data.results[].highlights.maxItems': 3,
+    '$.data.results[].highlights[].maxLength': 240,
   },
 };
 
@@ -1158,6 +1179,20 @@ describe('closed catalog Tool result projections', () => {
     expect(() => registry.project('mapyourshow-fetch/v1', map)).toThrow(
       'TYPED_PROJECTION_INVALID',
     );
+  });
+
+  it('refuses unredacted social attribution context at the typed persistence boundary', () => {
+    const registry = registerCatalogResultProjections(new TypedProjectionRegistry());
+    const base = { url: 'https://www.linkedin.com/in/lexi-novel', title: 'Lexi Novel | LinkedIn' };
+    const raw = {
+      data: { results: [{ ...base, snippet: 'Purchasing at Sunforge. Email lexi&#64;example.test.' }] },
+      costCents: 1,
+    };
+    expect(() => registry.project('social-search-serper/v1', raw)).toThrow('TYPED_PROJECTION_INVALID');
+    expect(() => registry.project('social-search-exa-people/v1', {
+      ...raw,
+      data: { results: [{ ...base, highlights: ['Purchasing at Sunforge. Tel: 030 / 123 45 67.'] }] },
+    })).toThrow('TYPED_PROJECTION_INVALID');
   });
 
   it('requires Google Patents publicationNumber identity and caps durable rows at 50', () => {
@@ -1689,6 +1724,14 @@ describe('closed catalog Tool result projections', () => {
     expect(() => registry.project('tradefair-algolia/v1', raw)).toThrow(
       'TYPED_PROJECTION_TOO_LARGE',
     );
+  });
+
+  it('keeps social-search-serper/v1 and social-search-exa-people/v1 backward-compatible with legacy { url, title } rows', () => {
+    const registry = registerCatalogResultProjections(new TypedProjectionRegistry());
+    for (const schema of ['social-search-serper/v1', 'social-search-exa-people/v1'] as const) {
+      const envelope = registry.project(schema, SEARX_RAW);
+      expect(registry.restore(envelope)).toEqual(jsonRoundTrip(SEARX_RAW));
+    }
   });
 });
 

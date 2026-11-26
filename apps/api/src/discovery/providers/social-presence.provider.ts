@@ -26,13 +26,11 @@ import {
   prioritizeBuyingCommitteeContacts,
 } from '../../enrichment/buying-committee';
 import { ExtractedPerson, cleanPersonName, extractPeopleFromPage } from './contact-extraction';
-import { isCrossCompanySocialMismatch, isJunkContactCandidate } from './contact-quality-filter';
-import {
-  companyMatchLevel,
-  hasDistinctiveCompanyEvidence,
-  hasRoleEvidence,
-  matchesCompany,
-} from './social-role-lexicon';
+import { normalizeJurisdiction } from '../../compliance/jurisdiction';
+import { inferConservativeEuUkFallback, resolveCompanyJurisdiction } from '../jurisdiction-resolver';
+import { scoreSocialAttribution } from './social-attribution';
+import { matchesCompany } from './social-role-lexicon';
+import { normalizeSocialProfileUrl, redactSocialSearchHighlights, redactSocialSearchText } from '../../tools/social-search-retention';
 
 /**
  * 社媒/渠道联系人适配器（M2a 索引层 + M2b 档案/直抓层）。
@@ -58,7 +56,42 @@ import {
  * 状态（API 与 worker 各一份），最坏为 3×进程数 次拒绝后全开——有意的保守边界。
  */
 
-export type SearxResultLike = { url: string; title?: string };
+export type SearxResultLike = {
+  url: string;
+  title?: string;
+  snippet?: string;
+  highlights?: readonly string[];
+};
+
+const EU_UK_LINKEDIN_SUBDOMAINS = new Set([
+  'at', 'be', 'bg', 'cy', 'cz', 'de', 'dk', 'ee', 'es', 'fi', 'fr', 'gr', 'hr',
+  'hu', 'ie', 'is', 'it', 'li', 'lt', 'lu', 'lv', 'mt', 'nl', 'no', 'pl', 'pt',
+  'ro', 'se', 'si', 'sk', 'uk',
+]);
+
+/**
+ * 法规红线（Batch 1.8B）：EU/UK 公司严禁直抓 LinkedIn L2 公开个人页（social.fetch），
+ * 仅允许 L1 Wayback 档案副本与 L3 搜索索引；对欧盟/英国 LinkedIn 国家子域亦 fail-closed。
+ */
+export function isEuOrUkLinkedinBlocked(
+  company: { name: string; domain?: string; country?: string },
+  hostname: string,
+): boolean {
+  const host = hostname.toLowerCase().replace(/\.$/u, '');
+  const sub = host.endsWith('.linkedin.com') ? host.slice(0, -'.linkedin.com'.length) : '';
+  if (sub && EU_UK_LINKEDIN_SUBDOMAINS.has(sub)) return true;
+  const resolved = resolveCompanyJurisdiction({
+    name: company.name,
+    domain: company.domain,
+    country: company.country,
+  });
+  const jurisdiction = resolved?.iso
+    ? normalizeJurisdiction(resolved.iso)
+    : company.country
+      ? normalizeJurisdiction(company.country)
+      : (inferConservativeEuUkFallback({ name: company.name, domain: company.domain }) ?? 'OTHER');
+  return jurisdiction === 'EU' || jurisdiction === 'UK';
+}
 
 export const SOCIAL_PERSON_HOSTS: readonly { host: string; pathPrefix: string }[] = Object.freeze([
   { host: 'linkedin.com', pathPrefix: '/in/' },
@@ -127,8 +160,8 @@ export function parseSocialHeadline(title: string): { fullName: string; title?: 
 }
 
 /**
- * 只保留个人主页 URL，并从标题解析出人；公司佐证不足的一律丢弃（防张冠李戴）：
- * 无佐证/仅同名 → namesake，仅泛词 → generic_name，缺职位词 → uninformative。
+ * 只保留个人主页 URL，并由 Fellegi-Sunter v1 模型综合 slug / title / snippet / highlights 归因；
+ * 公司或职位佐证不足的一律丢弃（防张冠李戴）。
  */
 export function parseSocialResults(
   results: readonly SearxResultLike[],
@@ -137,56 +170,36 @@ export function parseSocialResults(
 ): ProviderContactRecord[] {
   const found = new Map<string, ProviderContactRecord>();
   for (const result of results) {
-    if (!result?.url) continue;
-    let url: URL;
-    try {
-      url = new URL(result.url);
-    } catch {
-      continue;
-    }
+    const safeUrl = normalizeSocialProfileUrl(result?.url);
+    if (!safeUrl) continue;
+    const url = new URL(safeUrl);
     const spec = SOCIAL_PERSON_HOSTS.find(
       (candidate) =>
         (url.hostname === candidate.host || url.hostname.endsWith(`.${candidate.host}`)) &&
         url.pathname.startsWith(candidate.pathPrefix),
     );
     if (!spec) continue;
-    const headline = (result.title ?? '').trim();
-    if (!headline) continue;
-    const parsed = parseSocialHeadline(headline);
-    if (!parsed) continue;
-    // 机构名冒充人名（M5：公司页整条入库）直接丢弃。
-    const fullName = cleanPersonName(parsed.fullName);
-    if (fullName === null) {
-      onDropped?.('organisation');
-      continue;
-    }
-    // 同姓守卫（M5）：公司 token 如果只是与这个人名本身重合（公司名恰为姓氏），
-    // 就不能证明此人是该公司员工；标题里去掉人名后必须仍有独立的公司佐证。
-    const remainder = headline.split(parsed.fullName).join(' ');
-    const companyEvidence = companyMatchLevel(remainder, company);
-    if (companyEvidence === 'none' || isCrossCompanySocialMismatch(remainder, company)) {
-      onDropped?.('namesake');
-      continue;
-    }
-    // 泛词公司名（M5 第四轮，r14 验收残留类）：只命中泛词不算公司佐证——「Technical/Industries/
-    // Solutions…」既可能只是职务词，也可能属于别家公司（Redline Technical）；公司名本身是泛词
-    // （technical.de 名为「Technical」）时更是天然命中。必须有完整域名或多词全名短语才放行。
-    if (companyEvidence === 'generic' && !hasDistinctiveCompanyEvidence(remainder, company)) {
-      onDropped?.('generic_name');
-      continue;
-    }
-    // 专业佐证（M5 第三轮）：公司名之外必须仍有职位/职能词——只有公司名的 headline（「<人名> - 公司」）
-    // 不再因「含公司名」放行（URL slug 与姓名一致也不足以证明其与本公司的关系）。
-    if (!hasRoleEvidence(headline, parsed.fullName, company) || isJunkContactCandidate({ fullName, title: parsed.title })) {
-      onDropped?.('uninformative');
+    // Older typed receipts retain their original bytes and digest. Minimize again before attribution.
+    const attribution = scoreSocialAttribution({
+      url: safeUrl,
+      title: redactSocialSearchText(result.title, 2000),
+      snippet: redactSocialSearchText(result.snippet),
+      highlights: redactSocialSearchHighlights(result.highlights),
+    }, company);
+    if (attribution.decision !== 'ACCEPTED' || !attribution.fullName) {
+      if (attribution.dropReason) {
+        onDropped?.(attribution.dropReason);
+      } else if (attribution.decision === 'REVIEW') {
+        onDropped?.('namesake');
+      }
       continue;
     }
     const key = `${url.hostname}${url.pathname}`.replace(/\/+$/, '').toLowerCase();
     if (found.has(key)) continue;
     found.set(key, {
       externalId: key,
-      fullName,
-      ...(parsed.title ? { title: parsed.title } : {}),
+      fullName: attribution.fullName,
+      ...(attribution.parsedTitle ? { title: attribution.parsedTitle } : {}),
       ...(spec.host === 'linkedin.com' ? { linkedin: `https://${url.hostname}${url.pathname}` } : {}),
       personalData: true,
       sourcePage: `https://${url.hostname}${url.pathname}`,
@@ -579,7 +592,14 @@ export class SocialPresenceContactAdapter implements ContactDiscoveryAdapter {
       return null;
     }
     bump('social_fetches');
-    const page = await this.fetchProfilePage(candidate.sourcePage, hostname, socialHostKey(hostname), ctx, bump);
+    const page = await this.fetchProfilePage(
+      candidate.sourcePage,
+      hostname,
+      socialHostKey(hostname),
+      company,
+      ctx,
+      bump,
+    );
     if (!page || !matchesCompany(page.text, company) || !pageTextMentionsName(page.text, candidate.fullName)) {
       return null;
     }
@@ -649,11 +669,12 @@ export class SocialPresenceContactAdapter implements ContactDiscoveryAdapter {
     };
   }
 
-  /** L1 档案副本（不触目标站）→ L2 LinkedIn 直抓；被拒只记 L2，且只认 403/429/999/登录墙。 */
+  /** L1 档案副本（不触目标站）→ L2 LinkedIn 直抓（EU/UK 禁止）；被拒只记 L2，且只认 403/429/999/登录墙。 */
   private async fetchProfilePage(
     url: string,
     hostname: string,
     hostKey: string,
+    company: { name: string; domain?: string; country?: string },
     ctx: ExecutionContext,
     bump: (name: string) => void,
   ): Promise<ProfilePage | null> {
@@ -681,6 +702,10 @@ export class SocialPresenceContactAdapter implements ContactDiscoveryAdapter {
 
     // Xing 公开页实测是 SPA 壳（可见文本仅 "XING"），直抓无收益；只对 LinkedIn 走 L2。
     if (socialHostKey(hostname) !== 'linkedin.com') return null;
+    if (isEuOrUkLinkedinBlocked(company, hostname)) {
+      bump('social_l2_jurisdiction_blocked');
+      return null;
+    }
     if (this.circuit.isOpen(hostKey)) {
       bump('social_circuit_open');
       return null;

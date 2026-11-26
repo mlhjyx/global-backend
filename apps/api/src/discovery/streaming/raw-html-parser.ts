@@ -12,7 +12,11 @@ const ROLE_EMAIL_LOCAL_RE =
 const CONTACT_PATH_RE =
   /(?:^|\/)(?:contact|contacts|contact-us|contactus|contatti|contatto|contattaci|kontakt|kontaktformular|contacto|contactenos|contactez|contato|iletisim|impressum|imprint|anfrage|rfq|inquiry|quote|preventivo)(?:\/|$|\.)/iu;
 
-const IMPRESSUM_PATH_RE = /(?:^|\/)(?:impressum|imprint|legal-notice|note-legali|mentions-legales)(?:\/|$|\.)/iu;
+const IMPRESSUM_PATH_RE =
+  /(?:^|\/)(?:impressum|imprint|legal-notice|note-legali|dati-societari|mentions-legales|rechtliches|anbieterkennzeichnung|aviso-legal|kaisha-gaiyou|company-profile|会社概要|会社案内|企業情報)(?:\/|$|\.)/iu;
+
+const STATUTORY_DISCLOSURE_PATH_RE =
+  /(?:^|\/)(?:impressum|imprint|legal-notice|note-legali|dati-societari|mentions-legales|informativa-privacy|privacy|privacy-policy|datenschutz|rechtliches|anbieterkennzeichnung|aviso-legal|kaisha-gaiyou|company-profile|会社概要|会社案内|企業情報)(?:\/|$|\.)/iu;
 
 const CAREERS_PATH_RE =
   /(?:^|\/)(?:careers?|jobs?|karriere|stellenangebote|lavora-con-noi|empleo|recrutement|vacancies|join-us)(?:\/|$|\.)/iu;
@@ -47,6 +51,7 @@ export interface HtmlChannelsAndLinks {
   readonly hasInquiryForm: boolean;
   readonly contactPageUrl: string | null;
   readonly impressumUrl: string | null;
+  readonly statutoryDisclosureUrl?: string | null;
   readonly careersPageUrl: string | null;
 }
 
@@ -264,6 +269,7 @@ export function extractHtmlChannelsAndLinks(
 
   let contactPageUrl: string | null = null;
   let impressumUrl: string | null = null;
+  let statutoryDisclosureUrl: string | null = null;
   let careersPageUrl: string | null = null;
 
   let base: URL | null = null;
@@ -304,9 +310,17 @@ export function extractHtmlChannelsAndLinks(
     }
     if (!isSameCompanyHost(resolved.hostname, domain)) continue;
     if (isPdfDocumentUrl(resolved.href)) continue;
-    const pathname = resolved.pathname;
+    let pathname = resolved.pathname;
+    try {
+      pathname = decodeURIComponent(pathname);
+    } catch {
+      /* keep raw pathname */
+    }
     if (!impressumUrl && IMPRESSUM_PATH_RE.test(pathname)) {
       impressumUrl = cleanUrl;
+    }
+    if (!statutoryDisclosureUrl && STATUTORY_DISCLOSURE_PATH_RE.test(pathname)) {
+      statutoryDisclosureUrl = cleanUrl;
     }
     if (!contactPageUrl && CONTACT_PATH_RE.test(pathname) && cleanUrl !== pageUrl.replace(/\/+$/u, '')) {
       contactPageUrl = cleanUrl;
@@ -330,6 +344,7 @@ export function extractHtmlChannelsAndLinks(
     hasInquiryForm: hasUsableInquiryForm(html),
     contactPageUrl: contactPageUrl ?? impressumUrl,
     impressumUrl,
+    statutoryDisclosureUrl: impressumUrl ?? statutoryDisclosureUrl,
     careersPageUrl,
   };
 }

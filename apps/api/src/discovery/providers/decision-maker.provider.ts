@@ -5,6 +5,8 @@ import {
   ExtractedPerson,
   extractPeopleFromPage,
 } from './contact-extraction';
+import { extractStatutoryDirectorsFromHtml } from '../impressum/statutory-director-extract';
+import { isCompanyWebsitePageUrl, isStatutoryDisclosurePageUrl, rankLegalPageLinks } from '../impressum/find-legal-pages';
 import { isJunkContactCandidate } from './contact-quality-filter';
 import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
 import type { CrawlResult } from '../../adapters/web-crawler';
@@ -31,15 +33,16 @@ import {
 } from './decision-maker-paths';
 
 const PARSER_VERSION = 'decision_maker/v1';
+const STATUTORY_PARSER_VERSION = 'statutory-director/v1';
+const MAX_STATUTORY_HTML_CHARS = 300_000;
 
 /** 页面文本是否值得发一次抽取（与逐页抓取的 120 字符门一致）。 */
 function hasPeopleText(text: string | null): text is string {
   return typeof text === 'string' && text.trim().length >= 120;
 }
 
-/** 人物页优先级（Impressum/法律声明最高；然后管理层/团队/关于/联系，兼容德/意/西/法/葡/荷/英）。 */
+/** 人物页优先级（Impressum/法律声明最高；然后管理层/团队/关于/联系，兼容德/意/西/法/葡/荷/英/日/韩）。 */
 const PEOPLE_PATTERNS: { re: RegExp; w: number }[] = [
-  { re: /impressum|imprint|legal-?notice|mentions-legales|note-legali|aviso-legal/i, w: 100 },
   {
     re: /management|leadership|vorstand|gesch(ae|ä)ftsf(ue|ü)hr|gesch(ae|ä)ftsleitung|executive|board|direktion|direzione|dirigenza|direccion/i,
     w: 95,
@@ -120,6 +123,7 @@ export function sameRegistrableHost(a: string, b: string): boolean {
 
 /** 人物页优先级打分（纯函数，可测）：Impressum > 管理层 > 团队 > 关于 > 联系。0 = 非人物页。 */
 export function scorePeoplePageUrl(url: string): number {
+  if (isStatutoryDisclosurePageUrl(url)) return 100;
   let w = 0;
   for (const { re, w: pw } of PEOPLE_PATTERNS) if (re.test(url)) w = Math.max(w, pw);
   return w;
@@ -219,8 +223,19 @@ export class DecisionMakerProvider {
     };
     for (const page of selection.pages.slice(0, MAX_DECISION_MAKER_PAGES)) {
       if (!(await isAllowedByRobots(page.url, robotDeps))) continue;
+      if (isStatutoryDisclosurePageUrl(page.url)) {
+        if (ctx.artifactSubject && isCompanyWebsitePageUrl(page.url, company.domain)) {
+          const disclosure = await this.fetchStatutoryPage(page.url, company.domain, peopleToolCtx);
+          if (disclosure) {
+            const statutory = extractStatutoryDirectorsFromHtml(disclosure.html, disclosure.url)
+              .map((entry) => ({ full_name: entry.name, title: entry.role }));
+            this.mergePeople(dedup, statutory, disclosure.url, disclosure.html, STATUTORY_PARSER_VERSION);
+          }
+        }
+        continue;
+      }
       const text = await this.fetchPeoplePageText(page, ctx, peopleToolCtx);
-      if (!text || text.trim().length < 120) continue;
+      if (!hasPeopleText(text)) continue;
 
       const people = await this.extract(page.url, text, ctx, sellerContext);
       this.mergePeople(dedup, people, page.url, text);
@@ -247,6 +262,7 @@ export class DecisionMakerProvider {
     people: ExtractedPerson[],
     sourcePage: string,
     text: string,
+    parserVersion = PARSER_VERSION,
   ): void {
     const contentHash = createHash('sha256').update(text).digest('hex');
     for (const p of people) {
@@ -278,8 +294,26 @@ export class DecisionMakerProvider {
         personalData: true,
         sourcePage,
         contentHash,
-        parserVersion: PARSER_VERSION,
+        parserVersion,
       });
+    }
+  }
+
+  private async fetchStatutoryPage(
+    url: string,
+    domain: string,
+    ctx: ToolContext,
+  ): Promise<{ html: string; url: string } | null> {
+    try {
+      const { data } = await this.deps.broker!.invoke<{ url: string }, HttpGetOutput>('http.get', { url }, ctx);
+      if (!data.ok || data.blocked || !data.text || !data.finalUrl ||
+        !isCompanyWebsitePageUrl(data.finalUrl, domain)) return null;
+      const final = rankLegalPageLinks([data.finalUrl], { includePrivacy: true })[0];
+      if (final?.kind !== 'impressum') return null;
+      return { html: data.text.slice(0, MAX_STATUTORY_HTML_CHARS), url: final.url };
+    } catch (error) {
+      if (isExecutionControlError(error)) throw error;
+      return null;
     }
   }
 

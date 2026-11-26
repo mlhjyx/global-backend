@@ -302,4 +302,120 @@ describe('L0 search provider tools (serper.search / exa.search / google_places.s
     expect(registry.get('social.search_serper')).toBe(socialSerperSearchTool);
     expect(registry.get('social.search_exa_people')).toBe(socialExaPeopleTool);
   });
+
+  it('social tools retain redacted <=240-char snippet & <=3 highlights while keeping non-social tools snippet-free', async () => {
+    const serperSocial = createSocialSerperSearchTool({
+      resolveApiKey: () => 'serper-key',
+      serperSearch: vi.fn(async (input) => {
+        expect(input.includeSnippet).toBe(true);
+        return {
+          billed: true,
+          hits: [
+            {
+              url: 'https://it.linkedin.com/in/kieran-nolan-bbb26167',
+              title: 'Kieran Nolan | LinkedIn',
+              snippet: `Purchasing Manager at Tavia Energy (2020-2026). Contact contact@taviaenergy.example or +39 030 1234567. ${'x'.repeat(300)}`,
+            },
+          ],
+        };
+      }),
+    });
+
+    const serperRes = await serperSocial.execute(
+      { query: 'site:linkedin.com/in "Tavia Energy"' },
+      { workspaceId: 'ws', purpose: 'enrichment' },
+    );
+    const serperItem = serperRes.data.results[0];
+    expect(serperItem.snippet).toBeDefined();
+    expect(serperItem.snippet!.length).toBeLessThanOrEqual(240);
+    expect(serperItem.snippet).toContain('2020-2026');
+    expect(serperItem.snippet).not.toContain('contact@taviaenergy.example');
+    expect(serperItem.snippet).not.toContain('1234567');
+    expect(serperItem.snippet).toContain('[redacted]');
+    expect(
+      projectionRegistry().project(CATALOG_RESULT_PROJECTION_SCHEMAS['social.search_serper'], serperRes).data,
+    ).toEqual(serperRes);
+    expect(serperSocial.durableReplayResult?.(serperRes)).toEqual(serperRes);
+
+    const exaSocial = createSocialExaPeopleTool({
+      resolveApiKey: () => 'exa-key',
+      exaSearch: vi.fn(async (input) => {
+        expect(input.category).toBe('people');
+        return {
+          billed: true,
+          hits: [
+            {
+              url: 'https://it.linkedin.com/in/miralevinnovacrest',
+              title: 'Mira Levin | LinkedIn',
+              snippet: 'Head of Sales at Novacrest S.r.l.',
+              highlights: [
+                'Reach me at mira@novacrest.example or (02) 555-1234',
+                `Highlight 2 ${'y'.repeat(260)}`,
+                'Highlight 3',
+                'Highlight 4 should be dropped',
+              ],
+            },
+          ],
+        };
+      }),
+    });
+    const exaRes = await exaSocial.execute(
+      { query: 'Novacrest S.r.l.' },
+      { workspaceId: 'ws', purpose: 'enrichment' },
+    );
+    const exaItem = exaRes.data.results[0];
+    expect(exaItem.highlights).toHaveLength(3);
+    expect(exaItem.highlights![0]).not.toContain('mira@novacrest.example');
+    expect(exaItem.highlights![0]).not.toContain('555-1234');
+    expect(exaItem.highlights![1].length).toBeLessThanOrEqual(240);
+    expect(
+      projectionRegistry().project(CATALOG_RESULT_PROJECTION_SCHEMAS['social.search_exa_people'], exaRes).data,
+    ).toEqual(exaRes);
+    expect(exaSocial.durableReplayResult?.(exaRes)).toEqual(exaRes);
+  });
+
+  it('retains role context while removing formatted contact details and unnecessary URL parts', async () => {
+    const profile = {
+      url: 'https://www.linkedin.com/in/lexi-novel?invite=direct%40example.test#details',
+      title: 'Lexi Novel - Director at Sunforge - 030 1234 5678',
+      snippet: 'Procurement at Sunforge (2020-2026). Tel: 030 / 123 45 67 ext. 42. Write to buyer&#64;example.test.',
+      highlights: [
+        'Operations at Sunforge. WhatsApp +39 (0) 2 1234 5678. Mail lexi [at] example [dot] test.',
+      ],
+    };
+    const tool = createSocialSerperSearchTool({
+      resolveApiKey: () => 'test-serper-key',
+      serperSearch: async () => ({ billed: true, hits: [profile] }),
+    });
+    const result = await tool.execute({ query: 'Sunforge' }, { workspaceId: 'ws', purpose: 'enrichment' });
+    const hit = result.data.results[0];
+    expect(hit?.url).toBe('https://www.linkedin.com/in/lexi-novel');
+    expect(hit?.title).toContain('Director at Sunforge');
+    expect(hit?.snippet).toContain('Procurement at Sunforge (2020-2026)');
+    expect(hit?.highlights?.[0]).toContain('Operations at Sunforge');
+    expect(JSON.stringify(hit)).not.toMatch(/1234|123 45 67|ext\. 42|buyer|\[at\]|invite=/u);
+    expect(tool.durableReplayResult?.(result)).toEqual(result);
+  });
+
+  it('revalidates paid-ledger URL/title readback and keeps ordinary older typed projections recoverable', () => {
+    const registry = projectionRegistry();
+    const schema = CATALOG_RESULT_PROJECTION_SCHEMAS['social.search_serper'];
+    const legacy = {
+      data: { results: [{ url: 'https://www.linkedin.com/in/lexi-novel', title: 'Lexi Novel - Director at Sunforge' }] },
+      costCents: 1,
+    };
+    const projection = registry.project(schema, legacy);
+    expect(registry.restore(projection)).toEqual(legacy);
+    expect(registry.project(schema, registry.restore(projection)).digest).toBe(projection.digest);
+    expect(socialSerperSearchTool.durableReplayResult?.(legacy)).toEqual(legacy);
+    expect(socialSerperSearchTool.durableReplayResult?.({
+      ...legacy,
+      data: {
+        results: [
+          { url: 'https://user:password@www.linkedin.com/in/lexi-novel', title: 'Invalid entry' },
+          { url: 'https://www.linkedin.com/in/lexi-novel?email=private%40example.test', title: 'Lexi Novel - Director at Sunforge' },
+        ],
+      },
+    })).toEqual(legacy);
+  });
 });

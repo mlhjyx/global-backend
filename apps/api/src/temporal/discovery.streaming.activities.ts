@@ -348,8 +348,11 @@ async function persistExtractionFacts(
       hasInquiryForm: extraction.channels.hasInquiryForm,
       contactFormUrl: extraction.channels.contactFormUrl,
       contactPageUrl: extraction.channels.contactPageUrl,
+      statutoryDisclosureUrl: extraction.channels.statutoryDisclosureUrl ?? extraction.channels.impressumUrl ?? null,
+      statutoryDirectorCount: extraction.statutoryDirectors?.length ?? 0,
       careersPageUrl: extraction.channels.careersPageUrl,
       socialLinks: extraction.channels.socialLinks.slice(0, 6),
+      ...(extraction.passiveDns ? { passiveDns: extraction.passiveDns } : {}),
     },
   };
   await tx.canonicalCompany.updateMany({

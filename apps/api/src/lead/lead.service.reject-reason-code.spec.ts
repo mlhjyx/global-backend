@@ -107,4 +107,50 @@ describe('LeadService.decide — reject reason code (BI-20)', () => {
     });
     expect(withWorkspace).toHaveBeenCalledTimes(1);
   });
+
+  it('F8: blocks accept when fitVerdict=mismatch or C1/C2 material/role failed while allowing weak+unclear leads', async () => {
+    const mismatchTx = {
+      lead: { findUnique: vi.fn(async () => ({ ...lead, fitVerdict: 'mismatch', fitReasons: null })) },
+    };
+    await expect(
+      serviceWithTx(mismatchTx).decide(ctx, 'lead-1', 'accept', 'override', 'GOOD_FIT'),
+    ).rejects.toMatchObject({
+      status: 409,
+      response: { error: { code: 'LEAD_FIT_MISMATCH_BLOCKED' } },
+    });
+
+    const coreFailTx = {
+      lead: {
+        findUnique: vi.fn(async () => ({
+          ...lead,
+          fitVerdict: 'weak',
+          fitReasons: { material: 'fail (score 0): industrial valves only', role: 'weak (score 4)' },
+        })),
+      },
+    };
+    await expect(
+      serviceWithTx(coreFailTx).decide(ctx, 'lead-1', 'accept', 'override', 'GOOD_FIT'),
+    ).rejects.toMatchObject({
+      status: 409,
+      response: { error: { code: 'LEAD_FIT_MISMATCH_BLOCKED' } },
+    });
+
+    // Weak + unclear (like genuine solar distributors missing full corroboration) passes the fit guard.
+    const unclearTx = {
+      lead: {
+        findUnique: vi.fn(async () => ({
+          ...lead,
+          fitVerdict: 'weak',
+          fitReasons: { material: 'unclear (score —)', role: 'unclear (score —)' },
+        })),
+      },
+      $queryRaw: vi.fn(async () => []),
+      canonicalCompany: { findUnique: vi.fn(async () => null) },
+    };
+    await expect(
+      serviceWithTx(unclearTx).decide(ctx, 'lead-1', 'accept', undefined, 'GOOD_FIT'),
+    ).rejects.toMatchObject({
+      response: { error: { code: 'NOT_FOUND', message: 'canonical company not found' } },
+    });
+  });
 });

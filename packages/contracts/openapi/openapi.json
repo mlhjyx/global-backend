@@ -11757,6 +11757,9 @@
               }
             }
           },
+          "400": {
+            "description": "VALIDATION_ERROR or ENRICHMENT_INVALID_PLAN"
+          },
           "402": {
             "description": "EXECUTION_BUDGET_GRANT_REQUIRED, EXECUTION_BUDGET_GRANT_INVALID, EXECUTION_BUDGET_GRANT_EXPIRED or EXECUTION_BUDGET_AUTHORITY_EXHAUSTED",
             "content": {
@@ -11827,7 +11830,7 @@
             }
           },
           "409": {
-            "description": "EXECUTION_BUDGET_GRANT_REUSED",
+            "description": "EXECUTION_BUDGET_GRANT_REUSED, ENRICHMENT_HOLD, ENRICHMENT_INPUT_CONFLICT, ENRICHMENT_REDACTED or ENRICHMENT_CONTROL_MISMATCH",
             "content": {
               "application/json": {
                 "schema": {
@@ -18865,7 +18868,7 @@
             }
           },
           "409": {
-            "description": "当前 suppression/合规/制裁状态阻断交付",
+            "description": "当前匹配、抑制、合规或制裁状态阻断交付",
             "content": {
               "application/json": {
                 "schema": {
@@ -18888,6 +18891,7 @@
                           "enum": [
                             "SUPPRESSED",
                             "INVALID_STATE",
+                            "LEAD_FIT_MISMATCH_BLOCKED",
                             "SUPPRESSED_CONTACT_UNREACHABLE",
                             "STORAGE_RIGHTS_NOT_GRANTED",
                             "SANCTIONS_HOLD_UNRESOLVED",

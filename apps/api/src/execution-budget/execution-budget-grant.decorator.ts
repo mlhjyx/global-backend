@@ -1,15 +1,18 @@
 import {
   HttpException,
+  HttpStatus,
   applyDecorators,
   createParamDecorator,
   type ExecutionContext,
 } from '@nestjs/common';
 import { ApiHeader, ApiResponse } from '@nestjs/swagger';
 import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
+import { EnrichmentSafetyError } from '../enrichment/safety/enrichment-safety.contract';
 import {
   ExecutionBudgetGrantError,
   executionBudgetGrantErrorHttpStatus,
 } from './execution-budget-authority.types';
+import { ExecutionControlError } from './execution-control-error';
 
 export const EXECUTION_BUDGET_GRANT_HEADER = 'X-Execution-Budget-Grant';
 
@@ -119,14 +122,85 @@ export function executionBudgetGrantHttpException(
   );
 }
 
+function enrichmentSafetyHttpStatus(code: EnrichmentSafetyError['code']): number {
+  switch (code) {
+    case 'INVALID_PLAN':
+      return HttpStatus.BAD_REQUEST;
+    case 'BUDGET_CAP_EXCEEDED':
+      return HttpStatus.PAYMENT_REQUIRED;
+    case 'GOVERNANCE_PENDING':
+      return HttpStatus.SERVICE_UNAVAILABLE;
+    case 'HOLD':
+    case 'INPUT_CONFLICT':
+    case 'REDACTED':
+    case 'CONTROL_MISMATCH':
+    default:
+      return HttpStatus.CONFLICT;
+  }
+}
+
+function executionControlHttpStatus(code: string): number {
+  const upper = code.toUpperCase();
+  if (upper.includes('EXCEEDED') || upper.includes('EXHAUSTED')) {
+    return HttpStatus.PAYMENT_REQUIRED;
+  }
+  if (upper.includes('MISMATCH') || upper.includes('CONFLICT') || upper.includes('REUSED')) {
+    return HttpStatus.CONFLICT;
+  }
+  return HttpStatus.SERVICE_UNAVAILABLE;
+}
+
+function findExecutionControlError(error: unknown): ExecutionControlError | null {
+  if (error instanceof HttpException) return null;
+  let current: unknown = error;
+  try {
+    const seen = new Set<object>();
+    for (let depth = 0; depth < 8 && current && typeof current === 'object' && !seen.has(current); depth += 1) {
+      if (current instanceof ExecutionControlError) return current;
+      seen.add(current);
+      const cause = Object.getOwnPropertyDescriptor(current, 'cause');
+      current = cause && Object.hasOwn(cause, 'value') ? cause.value : undefined;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 export async function asExecutionBudgetHttpBoundary<T>(
   operation: () => Promise<T>,
 ): Promise<T> {
   try {
     return await operation();
   } catch (error) {
+    if (error instanceof HttpException) {
+      throw error;
+    }
     if (error instanceof ExecutionBudgetGrantError) {
       throw executionBudgetGrantHttpException(error);
+    }
+    throw error;
+  }
+}
+
+export async function asContactEnrichmentHttpBoundary<T>(
+  operation: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await asExecutionBudgetHttpBoundary(operation);
+  } catch (error) {
+    if (error instanceof EnrichmentSafetyError) {
+      throw new HttpException(
+        { error: { code: `ENRICHMENT_${error.code}`, message: `ENRICHMENT_${error.code}` } },
+        enrichmentSafetyHttpStatus(error.code),
+      );
+    }
+    const controlError = findExecutionControlError(error);
+    if (controlError) {
+      throw new HttpException(
+        { error: { code: controlError.code, message: controlError.code } },
+        executionControlHttpStatus(controlError.code),
+      );
     }
     throw error;
   }

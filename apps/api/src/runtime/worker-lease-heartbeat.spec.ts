@@ -22,7 +22,7 @@ describe("startWorkerLeaseHeartbeat", () => {
         worker: { shutdown },
         taskQueue: "understanding",
       }),
-    ).rejects.toThrow("writer unavailable");
+    ).rejects.toThrow("WORKER_READY_LEASE_UNAVAILABLE");
     expect(shutdown).not.toHaveBeenCalled();
   });
 
@@ -52,6 +52,58 @@ describe("startWorkerLeaseHeartbeat", () => {
     expect(shutdown).toHaveBeenCalledOnce();
     await vi.advanceTimersByTimeAsync(20_000);
     expect(heartbeat).toHaveBeenCalledTimes(3);
+    handle.stop();
+  });
+
+  it("bounds the initial READY registration before admitting polling", async () => {
+    const shutdown = vi.fn();
+    const start = startWorkerLeaseHeartbeat({
+      leases: { heartbeat: () => new Promise(() => undefined) },
+      worker: { shutdown },
+      taskQueue: "understanding",
+    });
+    const failed = expect(start).rejects.toThrow("WORKER_READY_LEASE_UNAVAILABLE");
+    await vi.advanceTimersByTimeAsync(5_000);
+    await failed;
+    expect(shutdown).not.toHaveBeenCalled();
+  });
+
+  it("stops polling immediately after lease loss even when the DRAINING write stalls", async () => {
+    const heartbeat = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("lease lost"))
+      .mockImplementationOnce(() => new Promise(() => undefined));
+    const shutdown = vi.fn();
+    const handle = await startWorkerLeaseHeartbeat({
+      leases: { heartbeat },
+      worker: { shutdown },
+      taskQueue: "understanding",
+    });
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(shutdown).toHaveBeenCalledOnce();
+    handle.stop();
+  });
+
+  it("drains when a running lease renewal never settles", async () => {
+    const heartbeat = vi.fn()
+      .mockResolvedValueOnce(undefined)
+      .mockImplementationOnce(() => new Promise(() => undefined))
+      .mockResolvedValueOnce(undefined);
+    const shutdown = vi.fn();
+    const handle = await startWorkerLeaseHeartbeat({
+      leases: { heartbeat },
+      worker: { shutdown },
+      taskQueue: "understanding",
+    });
+
+    await vi.advanceTimersByTimeAsync(14_999);
+    expect(shutdown).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(shutdown).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(heartbeat.mock.calls.map(([, state]) => state)).toEqual(["READY", "READY", "DRAINING"]);
     handle.stop();
   });
 });
