@@ -170,4 +170,24 @@ describe('Batch 1.3-A Anti-info@ 4-track Buying Committee engine', () => {
       'exec-invalid-only',
     ]);
   });
+
+  it('treats explicit CATCH_ALL_RISKY as authoritative over legacy status=VALID while falling back on UNKNOWN', () => {
+    const ordered = prioritizeBuyingCommitteeContacts([
+      {
+        id: 'proc-reverified-risky',
+        title: 'Head of Procurement',
+        points: [{ type: 'email', value: 'p@memodo.it', status: 'VALID', verificationState: 'CATCH_ALL_RISKY' }],
+      },
+      {
+        id: 'sales-legacy-valid-unknown',
+        title: 'Sales Manager',
+        points: [{ type: 'email', value: 's@memodo.it', status: 'VALID', verificationState: 'UNKNOWN' }],
+      },
+    ]);
+
+    expect(ordered.map((c) => c.id)).toEqual([
+      'sales-legacy-valid-unknown',
+      'proc-reverified-risky',
+    ]);
+  });
 });

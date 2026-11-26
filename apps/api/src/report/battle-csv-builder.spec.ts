@@ -263,4 +263,140 @@ describe('battle-csv-builder (Batch 1.4-C 19-column audited battle CSV)', () => 
     expect(row.linkedinNote).toBeNull();
     expect(row.channelTier).toBe('C');
   });
+
+  it('falls back to VALID when status=VALID and verificationState=UNKNOWN, and respects authoritative CATCH_ALL_RISKY over stale status=VALID', () => {
+    const legacyValidRow = buildBattleCsvRow({
+      lead: {
+        id: 'lead-legacy-valid',
+        canonicalCompanyId: 'co-legacy-valid',
+        totalScore: 0.85,
+        fitVerdict: 'match',
+        scoreDetail: null,
+      },
+      company: {
+        id: 'co-legacy-valid',
+        name: 'Legacy Valid S.r.l.',
+        domain: 'legacyvalid.it',
+        country: 'IT',
+        attributes: {},
+      },
+      companyContactPoints: [{ kind: 'email', value: 'info@legacyvalid.it' }],
+      decisionMakers: [
+        {
+          id: 'dm-reverified-risky',
+          fullName: 'Paolo Rossi',
+          title: 'Head of Procurement',
+          department: 'Procurement',
+          points: [
+            {
+              type: 'email',
+              value: 'p.rossi@legacyvalid.it',
+              status: 'VALID',
+              verificationState: 'CATCH_ALL_RISKY',
+            },
+          ],
+        },
+        {
+          id: 'dm-legacy-valid',
+          fullName: 'Elena Conti',
+          title: 'Sales Manager',
+          department: 'Sales',
+          points: [
+            {
+              type: 'email',
+              value: 'e.conti@legacyvalid.it',
+              status: 'VALID',
+              verificationState: 'UNKNOWN',
+            },
+          ],
+        },
+      ],
+      draft: null,
+    });
+
+    expect(legacyValidRow.contactName).toBe('Elena Conti');
+    expect(legacyValidRow.contactEmail).toBe('e.conti@legacyvalid.it');
+    expect(legacyValidRow.emailVerificationState).toBe('VALID');
+    expect(legacyValidRow.channelTier).toBe('S');
+
+    const downgradedRow = buildBattleCsvRow({
+      lead: {
+        id: 'lead-downgraded',
+        canonicalCompanyId: 'co-downgraded',
+        totalScore: 0.82,
+        fitVerdict: 'match',
+        scoreDetail: null,
+      },
+      company: {
+        id: 'co-downgraded',
+        name: 'Downgraded S.r.l.',
+        domain: 'downgraded.it',
+        country: 'IT',
+        attributes: {},
+      },
+      companyContactPoints: [],
+      decisionMakers: [
+        {
+          id: 'dm-reverified-risky',
+          fullName: 'Paolo Rossi',
+          title: 'Head of Procurement',
+          department: 'Procurement',
+          points: [
+            {
+              type: 'email',
+              value: 'p.rossi@downgraded.it',
+              status: 'VALID',
+              verificationState: 'CATCH_ALL_RISKY',
+            },
+          ],
+        },
+      ],
+      draft: null,
+    });
+
+    expect(downgradedRow.contactName).toBe('Paolo Rossi');
+    expect(downgradedRow.emailVerificationState).toBe('CATCH_ALL_RISKY');
+    expect(downgradedRow.channelTier).not.toBe('S');
+  });
+
+  it('blocks unconfirmed pattern_guess emails on placeholder contacts from leaking into switchboard fallback email', () => {
+    const row = buildBattleCsvRow({
+      lead: {
+        id: 'lead-placeholder-guess',
+        canonicalCompanyId: 'co-placeholder-guess',
+        totalScore: 0.75,
+        fitVerdict: 'match',
+        scoreDetail: null,
+      },
+      company: {
+        id: 'co-placeholder-guess',
+        name: 'AEG Market S.r.l.',
+        domain: 'aegmarket.it',
+        country: 'IT',
+        attributes: {},
+      },
+      companyContactPoints: [{ kind: 'email', value: 'info@aegmarket.it' }],
+      decisionMakers: [
+        {
+          id: 'dm-placeholder-guess',
+          fullName: '个人邮箱 (servizioclienti@)',
+          title: null,
+          department: null,
+          points: [
+            {
+              type: 'email',
+              value: 'guessed@aegmarket.it',
+              status: 'RISKY',
+              verificationState: 'CATCH_ALL_RISKY',
+              sourceType: 'pattern_guess',
+            },
+          ],
+        },
+      ],
+      draft: null,
+    });
+
+    expect(row.contactName).toBeNull();
+    expect(row.contactEmail).toBe('info@aegmarket.it');
+  });
 });

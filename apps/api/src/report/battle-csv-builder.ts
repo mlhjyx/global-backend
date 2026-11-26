@@ -13,6 +13,7 @@ import {
   buildReferralFirstInfoDraft,
   classifyBuyingCommitteeTrack,
   classifyContactChannelTier,
+  effectiveEmailVerificationState,
   isUsableOutreachEmailPoint,
   prioritizeBuyingCommitteeContacts,
 } from '../enrichment/buying-committee';
@@ -111,20 +112,13 @@ function pickBestEmailPoint(points: readonly BattleContactPoint[]): BattleContac
   const emails = points.filter(isUsableOutreachEmailPoint);
   if (emails.length === 0) return null;
   const rank = (point: BattleContactPoint): number => {
-    if (point.verificationState === 'VALID' || point.status === 'VALID') return 4;
-    if (point.verificationState === 'CATCH_ALL_RISKY' || point.status === 'RISKY') return 3;
-    if (point.verificationState === 'UNKNOWN') return 2;
+    const state = effectiveEmailVerificationState(point);
+    if (state === 'VALID') return 4;
+    if (state === 'CATCH_ALL_RISKY') return 3;
+    if (state === 'UNKNOWN') return 2;
     return 1;
   };
   return [...emails].sort((a, b) => rank(b) - rank(a))[0] ?? null;
-}
-
-type EmailVerificationStateLike = 'VALID' | 'CATCH_ALL_RISKY' | 'UNKNOWN' | 'INVALID' | null;
-
-function effectiveEmailVerificationState(point: BattleContactPoint | null): EmailVerificationStateLike {
-  if (!point) return null;
-  if (point.verificationState) return point.verificationState as EmailVerificationStateLike;
-  return point.status === 'VALID' ? 'VALID' : null;
 }
 
 function collectSwitchboardChannels(switchboardContacts: readonly BattleDecisionMaker[]): {
@@ -133,9 +127,7 @@ function collectSwitchboardChannels(switchboardContacts: readonly BattleDecision
 } {
   return {
     emails: switchboardContacts.flatMap((c) =>
-      c.points
-        .filter((p) => p.type === 'email' && p.status !== 'INVALID' && p.verificationState !== 'INVALID')
-        .map((p) => p.value),
+      c.points.filter(isUsableOutreachEmailPoint).map((p) => p.value),
     ),
     phones: switchboardContacts.flatMap((c) =>
       c.points.filter((p) => p.type === 'phone' && p.status !== 'INVALID').map((p) => p.value),

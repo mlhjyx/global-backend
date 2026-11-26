@@ -231,15 +231,36 @@ export interface ContactEmailPointLike {
   readonly verificationMethod?: string | null;
 }
 
+export type EmailVerificationStateLike = 'VALID' | 'CATCH_ALL_RISKY' | 'UNKNOWN' | 'INVALID' | null;
+
+/**
+ * 统一解析邮箱联系点的有效验真状态（单一事实源）：
+ * - 显式非 `UNKNOWN` 的 `verificationState`（`VALID` / `CATCH_ALL_RISKY` / `INVALID`）为权威裁决；
+ * - 仅当 `verificationState` 缺失或仍为 Postgres 默认值 `UNKNOWN` 时回退看 legacy `status === 'VALID'`，
+ *   避免新复验的 `CATCH_ALL_RISKY` 被旧 `status='VALID'` 覆盖，也避免未回填行排序与导出口径分裂。
+ */
+export function effectiveEmailVerificationState(
+  point: ContactEmailPointLike | null | undefined,
+): EmailVerificationStateLike {
+  if (!point) return null;
+  if (point.status === 'INVALID' || point.verificationState === 'INVALID') return 'INVALID';
+  if (point.verificationState === 'VALID' || point.verificationState === 'CATCH_ALL_RISKY') {
+    return point.verificationState;
+  }
+  if (point.status === 'VALID') return 'VALID';
+  if (point.verificationState === 'UNKNOWN') return 'UNKNOWN';
+  return null;
+}
+
 /** 筛选可用于作战触达的邮箱联系点（排除 INVALID 与未证实的 pattern_guess 盲猜邮箱）。 */
 export function isUsableOutreachEmailPoint(point: ContactEmailPointLike): boolean {
   if (point.type !== 'email') return false;
   if (point.value !== undefined && !(point.value ?? '').trim()) return false;
-  if (point.status === 'INVALID' || point.verificationState === 'INVALID') return false;
+  const state = effectiveEmailVerificationState(point);
+  if (state === 'INVALID') return false;
   const isPatternGuess =
     point.sourceType === 'pattern_guess' || point.verificationMethod === 'pattern_guess';
-  const isConfirmedValid = point.verificationState === 'VALID' || point.status === 'VALID';
-  return !isPatternGuess || isConfirmedValid;
+  return !isPatternGuess || state === 'VALID';
 }
 
 /**
@@ -255,7 +276,7 @@ export function contactEmailQualityTier(
   let hasUsable = false;
   for (const point of points) {
     if (!isUsableOutreachEmailPoint(point)) continue;
-    if (point.verificationState === 'VALID' || point.status === 'VALID') return 0;
+    if (effectiveEmailVerificationState(point) === 'VALID') return 0;
     hasUsable = true;
   }
   return hasUsable ? 1 : 2;
