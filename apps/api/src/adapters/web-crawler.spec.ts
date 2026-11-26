@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  CRAWL4AI_MD_FILTER_MODE,
   CRAWL4AI_RENDER_DEGRADED_EMPTY_HTML,
   CRAWL4AI_REQUEST_TIMEOUT_MS,
   crawlHtml,
@@ -120,15 +121,13 @@ describe("Crawl4AI artifact-result boundaries", () => {
     });
     expect(events).toEqual(['auth', 'dns', 'auth', 'counter', 'around', 'fetch', 'complete']);
   });
-  it("bounds and fences a successful markdown response", async () => {
+  it("bounds and fences a successful markdown response and explicitly requests raw filter mode so footers are preserved", async () => {
     const beforePhysicalWire = vi.fn(async () => undefined);
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => new Response(
-        JSON.stringify({ markdown: "bounded markdown", success: true }),
-        { status: 200 },
-      )),
-    );
+    const fetchMock = vi.fn(async () => new Response(
+      JSON.stringify({ markdown: "bounded markdown\nP.IVA 04553650989", success: true }),
+      { status: 200 },
+    ));
+    vi.stubGlobal("fetch", fetchMock);
 
     await expect(crawlUrl(
       "https://company.example/",
@@ -142,9 +141,17 @@ describe("Crawl4AI artifact-result boundaries", () => {
       beforePhysicalWire,
     )).resolves.toEqual({
       url: "https://company.example/",
-      text: "bounded markdown",
+      text: "bounded markdown\nP.IVA 04553650989",
     });
     expect(beforePhysicalWire).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [requestUrl, requestInit] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(requestUrl).toMatch(/\/md$/);
+    expect(JSON.parse(String(requestInit.body))).toEqual({
+      url: "https://company.example/",
+      f: CRAWL4AI_MD_FILTER_MODE,
+    });
+    expect(CRAWL4AI_MD_FILTER_MODE).toBe("raw");
   });
 
   it("rejects an oversized raw markdown response before JSON parsing", async () => {

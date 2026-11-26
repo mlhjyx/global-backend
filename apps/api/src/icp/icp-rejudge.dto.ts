@@ -66,7 +66,7 @@ export class RejudgeIcpLeadsDto {
 
   @ApiPropertyOptional({
     default: false,
-    description: '为 true 时对尚未升级到 website-profile/v2 且缺 vat_id 的公司重抓首页与欧盟法律页',
+    description: '为 true 时对尚未升级到 website-profile/v3 且缺 vat_id 的公司重抓首页与欧盟法律页',
   })
   @IsOptional()
   @IsBoolean()

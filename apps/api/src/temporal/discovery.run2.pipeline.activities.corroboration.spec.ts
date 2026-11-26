@@ -272,7 +272,7 @@ describe('Run2 independent corroboration before fit', () => {
     expect(h.websiteProfile.profile).toHaveBeenCalledOnce();
     expect(viesEnrich).toHaveBeenCalledOnce();
     expect((h.company.attributes as { website_profile?: { _parser_version?: string } }).website_profile?._parser_version)
-      .toBe('website-profile/v2');
+      .toBe('website-profile/v3');
     expect(currentEvidenceBundle(h.company).coverage.tier_list).toEqual(['T1', 'T3']);
     expect(currentEvidenceBundle(h.company).coverage.corroborated).toBe(true);
   });
@@ -291,14 +291,16 @@ describe('Run2 independent corroboration before fit', () => {
     }) }));
   });
 
-  it('invalidates pre-v2 fresh website_profile missing vat_id only when forceRefreshIfMissingVat is set', () => {
+  it('invalidates pre-v3 (v1 and v2) fresh website_profile missing vat_id only when forceRefreshIfMissingVat is set', () => {
     const now = Date.parse('2026-11-26T00:00:00.000Z');
     const v1MissingVat = { website_profile: { _ts: '2026-11-25T00:00:00.000Z', trade_role: 'distributor' } };
     const v2MissingVat = { website_profile: { _ts: '2026-11-25T00:00:00.000Z', _parser_version: 'website-profile/v2', trade_role: 'distributor' } };
+    const v3MissingVat = { website_profile: { _ts: '2026-11-25T00:00:00.000Z', _parser_version: 'website-profile/v3', trade_role: 'distributor' } };
     const v1WithVat = { website_profile: { _ts: '2026-11-25T00:00:00.000Z', vat_id: 'IT04553650989' } };
     expect(websiteProfileFreshAndCurrent(v1MissingVat, false, now)).toBe(true);
     expect(websiteProfileFreshAndCurrent(v1MissingVat, false, now, { forceRefreshIfMissingVat: true })).toBe(false);
-    expect(websiteProfileFreshAndCurrent(v2MissingVat, false, now, { forceRefreshIfMissingVat: true })).toBe(true);
+    expect(websiteProfileFreshAndCurrent(v2MissingVat, false, now, { forceRefreshIfMissingVat: true })).toBe(false);
+    expect(websiteProfileFreshAndCurrent(v3MissingVat, false, now, { forceRefreshIfMissingVat: true })).toBe(true);
     expect(websiteProfileFreshAndCurrent(v1WithVat, false, now, { forceRefreshIfMissingVat: true })).toBe(true);
   });
 

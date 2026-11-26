@@ -5,6 +5,7 @@ import { WEBSITE_PROFILE_PARSER_VERSION } from '../providers/website-profile.pro
 import { prepareJudgeCall } from './judge-run';
 import {
   hasNonRedactedEuVat,
+  needsWebsiteProfileV2Refresh,
   selectRejudgeCandidates,
   viesAttemptToken,
 } from './rejudge-candidates';
@@ -260,6 +261,43 @@ describe('selectRejudgeCandidates', () => {
     expect(candidates.map((c) => c.canonicalCompanyId).sort()).toEqual(
       [COMPANY_IT, COMPANY_DE, COMPANY_NO_VAT].sort(),
     );
+  });
+
+  it('selects v2 companies missing vat_id for refresh after bump to website-profile/v3 and converges once stamped v3', () => {
+    expect(WEBSITE_PROFILE_PARSER_VERSION).toBe('website-profile/v3');
+    expect(
+      needsWebsiteProfileV2Refresh({
+        domain: 'italsolsrl.it',
+        attributes: {
+          website_profile: {
+            _parser_version: 'website-profile/v2',
+            trade_role: 'distributor',
+          },
+        },
+      }),
+    ).toBe(true);
+    expect(
+      needsWebsiteProfileV2Refresh({
+        domain: 'italsolsrl.it',
+        attributes: {
+          website_profile: {
+            _parser_version: 'website-profile/v3',
+            trade_role: 'distributor',
+          },
+        },
+      }),
+    ).toBe(false);
+    expect(
+      needsWebsiteProfileV2Refresh({
+        domain: 'memodo.it',
+        attributes: {
+          website_profile: {
+            _parser_version: 'website-profile/v2',
+            vat_id: 'DE318463541',
+          },
+        },
+      }),
+    ).toBe(false);
   });
 
   it('allows includeFresh=true only with explicit companyIds and still excludes SUPPRESSED', async () => {

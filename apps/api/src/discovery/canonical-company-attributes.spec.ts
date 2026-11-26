@@ -263,7 +263,7 @@ describe("CanonicalCompany derived-attribute sanitizer parity", () => {
         vies: { ...vies, address: "VIA BENEDETTO CASTELLI 9/11" },
         website_profile: {
           trade_role: "distributor",
-          _parser_version: "website-profile/v2",
+          _parser_version: "website-profile/v3",
           _vies_attempted: "v1-9f8a-21c4-b0e7-3d12",
         },
       }),
@@ -271,7 +271,7 @@ describe("CanonicalCompany derived-attribute sanitizer parity", () => {
       vies,
       website_profile: {
         trade_role: "distributor",
-        _parser_version: "website-profile/v2",
+        _parser_version: "website-profile/v3",
         _vies_attempted: "v1-9f8a-21c4-b0e7-3d12",
       },
     });

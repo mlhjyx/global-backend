@@ -109,6 +109,14 @@ export function pageTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
   const ceiling = CRAWL4AI_REQUEST_TIMEOUT_MS - 5_000;
   return Math.min(ceiling, Math.max(5_000, Math.round(parsed)));
 }
+/**
+ * Crawl4AI `POST /md` filter mode (`schemas.MarkdownRequest.f: FilterType.RAW`).
+ * Explicit `raw` disables Crawl4AI's default `fit` (PruningContentFilterLXML /
+ * Readability pruning), which otherwise drops `<footer>` blocks carrying EU VAT
+ * / Italian P.IVA identifiers and company contact signals.
+ */
+export const CRAWL4AI_MD_FILTER_MODE = "raw" as const;
+
 export interface CrawlResult {
   url: string;
   text: string;
@@ -135,7 +143,10 @@ export async function crawlUrl(
         "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: JSON.stringify({ url: target.url.toString() }),
+      body: JSON.stringify({
+        url: target.url.toString(),
+        f: CRAWL4AI_MD_FILTER_MODE,
+      }),
       signal: AbortSignal.timeout(CRAWL4AI_REQUEST_TIMEOUT_MS),
     });
     const responseBytes = await readFetchResponseBodyBounded(

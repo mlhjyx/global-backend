@@ -171,15 +171,15 @@ export interface ExtractEuVatOptions {
   readonly countryHint?: string | null;
 }
 
-const JSONLD_VAT_RE = /"vatID"\s*:\s*"([A-Za-z]{2}[A-Za-z0-9\s.+-]{6,18})"/giu;
+const JSONLD_VAT_RE = /"(?:vatID|taxID)"\s*:\s*"([A-Za-z]{2}[A-Za-z0-9\s.+-]{6,18})"/giu;
 const VAT_LABEL_RE =
-  /(?:P\.?\s*IVA(?:\s*(?:e|\/|&)\s*(?:C\.?\s*F\.?|Cod\.?\s*Fisc\.?))?|Partita\s+IVA|USt-?IdNr|UID-?Nr|Umsatzsteuer-?(?:Identifikationsnummer|ID)|TVA(?:\s+intracommunautaire)?|BTW|NIF|CIF|VAT(?:\s*(?:ID|No\.?|Number|Reg\.?|Code))?|NIP|C\.?\s*F\.?\s*(?:e|\/|&)\s*P\.?\s*IVA)/giu;
+  /(?:P\.?\s*IVA(?:\s*(?:e|\/|&|-|,)\s*(?:C\.?\s*F\.?|Cod\.?\s*Fisc\.?|Codice\s+Fiscale))?|Partita\s+IVA|USt-?IdNr|UID-?Nr|Umsatzsteuer-?(?:Identifikationsnummer|ID)|TVA(?:\s+intracommunautaire)?|BTW|NIF|CIF|VAT(?:\s*(?:ID|No\.?|Number|Reg\.?|Code))?|NIP|C\.?\s*F\.?\s*(?:e|\/|&|-|,)\s*P\.?\s*IVA)/giu;
 const PREFIXED_EU_VAT_RE =
   /\b(AT|BE|BG|CY|CZ|DE|DK|EE|EL|ES|FI|FR|GR|HR|HU|IE|IT|LT|LU|LV|MT|NL|PL|PT|RO|SE|SI|SK|XI)[\s.-]?([A-Z0-9](?:[\s.-]?[A-Z0-9]){6,13})\b/gu;
 const STANDALONE_CHECKSUM_VAT_RE =
   /\b(?:DE[\s.-]?\d{3}[\s.-]?\d{3}[\s.-]?\d{3}|IT[\s.-]?\d{11}|BE[\s.-]?[01]\d{3}[\s.-]?\d{3}[\s.-]?\d{3}|NL[\s.-]?\d{9}[\s.-]?B\d{2}|PL[\s.-]?\d{10}|ATU[\s.-]?\d{8}|FR[\s.-]?\d{2}[\s.-]?\d{9})\b/gu;
 const ITALIAN_PIVA_LABELED_RE =
-  /(?:P\.?\s*IVA(?:\s*(?:e|\/|&)\s*(?:C\.?\s*F\.?|Cod\.?\s*Fisc\.?))?|Partita\s+IVA|C\.?\s*F\.?\s*(?:e|\/|&)\s*P\.?\s*IVA)\s*[:.#-]?\s*(\d[\d\s.]{9,13}\d)(?!\d)/giu;
+  /(?:P\.?\s*IVA(?:\s*(?:e|\/|&|-|,)\s*(?:C\.?\s*F\.?|Cod\.?\s*Fisc\.?|Codice\s+Fiscale))?|Partita\s+IVA|C\.?\s*F\.?\s*(?:e|\/|&|-|,)\s*P\.?\s*IVA)(?:\s+nr?\.?)?(?:\s*[:.#-])?\s*(\d[\d\s.]{9,13}\d)(?!\d)/giu;
 const ITALIAN_TEXT_CLUE_RE =
   /\bS\.?\s*r\.?\s*l\.?s?\.?\b|\bS\.?\s*p\.?\s*A\.?\b|\bS\.?\s*a\.?\s*s\.?\b|\bS\.?\s*n\.?\s*c\.?\b|\b\d{5}\s+[A-ZÀ-Ü][A-Za-zÀ-ü' -]{2,30}\s*\(?[A-Z]{2}\)?/u;
 
@@ -198,30 +198,52 @@ function hasItalianClue(text: string, opts?: ExtractEuVatOptions): boolean {
 }
 
 /**
- * Extracts a validated EU VAT ID from webpage text.
- * Priority: JSON-LD vatID > labeled EU prefixed VAT > standalone checksum-verified VAT
+ * Normalizes a single structured VAT/tax ID value (e.g. JSON-LD `vatID` / `taxID`).
+ * Accepts any valid prefixed EU VAT (27 EU + XI, GR -> EL), or an 11-digit
+ * prefix-less Italian Partita IVA when an Italian country/domain clue is present.
+ */
+export function normalizeEuVatWithHint(
+  raw: string,
+  opts?: ExtractEuVatOptions,
+): string | null {
+  if (typeof raw !== 'string') return null;
+  const direct = normalizeEuVat(raw);
+  if (direct) return direct;
+  if (!hasItalianClue('', opts)) return null;
+  const digits = raw.replace(/[\s.-]+/gu, '');
+  if (/^\d{11}$/u.test(digits)) {
+    const candidate = `IT${digits}`;
+    return isValidItalianVat(candidate) ? candidate : null;
+  }
+  return null;
+}
+
+/**
+ * Extracts all validated, deduplicated EU VAT IDs from webpage text in priority order:
+ * JSON-LD vatID/taxID > labeled EU prefixed VAT > standalone checksum-verified VAT
  * > labeled prefix-less Italian P.IVA (only with an Italian country/domain/legal clue).
  */
-export function extractEuVat(text: string, opts?: ExtractEuVatOptions): string | undefined {
-  if (!text) return undefined;
+export function extractAllEuVats(text: string, opts?: ExtractEuVatOptions): string[] {
+  if (!text) return [];
+  const found: string[] = [];
+  const add = (vat: string | null | undefined): void => {
+    if (vat && !found.includes(vat)) found.push(vat);
+  };
 
   for (const match of text.matchAll(JSONLD_VAT_RE)) {
-    const vat = normalizeEuVat(match[1]!);
-    if (vat) return vat;
+    add(normalizeEuVat(match[1]!));
   }
 
   for (const labelMatch of text.matchAll(VAT_LABEL_RE)) {
     const start = (labelMatch.index ?? 0) + labelMatch[0].length;
     const window = text.slice(start, start + 60);
     for (const vatMatch of window.matchAll(PREFIXED_EU_VAT_RE)) {
-      const vat = normalizeEuVat(`${vatMatch[1]}${vatMatch[2]}`);
-      if (vat) return vat;
+      add(normalizeEuVat(`${vatMatch[1]}${vatMatch[2]}`));
     }
   }
 
   for (const match of text.matchAll(STANDALONE_CHECKSUM_VAT_RE)) {
-    const vat = normalizeEuVat(match[0]);
-    if (vat) return vat;
+    add(normalizeEuVat(match[0]));
   }
 
   if (hasItalianClue(text, opts)) {
@@ -229,10 +251,17 @@ export function extractEuVat(text: string, opts?: ExtractEuVatOptions): string |
       const digits = match[1]!.replace(/[\s.]+/gu, '');
       if (/^\d{11}$/u.test(digits)) {
         const candidate = `IT${digits}`;
-        if (isValidItalianVat(candidate)) return candidate;
+        if (isValidItalianVat(candidate)) add(candidate);
       }
     }
   }
 
-  return undefined;
+  return found;
+}
+
+/**
+ * Extracts the highest-priority validated EU VAT ID from webpage text.
+ */
+export function extractEuVat(text: string, opts?: ExtractEuVatOptions): string | undefined {
+  return extractAllEuVats(text, opts)[0];
 }

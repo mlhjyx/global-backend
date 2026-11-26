@@ -541,7 +541,7 @@ describe('createRejudgeActivities', () => {
     expect(judgeFitCompany).not.toHaveBeenCalled();
   });
 
-  it('refreshes website_profile when v1 & missing vat_id and stamps _parser_version=website-profile/v2', async () => {
+  it('refreshes website_profile when v1/v2 & missing vat_id and stamps _parser_version=website-profile/v3', async () => {
     vi.stubEnv('JUDGE_CONTRACT_MODE', 'enforce');
     vi.mocked(judgeFitCompany).mockResolvedValueOnce(makeJudgmentDraft('FIT') as never);
 
@@ -564,7 +564,7 @@ describe('createRejudgeActivities', () => {
     const harness = makeHarness({
       company: {
         attributes: {
-          website_profile: { trade_role: 'distributor' },
+          website_profile: { _parser_version: 'website-profile/v2', trade_role: 'distributor' },
         },
       },
       websiteProfile: { profile: profileFn },
@@ -595,9 +595,10 @@ describe('createRejudgeActivities', () => {
       _parser_version: WEBSITE_PROFILE_PARSER_VERSION,
       vat_id: 'IT04553650989',
     });
+    expect(WEBSITE_PROFILE_PARSER_VERSION).toBe('website-profile/v3');
   });
 
-  it('stamps _parser_version=website-profile/v2 via suppression-safe CAS merge when provider.profile deterministically returns null (convergence without _ts)', async () => {
+  it('stamps _parser_version=website-profile/v3 via suppression-safe CAS merge when provider.profile deterministically returns null (convergence without _ts)', async () => {
     vi.stubEnv('JUDGE_CONTRACT_MODE', 'enforce');
     vi.mocked(judgeFitCompany).mockResolvedValueOnce(makeJudgmentDraft('UNKNOWN') as never);
 
