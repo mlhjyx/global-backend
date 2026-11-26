@@ -248,4 +248,69 @@ describe('fit-v3 unified rubric & R0 Ordina ora false-positive fix', () => {
     expect(result.verdict).toBe('weak');
     expect(result.score).toBeGreaterThanOrEqual(50);
   });
+
+  it('Phase 3B: injects learned fit_counter_examples and hard-vetoes learned peer_exclusions.excluded_domains without calling LLM', async () => {
+    const icp = {
+      name: '欧洲光伏分销商',
+      targetMarkets: ['DE', 'IT'],
+      exclusions: ['同业制造厂'],
+      companyAttributes: {
+        peer_exclusions: {
+          excluded_business_models: ['同业制造厂'],
+          excluded_keywords: ['PV module OEM'],
+          excluded_domains: ['peer-solar.de'],
+        },
+        fit_counter_examples: [
+          {
+            domain: 'peer-solar.de',
+            companyName: 'Peer Solar Modules GmbH',
+            industry: 'solar module manufacturing',
+            outcome: 'rejected',
+            reason: 'wrong_role_peer',
+            note: '上游组件制造同行',
+            recordedAt: '2026-11-26T00:00:00.000Z',
+          },
+        ],
+      },
+    };
+
+    const prompt = buildFitV3Prompt({
+      icp,
+      company: {
+        name: 'Another Solar Co',
+        domain: 'another-solar.de',
+        country: 'DE',
+        industry: 'Solar',
+        visibleText: 'Solar engineering and distribution',
+        title: 'Another Solar',
+        metaDescription: null,
+        channelsSummary: 'roleEmails=1',
+      },
+    });
+    expect(prompt).toContain('fit_counter_examples');
+    expect(prompt).toContain('Peer Solar Modules GmbH');
+    expect(prompt).toContain('PV module OEM');
+
+    const gateway = { generateStructured: vi.fn() } as unknown as ModelGateway;
+    const vetoed = await judgeCompanyFitV3({
+      gateway,
+      workspaceId: '10000000-0000-4000-8000-000000000001',
+      runId: '30000000-0000-4000-8000-000000000003',
+      icp,
+      company: {
+        id: '20000000-0000-4000-8000-000000000099',
+        name: 'Peer Solar Modules GmbH',
+        domain: 'www.peer-solar.de',
+        country: 'DE',
+        industry: 'Solar',
+        visibleText: 'PV module factory',
+        title: 'Peer Solar',
+        metaDescription: null,
+        channelsSummary: '',
+      },
+    });
+    expect(vetoed.verdict).toBe('mismatch');
+    expect(vetoed.score).toBe(0);
+    expect(gateway.generateStructured).not.toHaveBeenCalled();
+  });
 });

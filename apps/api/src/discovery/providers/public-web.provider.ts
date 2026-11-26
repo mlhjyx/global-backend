@@ -101,7 +101,7 @@ const NOISE_DOMAINS = [
   'wikipedia.org', 'wikidata.org', 'wiktionary.org', 'merriam-webster.com', 'dictionary.com', 'britannica.com',
   'youtube.com', 'facebook.com', 'linkedin.com', 'instagram.com', 'x.com', 'twitter.com',
   'reddit.com', 'quora.com', 'pinterest.com', 'tiktok.com',
-  'amazon.com', 'amazon.de', 'ebay.com', 'alibaba.com', 'aliexpress.com', 'made-in-china.com',
+  'amazon.com', 'amazon.de', 'ebay.com', 'alibaba.com', '1688.com', 'aliexpress.com', 'made-in-china.com',
   'globalsources.com', 'indiamart.com', 'thomasnet.com', 'yelp.com', 'trustpilot.com',
   'glassdoor.com', 'indeed.com', 'stepstone.de', 'kununu.com',
   'sciencedirect.com', 'researchgate.net', 'springer.com', 'mdpi.com', 'arxiv.org',

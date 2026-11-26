@@ -154,3 +154,68 @@ describe.each([
     expect(responses['502']?.description).toContain('MODEL_UPSTREAM_UNUSABLE');
   });
 });
+
+describe('Phase 3B ICP feedback learning endpoints', () => {
+  it('routes POST /icps/:icpId/feedback/record and GET /icps/:icpId/feedback/summary through FeedbackLearningService', async () => {
+    const recordFeedback = vi.fn().mockResolvedValue({
+      icpId: ICP_ID,
+      icpVersion: 2,
+      recorded: {
+        outcome: 'rejected',
+        rejectionReason: 'wrong_role_peer',
+        domain: 'peer.de',
+        companyId: null,
+        leadId: null,
+        recordedAt: '2026-11-26T00:00:00.000Z',
+      },
+      appliedRules: {
+        addedExcludedDomain: 'peer.de',
+        addedExcludedKeywords: [],
+        addedCounterExample: true,
+      },
+      summary: {
+        icpId: ICP_ID,
+        icpName: 'Generated',
+        icpVersion: 2,
+        excludedDomains: ['peer.de'],
+        excludedKeywords: [],
+        excludedBusinessModels: [],
+        counterExamples: [],
+        positiveExamples: [],
+        stats: { totalRecorded: 1, outcomeCounts: { rejected: 1 }, rejectionReasonCounts: { wrong_role_peer: 1 }, lastRecordedAt: '2026-11-26T00:00:00.000Z' },
+      },
+    });
+    const getSummary = vi.fn().mockResolvedValue({
+      icpId: ICP_ID,
+      icpName: 'Generated',
+      icpVersion: 2,
+      excludedDomains: ['peer.de'],
+      excludedKeywords: [],
+      excludedBusinessModels: [],
+      counterExamples: [],
+      positiveExamples: [],
+      stats: { totalRecorded: 1, outcomeCounts: { rejected: 1 }, rejectionReasonCounts: { wrong_role_peer: 1 }, lastRecordedAt: '2026-11-26T00:00:00.000Z' },
+    });
+    const controller = new IcpController(
+      {} as never,
+      {} as never,
+      { recordFeedback, getSummary } as never,
+    );
+
+    const rec = await controller.recordFeedbackLearning(CTX, ICP_ID, {
+      domain: 'peer.de',
+      outcome: 'rejected',
+      rejectionReason: 'wrong_role_peer',
+    });
+    expect(recordFeedback).toHaveBeenCalledWith(CTX, ICP_ID, {
+      domain: 'peer.de',
+      outcome: 'rejected',
+      rejectionReason: 'wrong_role_peer',
+    });
+    expect(rec.data.icpVersion).toBe(2);
+
+    const sum = await controller.feedbackLearningSummary(CTX, ICP_ID);
+    expect(getSummary).toHaveBeenCalledWith(CTX, ICP_ID);
+    expect(sum.data.excludedDomains).toEqual(['peer.de']);
+  });
+});

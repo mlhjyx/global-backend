@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import type { EnrichmentResult } from '../discovery/provider-contract';
+import { classifyStoredTedAwardBuyer } from '../discovery/providers/ted-role-classifier';
 import {
   buildSignalRow,
   persistSignalRows,
@@ -174,6 +175,8 @@ export async function loadCompanySignalsForLead(
 
 function inferSignalType(row: LeadPackageCompanySignal): string {
   const title = row.title.toLowerCase();
+  if (row.providerKey === 'ted' || row.signalKind === 'tender_awarded') return 'TENDER_AWARDED';
+  if (row.providerKey === 'changedetection') return 'PAGE_CHANGE';
   if (row.providerKey === 'structured_harvest') {
     return /采购|供应链|procurement|buying|sourcing|purchas/iu.test(title)
       ? 'HIRING_BUYING_ROLE'
@@ -183,7 +186,9 @@ function inferSignalType(row: LeadPackageCompanySignal): string {
     if (/广告|advertis|pixel/iu.test(title)) return 'AD_CAMPAIGN_ACTIVE';
     if (/招聘|hiring|职位|job/iu.test(title)) return 'HIRING_UP';
   }
-  if (row.signalKind === 'rss_item' || row.providerKey === 'rss') return 'NEWS_MENTION';
+  if (row.signalKind === 'rss_item' || row.providerKey === 'rss' || row.providerKey === 'rsshub') {
+    return 'NEWS_MENTION';
+  }
   return 'WEBSITE_CHANGE';
 }
 
@@ -196,6 +201,27 @@ function isoString(value: Date | string | unknown): string | null {
   return null;
 }
 
+function projectTedAwardFallbackSignal(
+  attributes: Record<string, unknown>,
+  companyName?: string,
+): LeadPackageSignalItem | null {
+  if (!companyName) return null;
+  const ted = asRecord(attributes.ted);
+  const tedAward = classifyStoredTedAwardBuyer(companyName, ted);
+  if (!tedAward) return null;
+  const pubDateRaw = nonEmptyString(ted.publication_date);
+  const tedAt = isoString(pubDateRaw ? `${pubDateRaw.slice(0, 10)}T00:00:00.000Z` : null);
+  if (!tedAt) return null;
+  const pubNo = nonEmptyString(ted.publication_number);
+  return {
+    type: 'TENDER_AWARDED',
+    at: tedAt,
+    url: pubNo ? `https://ted.europa.eu/en/notice/-/detail/${encodeURIComponent(pubNo)}` : null,
+    title: pubNo ? `EU TED 项目中标公告（${pubNo}）` : 'EU TED 项目中标公告',
+    provider: 'ted',
+  };
+}
+
 /**
  * Projects stored `company_signal` rows and (when absent) existing `attributes.structured_harvest` /
  * `attributes.digital_footprint` enrichment facts into readable `LeadPackage.signals` items.
@@ -203,6 +229,7 @@ function isoString(value: Date | string | unknown): string | null {
 export function projectStoredAndFallbackSignals(
   attributes: Record<string, unknown>,
   companySignals?: readonly LeadPackageCompanySignal[],
+  companyName?: string,
 ): LeadPackageSignalItem[] {
   const out: LeadPackageSignalItem[] = [];
   for (const row of companySignals ?? []) {
@@ -271,5 +298,8 @@ export function projectStoredAndFallbackSignals(
       });
     }
   }
+
+  const tedFallback = projectTedAwardFallbackSignal(attributes, companyName);
+  if (tedFallback) out.push(tedFallback);
   return out;
 }

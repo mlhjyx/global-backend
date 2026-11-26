@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { IcpController } from './icp.controller';
 import { IcpService } from './icp.service';
 import { IcpFeedbackService } from './icp-feedback.service';
+import { FeedbackLearningService } from './feedback-learning.service';
 import { ExecutionBudgetModule } from '../execution-budget/execution-budget.module';
 import { DiscoveryModule } from '../discovery/discovery.module';
 
@@ -10,7 +11,7 @@ import { DiscoveryModule } from '../discovery/discovery.module';
   // for discovery sources that are ENABLED (BI-30).
   imports: [ExecutionBudgetModule, DiscoveryModule],
   controllers: [IcpController],
-  providers: [IcpService, IcpFeedbackService],
-  exports: [IcpFeedbackService],
+  providers: [IcpService, IcpFeedbackService, FeedbackLearningService],
+  exports: [IcpFeedbackService, FeedbackLearningService],
 })
 export class IcpModule {}

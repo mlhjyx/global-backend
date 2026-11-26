@@ -181,6 +181,22 @@ const LEAD_PACKAGE_SCHEMA = {
       additionalProperties: false,
     },
     signals: { type: 'array', additionalProperties: true, items: { type: 'object' } },
+    icebreakerSuggestions: {
+      type: 'array',
+      description: '基于真实企业公开信号生成的零捏造、零 PII 中英文外联破冰首句建议',
+      items: {
+        type: 'object',
+        required: ['signalType', 'signalTitle', 'signalUrl', 'detectedAt', 'openerZh', 'openerEn'],
+        properties: {
+          signalType: { type: 'string' },
+          signalTitle: { type: 'string' },
+          signalUrl: { type: 'string', nullable: true },
+          detectedAt: { type: 'string', format: 'date-time' },
+          openerZh: { type: 'string' },
+          openerEn: { type: 'string' },
+        },
+      },
+    },
     scores: { type: 'object', additionalProperties: true },
     fit: { type: 'object', additionalProperties: true },
     evidence: { type: 'array', items: { type: 'object' } },

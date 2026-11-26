@@ -582,4 +582,33 @@ describe('Phase 1: ecosystem-sniper & Exa findSimilar awakening', () => {
       vi.unstubAllEnvs();
     }
   });
+
+  it('Phase 3B: filters out 1688.com and shop.1688.com from buyer discovery results (NOISE_DOMAINS double guard)', async () => {
+    const executionBroker = broker(async (toolId) => {
+      if (toolId === 'searxng.search') {
+        return {
+          data: {
+            results: [
+              { url: 'https://www.1688.com/company/demo', title: '1688 Factory Store' },
+              { url: 'https://shop12345.1688.com/page/offerlist.htm', title: '1688 Subdomain Store' },
+              { url: 'https://nord-pumpen.de/produkte', title: 'Nord Pumpen GmbH' },
+            ],
+          },
+          costCents: 0,
+        };
+      }
+      return { data: { results: [] }, costCents: 0 };
+    });
+    mocks.executeStructuredTaskWithRuntime.mockResolvedValue({
+      data: { is_company_site: true, name: 'Nord Pumpen GmbH', country: 'DE', industry: 'Pumpen' },
+      provider: 'gateway',
+      model: 'model',
+      runtimeExecution: {},
+    });
+
+    const res = await new PublicWebDiscoveryProvider({ gateway: {} as never, broker: executionBroker })
+      .discoverCompanies(distributorQuery(), CTX);
+
+    expect(res.records.map((r) => r.domain)).toEqual(['nord-pumpen.de']);
+  });
 });
