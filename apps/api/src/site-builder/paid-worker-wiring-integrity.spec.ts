@@ -7,6 +7,10 @@ const worker = readFileSync(
   path.join(apiRoot, "src/temporal/worker.ts"),
   "utf8",
 );
+const siteBuilderWorkerRuntime = readFileSync(
+  path.join(apiRoot, "src/temporal/site-builder-worker-runtime.ts"),
+  "utf8",
+);
 const factory = readFileSync(
   path.join(apiRoot, "src/tools/tool-broker.factory.ts"),
   "utf8",
@@ -36,6 +40,9 @@ describe("R4-B production worker paid-ledger wiring", () => {
       /buildToolBroker\(\{\s*sourcePolicyReader: input\.sourcePolicyReader,\s*paidLedger: input\.costLedger as never,\s*budgetStore: input\.budgetStore,\s*prisma: input\.prisma,\s*\.\.\.\(ports \? \{ contactEnrichment: ports \} : \{\}\)\s*\}\)/,
     );
     expect(worker).toMatch(
+      /loadSiteBuilderWorkerActivities\(\{[\s\S]*?costLedger,[\s\S]*?\}\)/,
+    );
+    expect(siteBuilderWorkerRuntime).toMatch(
       /createSiteBuilderActivities\(\{[\s\S]*?costLedger,[\s\S]*?\}\)/,
     );
     expect(factory).toContain("paidLedger?: SiteBuildCostLedger");
@@ -47,34 +54,34 @@ describe("R4-B production worker paid-ledger wiring", () => {
 
 describe("R1 production worker Release wiring", () => {
   it("initializes one storage client and injects one build-fenced Release service", () => {
-    expect(worker).toMatch(
-      /import \{\s*SiteReleaseService\s*\} from ["']\.\.\/site-builder\/site-release\.service["']/,
+    expect(siteBuilderWorkerRuntime).toMatch(
+      /import\(["']\.\.\/site-builder\/site-release\.service["']\)/,
     );
     // renderer 身份只能从 OCI release identity 派生（禁止 env 的 dev-unpinned 旁路）。
     expect(worker).toMatch(
       /import \{[\s\S]*?rendererRuntimeIdentity,[\s\S]*?\} from ["']\.\.\/runtime\/managed-dependency-readiness["']/,
     );
     expect(worker).toContain("await siteBuilderStorage.onModuleInit()");
-    expect(worker).toContain(
-      "const rendererBuildIdentity = rendererRuntimeIdentity(releaseIdentity)",
-    );
     expect(worker).toMatch(
+      /const rendererBuildIdentity =[\s\S]*?rendererRuntimeIdentity\(releaseIdentity\)/,
+    );
+    expect(siteBuilderWorkerRuntime).toMatch(
       /const releaseService = new SiteReleaseService\([\s\S]*?prisma,[\s\S]*?siteBuilderStorage,[\s\S]*?buildIdentity: rendererBuildIdentity/,
     );
-    expect(worker).toMatch(
+    expect(siteBuilderWorkerRuntime).toMatch(
       /const qualityCandidateService = new QualityCandidateService\([\s\S]*?new DeterministicQualityService\([\s\S]*?new StorageQualityArtifactSink\(siteBuilderStorage\)[\s\S]*?closedRepairService,[\s\S]*?releaseService/,
     );
-    expect(worker).toMatch(
+    expect(siteBuilderWorkerRuntime).toMatch(
       /createSiteBuilderActivities\(\{[\s\S]*?releaseService,[\s\S]*?\}\)/,
     );
-    expect(worker).toMatch(
+    expect(siteBuilderWorkerRuntime).toMatch(
       /new KbService\([\s\S]*?siteBuilderStorage[\s\S]*?\)/,
     );
-    expect(worker).toContain("qualityCandidateService,");
-    expect(worker).toMatch(
+    expect(siteBuilderWorkerRuntime).toContain("qualityCandidateService,");
+    expect(siteBuilderWorkerRuntime).toMatch(
       /const qualityNarrativeService = new QualityNarrativeService\(\s*siteBuilderStorage,\s*\)/,
     );
-    expect(worker).toContain("qualityNarrativeService,");
-    expect(worker).toContain("closedRepairService,");
+    expect(siteBuilderWorkerRuntime).toContain("qualityNarrativeService,");
+    expect(siteBuilderWorkerRuntime).toContain("closedRepairService,");
   });
 });

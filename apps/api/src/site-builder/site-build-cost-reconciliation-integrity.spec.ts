@@ -3,21 +3,26 @@ import { describe, expect, it } from "vitest";
 
 describe("site build cost reconciliation worker wiring", () => {
   it("registers a one-minute Temporal schedule and the workflow export", async () => {
-    const [constants, schedules, workflows, worker] = await Promise.all([
-      readFile(
-        new URL("../temporal/understanding.constants.ts", import.meta.url),
-        "utf8",
-      ),
-      readFile(
-        new URL("../temporal/sweep-scheduler.service.ts", import.meta.url),
-        "utf8",
-      ),
-      readFile(
-        new URL("../temporal/customer-workflows.ts", import.meta.url),
-        "utf8",
-      ),
-      readFile(new URL("../temporal/worker.ts", import.meta.url), "utf8"),
-    ]);
+    const [constants, schedules, workflows, worker, siteBuilderRuntime] =
+      await Promise.all([
+        readFile(
+          new URL("../temporal/understanding.constants.ts", import.meta.url),
+          "utf8",
+        ),
+        readFile(
+          new URL("../temporal/sweep-scheduler.service.ts", import.meta.url),
+          "utf8",
+        ),
+        readFile(
+          new URL("../temporal/customer-workflows.ts", import.meta.url),
+          "utf8",
+        ),
+        readFile(new URL("../temporal/worker.ts", import.meta.url), "utf8"),
+        readFile(
+          new URL("../temporal/site-builder-worker-runtime.ts", import.meta.url),
+          "utf8",
+        ),
+      ]);
 
     expect(constants).toContain("'siteBuildCostReconciliationSweepWorkflow'");
     expect(constants).toContain("'site-builder-cost-reconciliation'");
@@ -31,6 +36,9 @@ describe("site build cost reconciliation worker wiring", () => {
       "export { siteBuildCostReconciliationSweepWorkflow }",
     );
     expect(worker).toMatch(
+      /loadSiteBuilderWorkerActivities\(\{[\s\S]*?costLedger,[\s\S]*?costReconciliationResolver,/,
+    );
+    expect(siteBuilderRuntime).toMatch(
       /createSiteBuilderActivities\(\{[\s\S]*?costLedger,[\s\S]*?ownerDb(?::\s*workerOpsDb)?,/,
     );
     expect(worker).toContain("createSiteBuildSettlementReadbackRuntimeFromEnv");
@@ -49,7 +57,7 @@ describe("site build cost reconciliation worker wiring", () => {
     expect(worker).toContain(
       "checkSiteBuildSettlementReadbackReadiness(process.env)",
     );
-    expect(worker).toMatch(
+    expect(siteBuilderRuntime).toMatch(
       /createSiteBuilderActivities\(\{[\s\S]*?costReconciliationResolver,/,
     );
   });

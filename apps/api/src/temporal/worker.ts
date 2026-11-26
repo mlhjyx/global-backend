@@ -64,7 +64,7 @@ import {
   PrismaPersonalArtifactCleanupCommandRepository,
 } from "../durable-results/artifact/personal-artifact-cleanup.repository";
 import { createPersonalArtifactCleanupRuntime } from "../durable-results/artifact/personal-artifact-cleanup.runtime";
-import { createSiteBuilderActivities } from "./site-builder.activities";
+import { loadSiteBuilderWorkerActivities } from "./site-builder-worker-runtime";
 import { createSellerDocumentActivities } from "../seller-knowledge/seller-document.activities";
 import { SellerDocumentClaimsService } from "../seller-knowledge/seller-document-claims.service";
 import { SellerDocumentsStorage } from "../seller-knowledge/seller-documents.storage";
@@ -77,15 +77,11 @@ import {
   resolveTaskRoute,
   SITE_BUILDER_GENERATIVE_TASK_IDS,
 } from "../site-builder/agents/task-routes";
-import { createAssetCleanupActivities } from "./asset-cleanup.activities";
 import { createMeasurementActivities } from "./measurement.activities";
 import { SanctionsScreeningService } from "../sanctions/sanctions-screening.service";
-import { KbService } from "../site-builder/kb.service";
-import { EmbeddingsClient } from "../site-builder/embeddings.client";
-import { DoclingClient } from "../site-builder/docling.client";
-import { StorageService } from "../site-builder/storage.service";
-import { ImagePipelineService } from "../site-builder/image-pipeline.service";
-import { IsolatedImagePipelineRunner } from "../site-builder/image-pipeline-runner";
+import { EmbeddingsClient } from "../infra-clients/embeddings.client";
+import { DoclingClient } from "../infra-clients/docling.client";
+import { StorageService } from "../infra-clients/storage.service";
 import { DiscoveryProviderRegistry } from "../discovery/provider.registry";
 import { sourcePolicyReaderFrom } from "../tools/tool-broker.factory";
 import { createWorkerContactEnrichmentSafety } from "../enrichment/safety/contact-enrichment-safety.composition";
@@ -93,15 +89,9 @@ import { TaxonomyResolver } from "../discovery/taxonomy-resolver";
 import { UNDERSTANDING_TASK_QUEUE } from "./understanding.constants";
 import { SiteBuildCostLedger } from "../site-builder/site-build-cost-ledger";
 import { createSiteBuildProviderWireDatabaseFromEnv } from "../site-builder/site-build-provider-wire.database";
-import { SiteReleaseService } from "../site-builder/site-release.service";
-import { createSiteReleaseMaintenanceActivities } from "./site-release-maintenance.activities";
 import { createWorkspacePurgeActivities } from "./workspace-purge.activities";
 import { createDataExportActivities } from "./data-export.activities";
-import { StorageQualityArtifactSink } from "../site-builder/quality/quality-artifact-sink";
-import { DeterministicQualityService } from "../site-builder/quality/deterministic-quality.service";
-import { ClosedRepairService } from "../site-builder/quality/closed-repair.service";
-import { QualityCandidateService } from "../site-builder/quality/quality-candidate.service";
-import { QualityNarrativeService } from "../site-builder/quality/quality-narrative.service";
+import { isSiteBuilderEnabled } from "../runtime/site-builder-feature-flag";
 import { startLangfuseRuntimeTelemetry } from "../model-runtime";
 import { resolveRuntimeSettings } from "../runtime/runtime-environment";
 import { loadRuntimeReleaseIdentity } from "../runtime/runtime-release-identity";
@@ -170,6 +160,42 @@ async function holdWorkerNotReady(
 
 function catalogVerificationErrorCode(error: unknown): string {
   return error instanceof Error && "code" in error && typeof error.code === "string" ? error.code : "PLATFORM_CATALOG_NOT_SEEDED";
+}
+
+async function admitSiteBuilderWorkerDependencies(
+  siteBuilderEnabled: boolean,
+  dependencyBlocked: (code: string) => void,
+): Promise<StorageService | undefined> {
+  if (!siteBuilderEnabled) return undefined;
+  const siteBuilderStorage = new StorageService();
+  await siteBuilderStorage.onModuleInit();
+  await waitForWorkerDependencyAdmission({
+    check: () => siteBuilderStorage.checkReadiness(),
+    onBlocked: dependencyBlocked,
+  });
+  await waitForWorkerDependencyAdmission({
+    check: () => checkSiteBuildSettlementReadbackReadiness(process.env),
+    onBlocked: dependencyBlocked,
+  });
+  await waitForWorkerDependencyAdmission({
+    check: () => checkBrowserReadiness(process.env),
+    onBlocked: dependencyBlocked,
+  });
+  await waitForWorkerDependencyAdmission({
+    check: () => checkImagePipelineIsolationReadiness(),
+    onBlocked: dependencyBlocked,
+  });
+  return siteBuilderStorage;
+}
+
+function siteBuilderDependencyChecks(siteBuilderStorage: StorageService | undefined) {
+  if (!siteBuilderStorage) return [];
+  return [
+    siteBuilderStorage.checkReadiness(),
+    checkSiteBuildSettlementReadbackReadiness(process.env),
+    checkBrowserReadiness(process.env),
+    checkImagePipelineIsolationReadiness(),
+  ];
 }
 
 /**
@@ -325,16 +351,15 @@ async function main(): Promise<void> {
   const costLedger = new SiteBuildCostLedger(prisma, {
     providerWireDatabase,
   });
-  const siteBuilderStorage = new StorageService();
-  await siteBuilderStorage.onModuleInit();
+  const siteBuilderEnabled = isSiteBuilderEnabled(process.env);
   const dependencyBlocked = (code: string): void =>
     console.error(
       `[worker] not ready: ${code}; Temporal polling remains disabled`,
     );
-  await waitForWorkerDependencyAdmission({
-    check: () => siteBuilderStorage.checkReadiness(),
-    onBlocked: dependencyBlocked,
-  });
+  const siteBuilderStorage = await admitSiteBuilderWorkerDependencies(
+    siteBuilderEnabled,
+    dependencyBlocked,
+  );
   await waitForWorkerDependencyAdmission({
     check: () => checkGenericArtifactStorageReadiness(process.env),
     onBlocked: dependencyBlocked,
@@ -345,18 +370,6 @@ async function main(): Promise<void> {
   });
   await waitForWorkerDependencyAdmission({
     check: () => checkModelGatewayReadiness(process.env),
-    onBlocked: dependencyBlocked,
-  });
-  await waitForWorkerDependencyAdmission({
-    check: () => checkSiteBuildSettlementReadbackReadiness(process.env),
-    onBlocked: dependencyBlocked,
-  });
-  await waitForWorkerDependencyAdmission({
-    check: () => checkBrowserReadiness(process.env),
-    onBlocked: dependencyBlocked,
-  });
-  await waitForWorkerDependencyAdmission({
-    check: () => checkImagePipelineIsolationReadiness(),
     onBlocked: dependencyBlocked,
   });
   const personalArtifactCleanupRuntime = await (async () => {
@@ -380,27 +393,9 @@ async function main(): Promise<void> {
     check: () => personalArtifactCleanupRuntime.checkReadiness(),
     onBlocked: dependencyBlocked,
   });
-  const rendererBuildIdentity = rendererRuntimeIdentity(releaseIdentity);
-  const releaseService = new SiteReleaseService(prisma, siteBuilderStorage, {
-    buildIdentity: rendererBuildIdentity,
-  });
-  const closedRepairService = new ClosedRepairService();
-  const qualityCandidateService = new QualityCandidateService(
-    prisma,
-    new DeterministicQualityService(
-      new StorageQualityArtifactSink(siteBuilderStorage),
-    ),
-    closedRepairService,
-    releaseService,
-  );
-  const qualityNarrativeService = new QualityNarrativeService(
-    siteBuilderStorage,
-  );
-  const imagePipeline = new ImagePipelineService(
-    prisma,
-    siteBuilderStorage,
-    new IsolatedImagePipelineRunner(),
-  );
+  const rendererBuildIdentity = siteBuilderEnabled
+    ? rendererRuntimeIdentity(releaseIdentity)
+    : undefined;
 
   // 专用受限跨租户扫描/维护连接（CUSTOMER_WORKER_OPS_DATABASE_URL → runtime_customer_worker_ops，
   // NOSUPERUSER NOBYPASSRLS）：仅覆盖 ExternalIntent / SiteBuilder KB+reconcile / ReleaseMaintenance /
@@ -574,14 +569,11 @@ async function main(): Promise<void> {
     }
     const checks = await Promise.all([
       providerWireDatabase.checkReadiness(),
-      siteBuilderStorage.checkReadiness(),
       checkGenericArtifactStorageReadiness(process.env),
       personalArtifactCleanupRuntime.checkReadiness(),
       checkRedisReadiness(process.env),
       checkModelGatewayReadiness(process.env),
-      checkSiteBuildSettlementReadbackReadiness(process.env),
-      checkBrowserReadiness(process.env),
-      checkImagePipelineIsolationReadiness(),
+      ...siteBuilderDependencyChecks(siteBuilderStorage),
     ]);
     return selectWorkerDependencyAdmission({
       hardChecks: checks,
@@ -607,6 +599,20 @@ async function main(): Promise<void> {
     async () => holdPlatformNotReady("TEMPORAL_WORKER_CONNECTION_UNAVAILABLE"),
   );
   const primaryIdentity = workerIdentity(machine.subject, runtimeLeases.instanceId("WORKER"));
+  const siteBuilderActivities =
+    siteBuilderStorage && rendererBuildIdentity
+      ? await loadSiteBuilderWorkerActivities({
+          prisma,
+          workerOpsDb,
+          costLedger,
+          costReconciliationResolver,
+          gateway,
+          runtimeTelemetry: runtimeTelemetry.telemetry,
+          broker,
+          siteBuilderStorage,
+          rendererBuildIdentity,
+        })
+      : {};
   const sharedWorkerOptions = {
     connection,
     dataConverter: workerRuntime.dataConverter,
@@ -692,29 +698,8 @@ async function main(): Promise<void> {
       ...createPersonalArtifactCleanupActivities({
         service: personalArtifactCleanupService,
       }),
-      // 独立站建设（demo v0 + 精装修 refurbish；broker=brandProfile web 研究的唯一出网闸门）
-      ...createSiteBuilderActivities({
-        prisma,
-        costLedger,
-        costReconciliationResolver,
-        ownerDb: workerOpsDb,
-        gateway,
-        runtimeTelemetry: runtimeTelemetry.telemetry,
-        broker,
-        imagePipeline,
-        releaseService,
-        qualityCandidateService,
-        qualityNarrativeService,
-        closedRepairService,
-        storage: siteBuilderStorage,
-        rendererBuildIdentity,
-        kb: new KbService(
-          prisma,
-          new EmbeddingsClient(),
-          new DoclingClient(),
-          siteBuilderStorage,
-        ),
-      }),
+      // 独立站建设（SITE_BUILDER_ENABLED=false 时零加载 site-builder.activities.ts 与重型图片管线）
+      ...siteBuilderActivities,
       ...createSellerDocumentActivities({
         prisma,
         storage: new SellerDocumentsStorage(),
@@ -724,15 +709,7 @@ async function main(): Promise<void> {
         gateway,
         runtimeTelemetry: runtimeTelemetry.telemetry,
       }),
-      ...createAssetCleanupActivities({
-        prisma,
-        storage: siteBuilderStorage,
-      }),
       ...createMeasurementActivities({ ownerDb: workerOpsDb }),
-      ...createSiteReleaseMaintenanceActivities({
-        ownerDb: workerOpsDb,
-        storage: siteBuilderStorage,
-      }),
       ...createWorkspacePurgeActivities({ prisma, siteBuilderStorage, personalArtifactCleanupPort: personalArtifactCleanupRuntime.port }),
       ...createDataExportActivities({ prisma }),
     },

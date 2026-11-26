@@ -2113,24 +2113,6 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/site-build-cost-ledger.ts#<anonymous>#75": {
-      "file": "apps/api/src/site-builder/site-build-cost-ledger.ts",
-      "name": "<anonymous>",
-      "line": 1641,
-      "complexity": 21,
-      "owner": "P6-CI-10",
-      "expiresAt": "2027-01-31",
-      "reason": "存量高复杂度函数（棘轮：只许降低）"
-    },
-    "apps/api/src/site-builder/site-build-cost-ledger.ts#<anonymous>#90": {
-      "file": "apps/api/src/site-builder/site-build-cost-ledger.ts",
-      "name": "<anonymous>",
-      "line": 2215,
-      "complexity": 21,
-      "owner": "P6-CI-10",
-      "expiresAt": "2027-01-31",
-      "reason": "存量高复杂度函数（棘轮：只许降低）"
-    },
     "apps/api/src/site-builder/site-build-cost-reconciliation-resolver.ts#parseCatalog": {
       "file": "apps/api/src/site-builder/site-build-cost-reconciliation-resolver.ts",
       "name": "parseCatalog",

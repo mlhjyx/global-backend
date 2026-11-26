@@ -10,7 +10,7 @@ import type {
   ModelOp,
   ModelResult,
 } from "./types";
-import { paidOperationKey } from "../site-builder/site-build-cost-ledger";
+import { paidOperationKey } from "../common/paid-cost-ledger-contract";
 import {
   assertStatelessModelCallLimits,
   assertStatelessTaskCallBudget,

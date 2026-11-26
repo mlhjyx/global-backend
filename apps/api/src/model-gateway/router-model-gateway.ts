@@ -37,13 +37,15 @@ import {
   isRecoverableModelFailure,
 } from "./providers/provider-output-error";
 import {
-  modelCostMeasurement,
   paidOperationKey,
   PaidCallDeniedError,
   PaidOperationUnknownError,
-  SITE_BUILD_DURABLE_TOKEN_MAXIMUM,
   type PaidCostMeasurement,
   type PaidOperationReservation,
+} from "../common/paid-cost-ledger-contract";
+import { MODEL_USAGE_TOKEN_MAXIMUM as SITE_BUILD_DURABLE_TOKEN_MAXIMUM } from "./model-usage-boundary";
+import {
+  modelCostMeasurement,
   type SiteBuildCostLedger,
 } from "../site-builder/site-build-cost-ledger";
 import type { SiteBuildCostReconciliationCatalog } from "../site-builder/site-build-cost-reconciliation-resolver";

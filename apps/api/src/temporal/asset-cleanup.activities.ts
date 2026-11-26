@@ -1,6 +1,6 @@
 import { ApplicationFailure, Context } from '@temporalio/activity';
 import { PrismaService } from '../prisma/prisma.service';
-import { StorageService } from '../site-builder/storage.service';
+import { StorageService } from '../infra-clients/storage.service';
 import {
   AssetCleanupCommand,
   CanonicalAssetCleanupCommand,

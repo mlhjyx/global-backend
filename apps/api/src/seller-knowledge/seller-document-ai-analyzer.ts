@@ -13,7 +13,7 @@ import { getTask } from '../ai-tasks/task-registry';
 import { isNavigationNoiseOffering } from '../discovery/offering-noise-filter';
 import { mergeSelectionMarker, readSelectionMarker } from '../company/offering-selection';
 import type { ModelClaimSuggestion } from './seller-document-claim-extractor';
-import type { DoclingPageImage } from '../site-builder/docling.client';
+import type { DoclingPageImage } from '../infra-clients/docling.client';
 
 const TASK_ID = 'seller_document.analyze' as const;
 const MAX_PROMPT_CHARS = 12_000;

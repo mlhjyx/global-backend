@@ -89,4 +89,29 @@ describe('R7-A 周期 sweep 调度器', () => {
       expect(ids).not.toContain(paused);
     }
   });
+
+  it('skips the 3 Site Builder sweeps when SITE_BUILDER_ENABLED=false while dispatching all 6 acquisition/compliance sweeps', async () => {
+    vi.stubEnv('SITE_BUILDER_ENABLED', 'false');
+    const { service, start } = makeService();
+    await service.tick(new Date('2026-11-04T05:00:00Z'));
+
+    const dispatchedIds = start.mock.calls.map(
+      ([, options]) => (options as { workflowId: string }).workflowId,
+    );
+    expect(dispatchedIds).toHaveLength(6);
+    expect(dispatchedIds.some((id) => id.startsWith('site-builder-cost-reconciliation-'))).toBe(false);
+    expect(dispatchedIds.some((id) => id.startsWith('site-builder-kb-recovery-'))).toBe(false);
+    expect(dispatchedIds.some((id) => id.startsWith('site-builder-release-maintenance-'))).toBe(false);
+    expect(dispatchedIds.some((id) => id.startsWith('backlog-sweep-'))).toBe(true);
+    expect(dispatchedIds.some((id) => id.startsWith('external-intent-sweep-'))).toBe(true);
+    expect(dispatchedIds.some((id) => id.startsWith('raw-source-retention-'))).toBe(true);
+    expect(dispatchedIds.some((id) => id.startsWith('tool-budget-reconciliation-'))).toBe(true);
+    expect(dispatchedIds.some((id) => id.startsWith('discovery-stale-run-sweep-'))).toBe(true);
+    expect(dispatchedIds.some((id) => id.startsWith('seller-document-pending-cleanup-'))).toBe(true);
+
+    vi.stubEnv('SITE_BUILDER_ENABLED', 'true');
+    const { service: enabledSvc, start: enabledStart } = makeService();
+    await enabledSvc.tick(new Date('2026-11-04T05:00:00Z'));
+    expect(enabledStart.mock.calls).toHaveLength(CUSTOMER_SWEEPS.length);
+  });
 });
