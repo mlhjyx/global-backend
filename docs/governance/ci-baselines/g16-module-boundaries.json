@@ -1,7 +1,7 @@
 {
   "$comment": "G16：apps/api 运行时跨模块依赖对基线（按 from -> to 去重）。新增对必须显式更新本文件；消失的对不阻断。",
   "schemaVersion": "g16-module-boundaries/v1",
-  "generatedFrom": "37f0a20cf8ac0c435d9ee50cb6cbb13f6d7ea708",
+  "generatedFrom": "6990f3ba550fdec1ee8dcd06d1b48b4636cf05e1",
   "pairs": [
     {
       "from": "(root)",
@@ -38,6 +38,10 @@
     {
       "from": "(root)",
       "to": "compliance"
+    },
+    {
+      "from": "(root)",
+      "to": "data-exports"
     },
     {
       "from": "(root)",
@@ -338,6 +342,30 @@
     {
       "from": "compliance",
       "to": "seller-knowledge"
+    },
+    {
+      "from": "data-exports",
+      "to": "auth"
+    },
+    {
+      "from": "data-exports",
+      "to": "common"
+    },
+    {
+      "from": "data-exports",
+      "to": "prisma"
+    },
+    {
+      "from": "data-exports",
+      "to": "report"
+    },
+    {
+      "from": "data-exports",
+      "to": "seller-knowledge"
+    },
+    {
+      "from": "data-exports",
+      "to": "temporal"
     },
     {
       "from": "discovery",
@@ -1181,6 +1209,10 @@
     },
     {
       "from": "temporal",
+      "to": "data-exports"
+    },
+    {
+      "from": "temporal",
       "to": "discovery"
     },
     {
@@ -1268,6 +1300,10 @@
       "to": "tools"
     },
     {
+      "from": "temporal",
+      "to": "workspace"
+    },
+    {
       "from": "tools",
       "to": "adapters"
     },
@@ -1326,6 +1362,10 @@
     {
       "from": "workspace",
       "to": "seller-knowledge"
+    },
+    {
+      "from": "workspace",
+      "to": "temporal"
     }
   ]
 }

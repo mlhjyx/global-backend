@@ -26,6 +26,7 @@ import { IntakeController } from '../site-builder/intake.controller';
 import { KbController } from '../site-builder/kb.controller';
 import { SitesController } from '../site-builder/sites.controller';
 import { SiteBuildTechnicalBudgetQuoteController } from '../site-builder/site-build-technical-budget-quote.controller';
+import { DataExportsController } from '../data-exports/data-exports.controller';
 import { WorkspaceController } from '../workspace/workspace.controller';
 import { WhoamiController } from '../whoami/whoami.controller';
 import { AuthGuard } from './auth.guard';
@@ -51,6 +52,7 @@ const PROTECTED_CONTROLLERS = [
   KbController,
   SitesController,
   SiteBuildTechnicalBudgetQuoteController,
+  DataExportsController,
   WorkspaceController,
   WhoamiController,
 ] as const;
@@ -74,6 +76,7 @@ const SERVICE_PROTECTED_CONTROLLER_FILES = new Set([
   'platform-authority/platform-execution-technical-quote.controller.ts',
   'platform-authority/platform-target-lookup.controller.ts',
   'platform-authority/platform-revocation-http.controller.ts',
+  'workspace/workspace-purge-internal.controller.ts',
 ]);
 
 function controllerFiles(root: string): string[] {
@@ -160,6 +163,9 @@ describe('controller authorization guard topology', () => {
           '@UseGuards(PlatformTargetLookupGuard)',
           '@ReadOnlyControlPlane()',
           'PLATFORM_AUTHORITY_TARGET_READER_SCOPE',
+        ] : path === 'workspace/workspace-purge-internal.controller.ts' ? [
+          '@UseGuards(WorkspacePurgeServiceTokenGuard)',
+          'x-service-token',
         ] : [
           '@ApiBearerAuth(PLATFORM_TECHNICAL_QUOTE_OPENAPI_SECURITY_SCHEME)',
           '@UseGuards(PlatformTechnicalQuoteServiceAuthenticationGuard)',

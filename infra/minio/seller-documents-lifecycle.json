@@ -12,6 +12,19 @@
       "Expiration": {
         "Days": 1
       }
+    },
+    {
+      "ID": "data-export-ttl",
+      "Status": "Enabled",
+      "Filter": {
+        "Tag": {
+          "Key": "global-lifecycle",
+          "Value": "data-export"
+        }
+      },
+      "Expiration": {
+        "Days": 1
+      }
     }
   ]
 }

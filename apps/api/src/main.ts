@@ -159,6 +159,7 @@ function buildOpenApi(app: Parameters<typeof SwaggerModule.createDocument>[0]) {
     .addTag('Outreach', '受控邮件触达：DNC 预检、平台级抑制与联系人可触达性查询（含服务令牌端点）')
     .addTag('Events', '事件投递账本与确认回执')
     .addTag('Compliance', '数据主体删除请求（Art.17）')
+    .addTag('DataExports', '异步租户数据导出：按域或全量打包 CSV / JSONL / ZIP 并流式下载')
     .addTag('SiteBuilder', '独立站：intake、资料、素材、构建、预览')
     .addTag('ExecutionBudget', '平台内部执行预算包络（服务间调用，普通前端不调用）')
     .addTag('Campaign', 'Campaign 控制面内部入口（服务间调用，普通前端不调用）')
@@ -198,7 +199,7 @@ function buildOpenApi(app: Parameters<typeof SwaggerModule.createDocument>[0]) {
   Object.assign(document, {
     'x-tagGroups': [
       { name: '获客主链路', tags: ['Companies', 'Claims', 'Market Candidates', 'ICP', 'Discovery', 'Leads'] },
-      { name: '运营与合规', tags: ['Reports', 'Metrics', 'Events', 'Compliance', 'Skills', 'Packs', 'Agents'] },
+      { name: '运营与合规', tags: ['Reports', 'Metrics', 'Events', 'Compliance', 'DataExports', 'Skills', 'Packs', 'Agents'] },
       { name: '建站', tags: ['SiteBuilder'] },
       { name: '平台间通道', tags: ['ExecutionBudget', 'PlatformAuthority', 'Campaign'] },
       { name: '系统', tags: ['Workspace', 'System'] },

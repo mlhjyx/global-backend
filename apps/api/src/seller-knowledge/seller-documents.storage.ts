@@ -1,9 +1,11 @@
 import {
   CopyObjectCommand,
   DeleteObjectCommand,
+  DeleteObjectsCommand,
   GetObjectCommand,
   HeadBucketCommand,
   HeadObjectCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
@@ -193,5 +195,41 @@ export class SellerDocumentsStorage {
 
   async delete(key: string): Promise<void> {
     await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
+  }
+
+  async deletePrefix(prefix: string, signal?: AbortSignal): Promise<number> {
+    if (!prefix.endsWith('/') || prefix.includes('..')) {
+      throw new Error('invalid object deletion prefix');
+    }
+    let deleted = 0;
+    for (let page = 0; page < 10_000; page += 1) {
+      const listed = await this.client.send(
+        new ListObjectsV2Command({
+          Bucket: this.bucket,
+          Prefix: prefix,
+          MaxKeys: 1000,
+        }),
+        signal ? { abortSignal: signal } : undefined,
+      );
+      const objects = (listed.Contents ?? [])
+        .map(({ Key }) => Key)
+        .filter((key): key is string => Boolean(key));
+      if (objects.length === 0) return deleted;
+      const result = await this.client.send(
+        new DeleteObjectsCommand({
+          Bucket: this.bucket,
+          Delete: {
+            Objects: objects.map((Key) => ({ Key })),
+            Quiet: true,
+          },
+        }),
+        signal ? { abortSignal: signal } : undefined,
+      );
+      if ((result.Errors?.length ?? 0) > 0) {
+        throw new Error('Seller documents prefix deletion returned object errors');
+      }
+      deleted += objects.length;
+    }
+    throw new Error('Seller documents prefix deletion exceeded page safety bound');
   }
 }

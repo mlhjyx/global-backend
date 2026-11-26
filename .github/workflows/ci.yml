@@ -932,6 +932,10 @@ jobs:
           WORKSPACE_USAGE_TEST_APP_DATABASE_URL: postgresql://app_user:app_pw@127.0.0.1:5432/global_test
           DELETION_COMPANY_ERASURE_TEST_DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
           DELETION_COMPANY_ERASURE_TEST_APP_DATABASE_URL: postgresql://app_user:app_pw@127.0.0.1:5432/global_test
+          WORKSPACE_PURGE_TEST_DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
+          WORKSPACE_PURGE_TEST_APP_DATABASE_URL: postgresql://app_user:app_pw@127.0.0.1:5432/global_test
+          DATA_EXPORTS_TEST_DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
+          DATA_EXPORTS_TEST_APP_DATABASE_URL: postgresql://app_user:app_pw@127.0.0.1:5432/global_test
         run: |
           set -euo pipefail
           pnpm --filter @global/db exec prisma migrate deploy
@@ -956,7 +960,9 @@ jobs:
             src/seller-knowledge/document-claim-gated-consumers.postgres.spec.ts \
             src/seller-knowledge/seller-document-pending-cleanup.postgres.spec.ts \
             src/workspace/workspace.postgres.spec.ts \
-            src/temporal/deletion-company-erasure.postgres.spec.ts
+            src/temporal/deletion-company-erasure.postgres.spec.ts \
+            src/workspace/workspace-purge.postgres.spec.ts \
+            src/data-exports/data-exports.postgres.spec.ts
 
       # Raw ingestion and the database writer bind each record to the same source_policy
       # (company-site fallback, most specific site policy, SUSPENDED first). The database was
