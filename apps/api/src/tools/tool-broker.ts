@@ -589,15 +589,20 @@ export class ToolBroker implements ExecutionBroker {
       }
     }
     let artifactSubject: ArtifactSubjectRef | undefined;
-    if (!ctx.paidCost && reservation && subjectBoundArtifactSchema(tool) && !transientScope) {
+    if (
+      !ctx.paidCost &&
+      (reservation || bypassWorkspaceBudget) &&
+      subjectBoundArtifactSchema(tool) &&
+      !transientScope
+    ) {
       const precheck = this.artifactPrecheck(tool, ctx);
       if ("reason" in precheck) {
-        if (!reservation.replay) await this.budget.release(reservation);
+        if (reservation && !reservation.replay) await this.budget.release(reservation);
         this.trace(ctx, tool, "DENIED", precheck.reason, 0, now() - started);
         throw new ToolPolicyDenied(toolId, precheck.reason);
       }
       artifactSubject = precheck.subjectRef;
-      if (reservation.replay) {
+      if (reservation?.replay) {
         // No wire: admit and read the settled artifact now. A fresh physical
         // call is admitted below, after the limiter, immediately before execute().
         await this.admitArtifactSubjectOrDeny(tool, ctx, reservation, artifactSubject, started);
@@ -640,7 +645,7 @@ export class ToolBroker implements ExecutionBroker {
     try {
       // G3: the subject rights check (tombstone/SUPPRESSED) is linearized here,
       // after limiter and crawl-delay waits, so a DSR committed meanwhile wins.
-      if (artifactSubject && reservation) {
+      if (artifactSubject && (reservation || bypassWorkspaceBudget)) {
         await this.admitArtifactSubjectOrDeny(tool, ctx, reservation, artifactSubject, started);
       }
       // Acquisition suppression is linearized at the last common Tool wire
@@ -1066,11 +1071,11 @@ export class ToolBroker implements ExecutionBroker {
     }
   }
 
-  /** RLS subject admission; on denial releases a fresh reservation and throws. */
+  /** RLS subject admission; on denial releases a fresh reservation (if any) and throws. */
   private async admitArtifactSubjectOrDeny<I, O>(
     tool: Tool<I, O>,
     ctx: ToolContext,
-    reservation: BudgetReservation,
+    reservation: BudgetReservation | undefined,
     subjectRef: ArtifactSubjectRef,
     started: number,
   ): Promise<void> {
@@ -1087,11 +1092,11 @@ export class ToolBroker implements ExecutionBroker {
           ? null
           : `GENERIC_OPERATION_ARTIFACT_${admission.reason}`;
     } catch (error) {
-      if (!reservation.replay) await this.budget.release(reservation);
+      if (reservation && !reservation.replay) await this.budget.release(reservation);
       throw error;
     }
     if (reason === null) return;
-    if (!reservation.replay) await this.budget.release(reservation);
+    if (reservation && !reservation.replay) await this.budget.release(reservation);
     this.trace(ctx, tool as Tool, "DENIED", reason, 0, now() - started);
     throw new ToolPolicyDenied(tool.id, reason);
   }

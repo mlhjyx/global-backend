@@ -14,8 +14,10 @@ import {
   type ExecutionBudgetPurpose,
 } from './execution-budget-authority.types';
 import {
+  BudgetStoreUnavailableError,
   PostgresBudgetStore,
   type BudgetAccountAuthorization,
+  type BudgetDomainAckRequest,
   type BudgetReservation,
   type BudgetReservationRequest,
   type BudgetResultUnknownTransition,
@@ -23,6 +25,14 @@ import {
   type BudgetStatus,
   type BudgetStore,
 } from '../tools/budget-store';
+import type {
+  BudgetOperationResultQuery,
+  BudgetOperationResultReadback,
+} from '../tools/budget-operation-result';
+import type { GenericOperationProjection } from '../tools/generic-operation-projection';
+import type { DurableExecutionReceiptFacts } from '../durable-results/durable-execution-receipt';
+import type { GenericOperationArtifactSnapshot } from '../tools/artifact-budget-expected-facts';
+import type { GenericOperationArtifactSubjectRef } from '../durable-results/artifact/generic-operation-artifact-subject.repository';
 import { assertMicrousd } from '../tools/microusd';
 
 export const LEGACY_EXECUTION_BUDGET_MODE_ENV =
@@ -274,9 +284,12 @@ export class StatelessTechnicalBudgetStore implements BudgetStore {
   }
 
   async settle(
-    _reservation: BudgetReservation,
+    reservation: BudgetReservation,
     observedMicrousd: bigint,
   ): Promise<BudgetSettlement> {
+    if (reservation.workspaceId === 'platform') {
+      throw new ExecutionBudgetGrantError('EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH');
+    }
     assertMicrousd('observedMicrousd', observedMicrousd);
     return Object.freeze({
       chargedMicrousd: observedMicrousd,
@@ -289,20 +302,31 @@ export class StatelessTechnicalBudgetStore implements BudgetStore {
   async markResultUnknown(
     reservation: BudgetReservation,
   ): Promise<BudgetResultUnknownTransition> {
+    if (reservation.workspaceId === 'platform') {
+      throw new ExecutionBudgetGrantError('EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH');
+    }
     return Object.freeze({
       reservedMicrousd: reservation.estimatedMicrousd,
       replay: false,
     });
   }
 
-  async loadResultUnknownArtifact(): Promise<null> {
+  async loadResultUnknownArtifact(
+    reservation: BudgetReservation,
+  ): Promise<null> {
+    if (reservation.workspaceId === 'platform') {
+      throw new ExecutionBudgetGrantError('EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH');
+    }
     return null;
   }
 
   async settleArtifactManifest(
-    _reservation: BudgetReservation,
+    reservation: BudgetReservation,
     observedMicrousd: bigint,
   ): Promise<BudgetSettlement> {
+    if (reservation.workspaceId === 'platform') {
+      throw new ExecutionBudgetGrantError('EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH');
+    }
     assertMicrousd('observedMicrousd', observedMicrousd);
     return Object.freeze({
       chargedMicrousd: observedMicrousd,
@@ -312,7 +336,10 @@ export class StatelessTechnicalBudgetStore implements BudgetStore {
     });
   }
 
-  async release(): Promise<BudgetSettlement> {
+  async release(reservation: BudgetReservation): Promise<BudgetSettlement> {
+    if (reservation.workspaceId === 'platform') {
+      throw new ExecutionBudgetGrantError('EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH');
+    }
     return Object.freeze({
       chargedMicrousd: 0n,
       observedMicrousd: 0n,
@@ -325,6 +352,9 @@ export class StatelessTechnicalBudgetStore implements BudgetStore {
     workspaceId: string;
     accountKey: string;
   }): Promise<BudgetStatus> {
+    if (input.workspaceId === 'platform') {
+      throw new ExecutionBudgetGrantError('EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH');
+    }
     assertBoundedPrintable('accountKey', input.accountKey);
     return Object.freeze({
       remainingMicrousd: BYPASS_TECHNICAL_CAP_MICROUSD,
@@ -338,6 +368,9 @@ export class StatelessTechnicalBudgetStore implements BudgetStore {
     accountKey: string;
     force?: boolean;
   }): Promise<void> {
+    if (input.workspaceId === 'platform') {
+      throw new ExecutionBudgetGrantError('EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH');
+    }
     assertBoundedPrintable('accountKey', input.accountKey);
     this.operationCounts.delete(
       this.counterKey(input.workspaceId, input.accountKey),
@@ -346,15 +379,142 @@ export class StatelessTechnicalBudgetStore implements BudgetStore {
 }
 
 /**
+ * Scope-routed composite `BudgetStore` used when `LEGACY_EXECUTION_BUDGET_MODE=bypass`:
+ * - `platform` scope (`scopeKey === 'platform'` / `workspaceId === 'platform'`) delegates
+ *   every lifecycle operation to the durable `platformStore` (`PostgresBudgetStore` or
+ *   `UnavailableBudgetStore`), keeping platform schedules and egress fences intact.
+ * - Tenant workspace scopes delegate to `StatelessTechnicalBudgetStore` with zero DB writes.
+ */
+export class ScopeRoutedBypassBudgetStore implements BudgetStore {
+  constructor(
+    private readonly platformStore: BudgetStore,
+    private readonly workspaceStore: BudgetStore = new StatelessTechnicalBudgetStore(),
+  ) {}
+
+  private targetForScope(scopeKey: string): BudgetStore {
+    return scopeKey === 'platform' ? this.platformStore : this.workspaceStore;
+  }
+
+  async readOperationResult(
+    query: BudgetOperationResultQuery,
+  ): Promise<BudgetOperationResultReadback> {
+    if (!this.platformStore.readOperationResult) {
+      throw new BudgetStoreUnavailableError(
+        'ScopeRoutedBypassBudgetStore platform store does not expose readOperationResult',
+      );
+    }
+    return this.platformStore.readOperationResult(query);
+  }
+
+  open(input: {
+    authorityId: string;
+    scopeKey: string;
+    accountKey: string;
+    replayScope?: boolean;
+  }): Promise<BudgetAccountAuthorization> {
+    return this.targetForScope(input.scopeKey).open(input);
+  }
+
+  attestAuthorized(input: {
+    authorityId: string;
+    scopeKey: string;
+    accountKey: string;
+  }): Promise<BudgetAccountAuthorization> {
+    return this.targetForScope(input.scopeKey).attestAuthorized(input);
+  }
+
+  reserve(input: BudgetReservationRequest): Promise<BudgetReservation> {
+    return this.targetForScope(input.workspaceId).reserve(input);
+  }
+
+  settle(
+    reservation: BudgetReservation,
+    observedMicrousd: bigint,
+    projection?: GenericOperationProjection,
+    receiptFacts?: DurableExecutionReceiptFacts,
+  ): Promise<BudgetSettlement> {
+    return this.targetForScope(reservation.workspaceId).settle(
+      reservation,
+      observedMicrousd,
+      projection,
+      receiptFacts,
+    );
+  }
+
+  markResultUnknown(
+    reservation: BudgetReservation,
+    expected?: GenericOperationArtifactSnapshot,
+    subjectRef?: GenericOperationArtifactSubjectRef,
+  ): Promise<BudgetResultUnknownTransition> {
+    return this.targetForScope(reservation.workspaceId).markResultUnknown(
+      reservation,
+      expected,
+      subjectRef,
+    );
+  }
+
+  loadResultUnknownArtifact(
+    reservation: BudgetReservation,
+    authorityId: string,
+    subjectRef?: GenericOperationArtifactSubjectRef,
+  ): Promise<GenericOperationArtifactSnapshot | null> {
+    return this.targetForScope(
+      reservation.workspaceId,
+    ).loadResultUnknownArtifact(reservation, authorityId, subjectRef);
+  }
+
+  settleArtifactManifest(
+    reservation: BudgetReservation,
+    observedMicrousd: bigint,
+    snapshot: GenericOperationArtifactSnapshot,
+    receiptFacts: DurableExecutionReceiptFacts,
+    domainAck: BudgetDomainAckRequest,
+    subjectRef?: GenericOperationArtifactSubjectRef,
+    objectVersionId?: string,
+  ): Promise<BudgetSettlement> {
+    return this.targetForScope(reservation.workspaceId).settleArtifactManifest(
+      reservation,
+      observedMicrousd,
+      snapshot,
+      receiptFacts,
+      domainAck,
+      subjectRef,
+      objectVersionId,
+    );
+  }
+
+  release(reservation: BudgetReservation): Promise<BudgetSettlement> {
+    return this.targetForScope(reservation.workspaceId).release(reservation);
+  }
+
+  status(input: {
+    workspaceId: string;
+    accountKey: string;
+  }): Promise<BudgetStatus> {
+    return this.targetForScope(input.workspaceId).status(input);
+  }
+
+  close(input: {
+    workspaceId: string;
+    accountKey: string;
+    force?: boolean;
+  }): Promise<void> {
+    return this.targetForScope(input.workspaceId).close(input);
+  }
+}
+
+/**
  * Selects the workspace `BudgetStore` according to `LEGACY_EXECUTION_BUDGET_MODE`:
  * - `enforce` (default): `PostgresBudgetStore` (full legacy ledger behavior)
- * - `bypass`: `StatelessTechnicalBudgetStore` (zero DB budget-table writes)
+ * - `bypass`: `ScopeRoutedBypassBudgetStore` (`platform` -> `PostgresBudgetStore`,
+ *   tenant workspace UUIDs -> `StatelessTechnicalBudgetStore` with zero DB writes)
  */
 export function createWorkspaceBudgetStore(
   prisma: PrismaService,
   env: NodeJS.ProcessEnv = process.env,
 ): BudgetStore {
+  const durableStore = new PostgresBudgetStore(prisma);
   return isLegacyExecutionBudgetBypass(env)
-    ? new StatelessTechnicalBudgetStore()
-    : new PostgresBudgetStore(prisma);
+    ? new ScopeRoutedBypassBudgetStore(durableStore)
+    : durableStore;
 }

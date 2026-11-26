@@ -22,7 +22,7 @@ import {
 } from "./budget-store";
 import {
   isLegacyExecutionBudgetBypass,
-  StatelessTechnicalBudgetStore,
+  ScopeRoutedBypassBudgetStore,
 } from "../execution-budget/legacy-execution-budget-mode";
 import type { RateLimitStore } from "./rate-limiter";
 import type { ArtifactExecutionPort } from "./artifact-execution-port";
@@ -163,15 +163,16 @@ export function buildToolBroker(deps?: {
           `[tool-broker] ${t.status} ${t.toolId} ${t.reason ?? ""}`.trim(),
         );
     });
+  const durableBudgetStore = deps?.prisma
+    ? new PostgresBudgetStore(deps.prisma)
+    : new UnavailableBudgetStore(
+        "ToolBroker factory requires PrismaService for durable budgets",
+      );
   const budgetStore =
     deps?.budgetStore ??
     (isLegacyExecutionBudgetBypass()
-      ? new StatelessTechnicalBudgetStore()
-      : deps?.prisma
-        ? new PostgresBudgetStore(deps.prisma)
-        : new UnavailableBudgetStore(
-            "ToolBroker factory requires PrismaService for durable budgets",
-          ));
+      ? new ScopeRoutedBypassBudgetStore(durableBudgetStore)
+      : durableBudgetStore);
   // G3: subject-bound PERSONAL_DATA artifacts persist through the same durable
   // budget ledger. Without Prisma or valid storage env every such call stays held.
   const artifactExecution =

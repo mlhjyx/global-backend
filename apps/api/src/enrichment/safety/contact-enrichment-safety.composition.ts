@@ -1,5 +1,13 @@
 import { createHash } from "node:crypto";
+import { types } from "node:util";
+import { ForbiddenException } from "@nestjs/common";
 import { assertPiiKeyConfigured } from "../../compliance/pii-crypto";
+import { isCanonicalArtifactUuid } from "../../durable-results/artifact/artifact.types";
+import { enrichContactsExecutionBudgetRequestScope } from "../../execution-budget/execution-budget-request-scope";
+import { parseExecutionBudgetBinding } from "../../execution-budget/execution-budget-binding";
+import { isLegacyExecutionBudgetBypass } from "../../execution-budget/legacy-execution-budget-mode";
+import { isValidLawfulBasis } from "../../discovery/compliance/email-verification-gate";
+import type { LawfulBasis } from "../../discovery/provider-contract";
 import { genericArtifactStorageConfig } from "../../durable-results/artifact/generic-operation-artifact.storage-config";
 import { GenericOperationArtifactService } from "../../durable-results/artifact/generic-operation-artifact.service";
 import { GenericOperationArtifactRepository } from "../../durable-results/artifact/generic-operation-artifact.repository";
@@ -19,7 +27,7 @@ import { resolveEmailableConfig } from "../verification/emailable.provider";
 import { resolveZeroBounceConfig } from "../verification/zerobounce.provider";
 import { resolveConfiguredFinderProviders, resolveConfiguredTailFinderProviders } from "../finders/finder-pool";
 import { checkProviderGates } from "../provider-gates";
-import { loadCompanyContactEnrichmentTier, loadContactEnrichmentTargets, reachableContactEnrichmentFinders, gateConfiguredVerificationProviders } from "../waterfall/enrich-company-contacts";
+import { enrichCompanyContacts, loadCompanyContactEnrichmentTier, loadContactEnrichmentTargets, reachableContactEnrichmentFinders, gateConfiguredVerificationProviders } from "../waterfall/enrich-company-contacts";
 import { enrichmentInputVersion, enrichmentRequestHash } from "../finders/email-enrichment-provider";
 import { contactMayUseExternalProcessing } from "../../discovery/company-suppression-gate";
 import { buildFrozenEnrichmentPlan } from "./enrichment-call-plan";
@@ -39,7 +47,7 @@ import {
   type EnrichmentHeadStepFact,
 } from "./enrichment-safety-policy";
 import { contactTargetBeforeDigest, type EnrichmentPointBeforeSnapshot } from "./enrichment-target-snapshot";
-import { canonicalSafetyJson, closedSafetyRecord, safetyInteger, EnrichmentSafetyError, type ContactTargetSnapshot, type QuotedEnrichmentSlot } from "./enrichment-safety.contract";
+import { canonicalSafetyJson, closedSafetyRecord, denseSafetyArray, safetyInteger, EnrichmentSafetyError, type ContactTargetSnapshot, type QuotedEnrichmentSlot } from "./enrichment-safety.contract";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import type { WorkspaceEnrichmentTransactions } from "./enrichment-execution.repository";
 import type { ExecutionBroker } from "../../tools/tool-contract";
@@ -693,11 +701,230 @@ export function createContactEnrichmentSafetyRuntime(deps: ContactEnrichmentSafe
 
 export interface ManagedContactEnrichmentSafety {
   readonly broker: ExecutionBroker;
-  readonly service?: import('./contact-enrichment-safety.service').ContactEnrichmentSafetyService;
+  readonly service?: SafetyResultsPort;
   readonly unavailableReason?: string;
 }
 type SafetyResultsPort = Pick<import('./contact-enrichment-safety.service').ContactEnrichmentSafetyService,
   'executeHttp' | 'executeRun' | 'listEnrichmentExecutions' | 'readEnrichmentExecution' | 'recoverEnrichmentExecution' | 'listEnrichmentQualityFacts' | 'readEnrichmentQualityFacts'>;
+
+function assertBypassSafetyAddress(workspaceId: string, companyId: string, operationRef?: string): void {
+  if (![workspaceId, companyId].every(isCanonicalArtifactUuid) || (operationRef !== undefined && !/^[a-f0-9]{64}$/.test(operationRef))) {
+    throw new EnrichmentSafetyError('INVALID_PLAN');
+  }
+}
+
+function normalizeBypassHttpOptions(
+  value: import('./contact-enrichment-safety.service').ContactEnrichmentSafetyOptions,
+): import('./contact-enrichment-safety.service').ContactEnrichmentSafetyOptions {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || types.isProxy(value)) {
+    throw new EnrichmentSafetyError('INVALID_PLAN');
+  }
+  const allowed = ['lawfulBasis', 'contactIds', 'maxProviders', 'maxProbe', 'attemptId'];
+  const keys = Reflect.ownKeys(value);
+  if (keys.some((key) => typeof key !== 'string' || !allowed.includes(key))) {
+    throw new EnrichmentSafetyError('INVALID_PLAN');
+  }
+  const row = closedSafetyRecord(value, keys as string[]);
+  if (!isValidLawfulBasis(row.lawfulBasis as LawfulBasis | undefined)) {
+    throw new ForbiddenException({
+      error: {
+        code: 'CONTACT_ENRICH_LAWFUL_BASIS_REQUIRED',
+        message: 'an explicit lawful basis is required for external contact enrichment',
+      },
+    });
+  }
+  const lawfulBasis = row.lawfulBasis as LawfulBasis;
+  for (const text of [lawfulBasis.ref, lawfulBasis.note, row.attemptId]) {
+    if (
+      text !== undefined &&
+      (typeof text !== 'string' ||
+        text.length > 4096 ||
+        Array.from(text).some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127))
+    ) {
+      throw new EnrichmentSafetyError('INVALID_PLAN');
+    }
+  }
+  const contactIds =
+    row.contactIds === undefined
+      ? undefined
+      : denseSafetyArray(row.contactIds, 10).map((id) => {
+          if (!isCanonicalArtifactUuid(id)) throw new EnrichmentSafetyError('INVALID_PLAN');
+          return id;
+        });
+  if (contactIds && new Set(contactIds).size !== contactIds.length) {
+    throw new EnrichmentSafetyError('INVALID_PLAN');
+  }
+  return {
+    lawfulBasis: {
+      basis: lawfulBasis.basis,
+      ...(lawfulBasis.ref === undefined ? {} : { ref: lawfulBasis.ref }),
+      ...(lawfulBasis.note === undefined ? {} : { note: lawfulBasis.note }),
+    },
+    ...(contactIds === undefined ? {} : { contactIds: [...contactIds].sort() }),
+    ...(row.maxProviders === undefined ? {} : { maxProviders: safetyInteger(row.maxProviders, 1, 3) }),
+    ...(row.maxProbe === undefined ? {} : { maxProbe: safetyInteger(row.maxProbe, 1, 6) }),
+    ...(row.attemptId === undefined ? {} : { attemptId: row.attemptId as string }),
+  };
+}
+
+/**
+ * Contact enrichment executor used when `LEGACY_EXECUTION_BUDGET_MODE=bypass`.
+ * Runs the direct `enrichCompanyContacts` waterfall with stateless per-request
+ * technical limits, provider/source_policy gates, suppression/DSR checks, and
+ * lawful-basis enforcement—without touching legacy `execution_budget_authority`
+ * or `tool_budget_account`/`tool_budget_operation` DB locks. Historical read-only
+ * execution views remain readable through `EnrichmentExecutionQueryRepository`.
+ */
+export function createBypassContactEnrichmentSafetyExecutor(deps: {
+  readonly prisma: ContactEnrichmentPreparationDeps['prisma'];
+  readonly env?: NodeJS.ProcessEnv;
+  readonly broker: ExecutionBroker;
+  readonly runWaterfall?: typeof enrichCompanyContacts;
+}): SafetyResultsPort {
+  const env = deps.env ?? process.env;
+  const runWaterfall = deps.runWaterfall ?? enrichCompanyContacts;
+  const query = new EnrichmentExecutionQueryRepository(deps.prisma);
+  const resultsAdapters: ContactEnrichmentResultsAdapterDeps = {
+    database: deps.prisma,
+    loadById: (scope, id) => query.loadById(scope, id),
+    loadByRef: (scope, operationRef) => query.loadByRef(scope, operationRef),
+  };
+
+  const notAdmitted = (
+    companyId: string,
+    tier: 'A' | 'B',
+    reasonCode: string,
+  ): import('./contact-enrichment-safety.service').ContactEnrichmentSafetyResult => ({
+    companyId,
+    tier,
+    attempted: 0,
+    costMicrousd: 0,
+    deadlineHit: false,
+    results: [],
+    admission: 'NOT_ADMITTED',
+    reasonCode,
+    qualityCoverage: 'PREREQUISITE_ONLY',
+  });
+
+  const executeDirect = async (params: {
+    workspaceId: string;
+    companyId: string;
+    accountKey: string;
+    actorId: string;
+    lawfulBasis: LawfulBasis;
+    runId?: string;
+    contactIds?: string[];
+    maxProviders?: number;
+    maxProbe?: number;
+  }): Promise<import('./contact-enrichment-safety.service').ContactEnrichmentSafetyResult> => {
+    const primary = resolveConfiguredFinderProviders(env);
+    const tail = resolveConfiguredTailFinderProviders(env);
+    const tier = await loadCompanyContactEnrichmentTier(
+      deps.prisma,
+      { workspaceId: params.workspaceId, companyId: params.companyId },
+      tail.length > 0,
+    );
+    const reachable = reachableContactEnrichmentFinders(primary, tail, tier);
+    if (reachable.length === 0) return notAdmitted(params.companyId, tier, 'NO_CONFIGURED_FINDER');
+    let enabledCount = 0;
+    for (const finder of reachable) {
+      if ((await checkProviderGates(deps.prisma, finder)).ok) enabledCount += 1;
+    }
+    if (enabledCount === 0) return notAdmitted(params.companyId, tier, 'NO_ENABLED_FINDER');
+    const verifiers = await gateConfiguredVerificationProviders(deps.prisma, env, deps.broker);
+    const result = await runWaterfall(
+      {
+        prisma: deps.prisma,
+        ownerPrisma: deps.prisma,
+        finders: primary,
+        ...(tail.length > 0 ? { tailFinders: tail } : {}),
+        verifiers,
+        verificationBroker: deps.broker,
+        circuits: new PrismaCircuitBreakerStore(deps.prisma),
+        actorId: params.actorId,
+      },
+      {
+        workspaceId: params.workspaceId,
+        companyId: params.companyId,
+        ...(params.contactIds === undefined ? {} : { contactIds: params.contactIds }),
+        lawfulBasis: params.lawfulBasis,
+        ...(params.runId === undefined ? {} : { runId: params.runId }),
+        accountKey: params.accountKey,
+        ...(params.maxProviders === undefined ? {} : { maxProvidersPerContact: params.maxProviders }),
+        ...(params.maxProbe === undefined ? {} : { maxVerificationCalls: params.maxProbe }),
+      },
+    );
+    if (result.skipped === 'no_domain') {
+      return { ...result, admission: 'NOT_ADMITTED', reasonCode: 'NO_DOMAIN', qualityCoverage: 'PREREQUISITE_ONLY' };
+    }
+    if (result.skipped === 'no_contacts') {
+      return { ...result, admission: 'NOT_ADMITTED', reasonCode: 'NO_CONTACTS', qualityCoverage: 'PREREQUISITE_ONLY' };
+    }
+    return { ...result, admission: 'ADMITTED', qualityCoverage: 'PREREQUISITE_ONLY' };
+  };
+
+  return {
+    executeHttp: async (context, companyId, options) => {
+      assertBypassSafetyAddress(context.workspaceId, companyId);
+      const normalized = normalizeBypassHttpOptions(options);
+      const scope = enrichContactsExecutionBudgetRequestScope(companyId, { attemptId: normalized.attemptId });
+      const accountKey = ['contact.enrich', scope.subjectType, scope.subjectId, scope.requestSha256].join(':');
+      return executeDirect({
+        workspaceId: context.workspaceId,
+        companyId,
+        accountKey,
+        actorId: context.userId,
+        lawfulBasis: normalized.lawfulBasis!,
+        ...(normalized.contactIds === undefined ? {} : { contactIds: normalized.contactIds }),
+        ...(normalized.maxProviders === undefined ? {} : { maxProviders: normalized.maxProviders }),
+        ...(normalized.maxProbe === undefined ? {} : { maxProbe: normalized.maxProbe }),
+      });
+    },
+    executeRun: async (input) => {
+      assertBypassSafetyAddress(input.workspaceId, input.companyId);
+      if (!isCanonicalArtifactUuid(input.businessRunId)) throw new EnrichmentSafetyError('INVALID_PLAN');
+      const binding = parseExecutionBudgetBinding(input.binding, {
+        scopeKey: input.workspaceId,
+        purpose: 'discovery.run',
+        subjectType: 'discovery_run',
+      });
+      const normalized = normalizeBypassHttpOptions({ lawfulBasis: input.lawfulBasis });
+      return executeDirect({
+        workspaceId: input.workspaceId,
+        companyId: input.companyId,
+        accountKey: binding.accountKey,
+        actorId: input.actorId,
+        lawfulBasis: normalized.lawfulBasis!,
+        runId: input.businessRunId,
+      });
+    },
+    listEnrichmentExecutions: async (context, companyId, parsed) => {
+      assertBypassSafetyAddress(context.workspaceId, companyId);
+      return listContactEnrichmentResults(resultsAdapters, context, companyId, parsed);
+    },
+    readEnrichmentExecution: async (context, companyId, operationRef) => {
+      assertBypassSafetyAddress(context.workspaceId, companyId, operationRef);
+      return readContactEnrichmentResult(resultsAdapters, context, companyId, operationRef);
+    },
+    listEnrichmentQualityFacts: async (context, companyId, parsed) => {
+      assertBypassSafetyAddress(context.workspaceId, companyId);
+      return listContactEnrichmentQualityFacts(resultsAdapters, context, companyId, parsed);
+    },
+    readEnrichmentQualityFacts: async (context, companyId, operationRef) => {
+      assertBypassSafetyAddress(context.workspaceId, companyId, operationRef);
+      return readContactEnrichmentQualityFacts(resultsAdapters, context, companyId, operationRef);
+    },
+    recoverEnrichmentExecution: async (context, companyId, operationRef) => {
+      assertBypassSafetyAddress(context.workspaceId, companyId, operationRef);
+      const scopes = new Set(context.scopes ?? []);
+      if (!['acquisition:write', 'contact-discovery:read', 'compliance:manage'].every((scope) => scopes.has(scope as never))) {
+        throw new ForbiddenException('contact enrichment recovery scope required');
+      }
+      return readContactEnrichmentResult(resultsAdapters, context, companyId, operationRef);
+    },
+  };
+}
+
 /** Explicit fail-closed executor: no Grant verify/consume, no broker, no legacy lane. */
 export function createFailClosedSafetyExecutor(reasonCode: string): SafetyResultsPort {
   const notAdmitted = (companyId: string) => ({ companyId, tier: 'B' as const, attempted: 0, costMicrousd: 0, deadlineHit: false, results: [], admission: 'NOT_ADMITTED' as const, reasonCode, qualityCoverage: 'PREREQUISITE_ONLY' as const });
@@ -776,7 +1003,16 @@ export async function createManagedContactEnrichmentSafety(input: {
   try {
     broker = input.buildBroker(ports);
   } catch {
-    return { broker: input.buildBroker(undefined), unavailableReason: 'GOVERNANCE_PENDING' };
+    broker = input.buildBroker(undefined);
+    if (!isLegacyExecutionBudgetBypass(env)) {
+      return { broker, unavailableReason: 'GOVERNANCE_PENDING' };
+    }
+  }
+  if (isLegacyExecutionBudgetBypass(env)) {
+    return {
+      broker,
+      service: createBypassContactEnrichmentSafetyExecutor({ prisma, env, broker }),
+    };
   }
   if (!ports || !artifacts) return { broker, unavailableReason: 'ARTIFACT_UNAVAILABLE' };
   try {

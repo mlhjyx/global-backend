@@ -172,7 +172,7 @@ describe("development fast-lane worker", () => {
       "createDiscoveryActivities(",
       "createQualifyActivities(",
       "new SiteBuildCostLedger(",
-      "new PostgresBudgetStore(",
+      "createWorkspaceBudgetStore(",
     ]) {
       expect(call(lane, anchor), anchor).toBe(call(worker, anchor));
     }
