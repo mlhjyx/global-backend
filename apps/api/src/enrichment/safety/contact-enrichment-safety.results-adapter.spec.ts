@@ -230,7 +230,7 @@ describe('real enrichment result list/read adapters distinguish unknown companie
 
     const detail = await readContactEnrichmentResult(x.deps, { workspaceId: W }, C, resultRef(rows[9]!));
     expect(detail).toMatchObject({ operationRef: resultRef(rows[9]!), status: 'APPLY_PENDING', businessRunId: RUN_A });
-    expect(x.loadByRef).not.toHaveBeenCalled();
+    expect(x.loadByRef).toHaveBeenCalledExactlyOnceWith({ workspaceId: W, companyId: C }, resultRef(rows[9]!));
     const facts = await listContactEnrichmentQualityFacts(x.deps, { workspaceId: W }, C, { ...parsed, businessRunId: RUN_A });
     expect(facts?.items).toHaveLength(10);
     expect(facts).toMatchObject({ hasMore: false, nextCursor: null });

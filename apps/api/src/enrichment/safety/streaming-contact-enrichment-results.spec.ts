@@ -17,7 +17,7 @@ const address = { workspaceId, runId, companyId };
 
 type State = 'APPLY_PENDING' | 'COMPLETED' | 'RATE_LIMITED';
 
-function world(attemptOutcome = 'error') {
+function world(attemptOutcome = 'error', otherOutcome?: string) {
   let state: State | null = null;
   let ref: string | null = null;
   let depth = 0;
@@ -46,10 +46,13 @@ function world(attemptOutcome = 'error') {
         ref = String(operationRef);
         return [{ id: jobId }];
       }
-      const [next, workspace, run, company, job, operationRef] = values;
+      const [next, clearRef, clearStartedAt, workspace, run, company, job, operationRef] = values;
       expect([workspace, run, company, job, operationRef]).toEqual([workspaceId, runId, companyId, jobId, ref]);
       expect(sql).toContain("contact_enrichment_status = 'APPLY_PENDING'");
-      state = next as State;
+      expect(clearRef).toBe(next === null);
+      expect(clearStartedAt).toBe(next === null);
+      state = next as State | null;
+      if (next === null) ref = null;
       return [{ id: jobId }];
     }
     if (sql.includes('FROM public.discovery_company_job')) {
@@ -60,12 +63,18 @@ function world(attemptOutcome = 'error') {
       const [workspace, company, lookupId, lookupRef] = values;
       if (!present || state === null || workspace !== workspaceId || company !== companyId ||
           (lookupId !== null && lookupId !== jobId) || (lookupRef !== null && lookupRef !== ref)) return [];
-      return [{
+      const row = {
         operation_ref: ref, run_id: runId, started_at: startedAt, result_status: state,
         company_suppressed: companySuppressed,
         contact_id: attempted && !companySuppressed ? contactId : null,
         attempt_refs: attempted && !companySuppressed ? [attemptId] : null,
         attempt_outcomes: attempted && !companySuppressed ? [attemptOutcome] : null,
+      };
+      if (!otherOutcome || !attempted || companySuppressed) return [row];
+      return [row, {
+        ...row, contact_id: '00000000-0000-4000-8000-000000000008',
+        attempt_refs: ['00000000-0000-4000-8000-000000000009'],
+        attempt_outcomes: [otherOutcome],
       }];
     }
     throw new Error('unexpected read or write');
@@ -94,6 +103,21 @@ function world(attemptOutcome = 'error') {
 }
 
 describe('bypass streaming enrichment execution readback', () => {
+  it('leaves the operation pending without misclassifying a different contact with a finder hit', async () => {
+    const x = world('error', 'hit');
+    await runBypassStreamingContactEnrichment(x.database, address, async () => ({ rateLimited: true }));
+    const result = await readStreamingContactEnrichmentResult(x.database, address, { id: jobId });
+    expect(result?.status).toBe('APPLY_PENDING');
+    expect(result?.perContact.map((contact) => contact.reasonCode)).toEqual(['RESULT_UNKNOWN', 'UNAVAILABLE']);
+  });
+
+  it('clears a claim when the worker confirms F7 was never admitted', async () => {
+    const x = world();
+    await runBypassStreamingContactEnrichment(x.database, address, async () => ({ skipped: true }));
+    expect(x.current()).toMatchObject({ state: null, ref: null });
+    await expect(readStreamingContactEnrichmentResult(x.database, address, { id: jobId })).resolves.toBeNull();
+  });
+
   it('commits one claim before executing and seals the observed rate limit without a redispatch', async () => {
     const x = world();
     let release!: () => void;

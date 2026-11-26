@@ -84,6 +84,7 @@ describe('shared safe service admission and read/recovery orchestration, pure po
     const operationRef = '7'.repeat(64);
     const pending = { operationRef, status: 'APPLY_PENDING' };
     const readStreamingEnrichmentExecution = vi.fn(async () => pending);
+    x.deps.execution.findByRef.mockResolvedValueOnce(null);
     const service = new ContactEnrichmentSafetyService({
       ...x.deps, results: { ...x.deps.results, readStreamingEnrichmentExecution },
     });
@@ -92,7 +93,7 @@ describe('shared safe service admission and read/recovery orchestration, pure po
     expect(readStreamingEnrichmentExecution).not.toHaveBeenCalled();
     await expect(service.recoverEnrichmentExecution(ctx, C, operationRef)).resolves.toEqual(pending);
     expect(readStreamingEnrichmentExecution).toHaveBeenCalledWith(ctx, C, operationRef);
-    expect(x.deps.execution.findByRef).not.toHaveBeenCalled();
+    expect(x.deps.execution.findByRef).toHaveBeenCalledOnce();
     expect(x.deps.execution.execute).not.toHaveBeenCalled();
     expect(x.deps.authority.verifyWorkspaceGrant).not.toHaveBeenCalled();
   });

@@ -97,10 +97,9 @@ export class ContactEnrichmentSafetyService implements ContactEnrichmentResultsP
     this.address(context.workspaceId, companyId, operationRef);
     const scopes = new Set(context.scopes ?? []);
     if (!["acquisition:write", "contact-discovery:read", "compliance:manage"].every((scope) => scopes.has(scope as never))) throw new ForbiddenException("contact enrichment recovery scope required");
-    const streaming = await this.deps.results.readStreamingEnrichmentExecution?.(context, companyId, operationRef);
-    if (streaming) return streaming;
     const existing = await this.deps.execution.findByRef({ workspaceId: context.workspaceId, companyId, operationRef });
-    if (!existing || existing.workspaceId !== context.workspaceId || existing.companyId !== companyId) return null;
+    if (!existing) return await this.deps.results.readStreamingEnrichmentExecution?.(context, companyId, operationRef) ?? null;
+    if (existing.workspaceId !== context.workspaceId || existing.companyId !== companyId) return null;
     if (!(await this.deps.authorizeRecovery(context, companyId))) throw new ForbiddenException("contact enrichment recovery subject unavailable");
     try { await this.deps.execution.execute({ view: existing.view, workspaceId: context.workspaceId, companyId, actorId: context.userId, mode: "RECOVER_NO_WIRE" }); }
     catch (error) { if (!(error instanceof EnrichmentSafetyError) || error.code !== "HOLD") throw error; }

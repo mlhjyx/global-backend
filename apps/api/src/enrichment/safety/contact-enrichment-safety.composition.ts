@@ -295,11 +295,10 @@ export async function readContactEnrichmentResult(
   companyId: string,
   operationRef: string,
 ) {
-  const streaming = await readStreamingContactEnrichmentResult(
+  const existing = await enrichmentResultByRef(deps, context, companyId, operationRef, buildContactEnrichmentQualityResult);
+  return existing ?? readStreamingContactEnrichmentResult(
     deps.database, { workspaceId: context.workspaceId, companyId }, { operationRef },
   );
-  if (streaming) return streaming;
-  return enrichmentResultByRef(deps, context, companyId, operationRef, buildContactEnrichmentQualityResult);
 }
 export function listContactEnrichmentQualityFacts(
   deps: ContactEnrichmentResultsAdapterDeps,

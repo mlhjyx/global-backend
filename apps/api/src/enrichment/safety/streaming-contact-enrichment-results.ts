@@ -15,7 +15,7 @@ type StreamingEnrichmentStatus = 'APPLY_PENDING' | 'COMPLETED' | 'RATE_LIMITED';
 export async function runBypassStreamingContactEnrichment(
   database: WorkspaceEnrichmentTransactions,
   input: CompanyScope & { readonly runId: string },
-  execute: () => Promise<{ rateLimited?: boolean }>,
+  execute: () => Promise<{ rateLimited?: boolean; skipped?: boolean }>,
 ): Promise<void> {
   const { workspaceId, runId, companyId } = input;
   if (![workspaceId, runId, companyId].every(isCanonicalArtifactUuid)) throw new EnrichmentSafetyError('INVALID_PLAN');
@@ -49,10 +49,15 @@ export async function runBypassStreamingContactEnrichment(
   // A thrown error can occur after a request reached the provider. Keep the
   // pending claim for durable readback and block a second execution.
   const result = await execute();
-  const status: StreamingEnrichmentStatus = result.rateLimited === true ? 'RATE_LIMITED' : 'COMPLETED';
+  // NOT_ADMITTED is the only result that confirms this execution sent no request.
+  const clearClaim = result.skipped === true && result.rateLimited !== true;
+  const status: StreamingEnrichmentStatus | null =
+    clearClaim ? null : result.rateLimited === true ? 'RATE_LIMITED' : 'COMPLETED';
   await database.withWorkspace(workspaceId, (tx) => tx.$executeRaw`
     UPDATE public.discovery_company_job
-    SET contact_enrichment_status = ${status}
+    SET contact_enrichment_status = ${status},
+        contact_enrichment_operation_ref = CASE WHEN ${clearClaim} THEN NULL ELSE contact_enrichment_operation_ref END,
+        contact_enrichment_started_at = CASE WHEN ${clearClaim} THEN NULL ELSE contact_enrichment_started_at END
     WHERE workspace_id = ${workspaceId}::uuid AND run_id = ${runId}::uuid
       AND canonical_company_id = ${companyId}::uuid AND id = ${claim.id}::uuid
       AND contact_enrichment_operation_ref = ${operationRef} AND contact_enrichment_status = 'APPLY_PENDING'`);
@@ -69,10 +74,10 @@ interface StreamingResultRow {
   readonly attempt_outcomes: string[] | null;
 }
 
-function contactReason(status: StreamingEnrichmentStatus, outcomes: readonly string[]): EnrichmentContactResultReason {
-  if (status !== 'COMPLETED' || outcomes.includes('error')) return 'RESULT_UNKNOWN';
+function contactReason(outcomes: readonly string[]): EnrichmentContactResultReason {
   // The finder attempt records a hit, without a link proving the committed point.
   if (outcomes.includes('hit')) return 'UNAVAILABLE';
+  if (outcomes.includes('error')) return 'RESULT_UNKNOWN';
   if (outcomes.includes('skipped_budget')) return 'BUDGET_CAP';
   if (outcomes.includes('miss')) return 'NO_MATCH';
   return 'GOVERNANCE_PENDING';
@@ -128,7 +133,7 @@ export async function readStreamingContactEnrichmentResult(
   let eligible = 0;
   for (const row of rows) {
     if (!row.contact_id || !row.attempt_refs || !row.attempt_outcomes) continue;
-    const reasonCode = contactReason(head.result_status, row.attempt_outcomes);
+    const reasonCode = contactReason(row.attempt_outcomes);
     if (row.attempt_outcomes.some((outcome) => outcome !== 'skipped_compliance')) eligible += 1;
     if (reasonCode === 'BUDGET_CAP' || reasonCode === 'GOVERNANCE_PENDING') {
       skipped.set(reasonCode, (skipped.get(reasonCode) ?? 0) + 1);

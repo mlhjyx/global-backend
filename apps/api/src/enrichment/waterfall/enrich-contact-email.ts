@@ -312,13 +312,14 @@ export async function enrichContactEmail(
 
     attempts += 1;
     const outcome = await finder.findEmail(findInput);
-    if (outcome.status === 'error' && outcome.errorCode === 'rate_limited') deps.onRateLimited?.();
+    const errorCode = outcome.status === 'error' ? outcome.errorCode : null;
+    if (errorCode === 'rate_limited') deps.onRateLimited?.();
     budget.settle(finder.costMicrousd, outcome.costMicrousd);
     costMicrousd += outcome.costMicrousd;
 
     if (deps.circuits) {
       // provider_unconfigured 是本地配置问题，不进熔断统计；其余 error 计失败。
-      if (!(outcome.status === 'error' && outcome.errorCode === 'provider_unconfigured')) {
+      if (errorCode !== 'provider_unconfigured') {
         const nextCircuit = applyCircuitOutcome(
           circuit,
           outcome.status === 'error' ? 'failure' : 'success',
@@ -335,7 +336,7 @@ export async function enrichContactEmail(
         providerKey: finder.key,
         requestHash,
         outcome: outcome.status,
-        errorCode: outcome.status === 'error' ? outcome.errorCode : null,
+        errorCode,
         retryable: outcome.status === 'error' ? outcome.retryable : null,
         costMicrousd: outcome.costMicrousd,
         latencyMs: outcome.latencyMs,
