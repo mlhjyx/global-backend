@@ -142,5 +142,39 @@ describe('industrial pump buyer scenario pilot', () => {
     expect(drafts.every((d) => d.market === 'IT')).toBe(true);
     expect(drafts[0]!.keywords[0]).toContain('HJT Solar Modules 700W+');
     expect(drafts.every((d) => !d.searchPurpose.includes('pump'))).toBe(true);
+    expect(drafts[0]!.scenario).toBe('distribution');
+    expect(drafts[0]!.recommended).toBe(true);
+    expect(drafts[0]!.productLine).toBe('HJT Solar Modules 700W+');
+  });
+
+  it('generalizes prepareBuyerScenarioQueries to preserve non-DE target markets and ISO-3 TED buyer_country', () => {
+    const itQuery: PlanQueryShape = {
+      source_class: 'public_intelligence',
+      filters: { source_hint: 'ted', country: 'IT', cpv: '09331200' },
+      keywords: ['moduli fotovoltaici distributore'],
+      rationale: 'IT solar',
+      priority: 1,
+    };
+    const [compiledIt] = prepareBuyerScenarioQueries([itQuery], 'distribution', ['IT']);
+    expect(compiledIt?.filters).toMatchObject({
+      country: 'IT',
+      buyer_country: 'ITA',
+      trade_side: 'distributor',
+      procurement_scenario: 'distribution',
+    });
+
+    const thQuery: PlanQueryShape = {
+      source_class: 'public_intelligence',
+      filters: { source_hint: 'public_web', country: 'TH' },
+      keywords: ['food packaging machinery factory Thailand'],
+      rationale: 'TH packaging',
+      priority: 1,
+    };
+    const [compiledTh] = prepareBuyerScenarioQueries([thQuery], 'factory_direct', ['TH']);
+    expect(compiledTh?.filters).toMatchObject({
+      country: 'TH',
+      procurement_scenario: 'factory_direct',
+    });
+    expect(compiledTh?.keywords).toEqual(['food packaging machinery factory Thailand']);
   });
 });

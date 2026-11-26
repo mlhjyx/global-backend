@@ -25,6 +25,7 @@ export interface ProfileClaimDraftInput {
   readonly industry?: string | null;
   readonly targetMarkets?: readonly string[] | null;
   readonly offeringNames?: readonly string[] | null;
+  readonly summary?: string | null;
 }
 
 export function normalizeClaimDraftStatement(statement: string): string {
@@ -51,6 +52,11 @@ export function buildProfileClaimDraftSpecs(input: ProfileClaimDraftInput): Clai
   if (industry) push('company_fact', `所属行业：${industry}`);
   const markets = (input.targetMarkets ?? []).map((market) => market.trim()).filter(Boolean);
   if (markets.length > 0) push('market', `目标出口市场：${markets.join('、')}`);
+  const summary = input.summary?.trim();
+  if (summary) {
+    const snippet = summary.length > 240 ? `${summary.slice(0, 240)}…` : summary;
+    push('company_fact', `主营业务描述：${snippet}`);
+  }
 
   return specs;
 }

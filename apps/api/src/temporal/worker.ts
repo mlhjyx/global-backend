@@ -41,6 +41,7 @@ import { PrismaAgentDecisionTraceStore } from "../agents/agent-decision-trace.st
 import { createDiscoveryActivities } from "./discovery.activities";
 import { createRun2Activities } from "./discovery.run2.activities";
 import { createRun2PipelineActivities } from "./discovery.run2.pipeline.activities";
+import { createStreamingDiscoveryActivities } from "./discovery.streaming.activities";
 import { prismaDiscoveryRunLeaseReader } from "./discovery-run-lease";
 import { createRawSourceActivities } from "./raw-source.activities";
 import { createToolBudgetReconciliationActivities } from "./tool-budget-reconciliation.activities";
@@ -658,17 +659,9 @@ async function main(): Promise<void> {
         skills: skillResolver,
         agentRuntime: { agents: agentResolver, traces: agentTraces },
       }),
-      // Run 2.0（M0④）：深挖单公司活动（画像/精判/信号/联系人 + job 状态写回）。
-      ...createRun2PipelineActivities({
-        prisma,
-        providers,
-        gateway,
-        broker,
-        runtimeTelemetry: runtimeTelemetry.telemetry,
-        budgetStore,
-        skills: skillResolver,
-        contactEnrichmentSafety: safetyComposition.service,
-      }),
+      // Run 2.0（M0④）：深挖单公司活动（画像/精判/信号/联系人 + job 状态写回）；Phase 2 方案 B 流式三段漏斗。
+      ...createRun2PipelineActivities({ prisma, providers, gateway, broker, runtimeTelemetry: runtimeTelemetry.telemetry, budgetStore, skills: skillResolver, contactEnrichmentSafety: safetyComposition.service }),
+      ...createStreamingDiscoveryActivities({ prisma, providers, gateway, broker, runtimeTelemetry: runtimeTelemetry.telemetry, budgetStore }),
       ...createRawSourceActivities({ prisma }),
       ...createQualifyActivities({ prisma, sanctionsScreening }),
       ...createBacklogActivities({

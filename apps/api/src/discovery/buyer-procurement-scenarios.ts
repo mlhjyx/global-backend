@@ -98,30 +98,60 @@ export function buyerScenarioSupportsSource(scenario: BuyerProcurementScenario |
   return scenario === null || scenario === 'distribution' || SCENARIO_SEARCH_SOURCES.has(providerKey);
 }
 
+const ISO2_TO_ISO3: Readonly<Record<string, string>> = Object.freeze({
+  DE: 'DEU', IT: 'ITA', FR: 'FRA', ES: 'ESP', NL: 'NLD', BE: 'BEL', AT: 'AUT', CH: 'CHE',
+  PL: 'POL', CZ: 'CZE', SE: 'SWE', DK: 'DNK', FI: 'FIN', NO: 'NOR', PT: 'PRT', IE: 'IRL',
+  GB: 'GBR', US: 'USA', CA: 'CAN', MX: 'MEX', BR: 'BRA', AU: 'AUS', JP: 'JPN', KR: 'KOR',
+  TH: 'THA', VN: 'VNM', MY: 'MYS', ID: 'IDN', IN: 'IND', AE: 'ARE', SA: 'SAU', TR: 'TUR',
+  GR: 'GRC', RO: 'ROU', HU: 'HUN', SK: 'SVK', BG: 'BGR', HR: 'HRV', SI: 'SVN',
+});
+
+const LEGACY_GERMAN_PUMP_KW_RE = /kreiselpump|prozesspump|abwasserpump|pumpen|industriepump/iu;
+
+function resolveScenarioCountry(
+  query: PlanQueryShape,
+  targetMarkets?: unknown,
+): string {
+  if (targetMarkets !== undefined) {
+    const marketCodes = targetCountryCodes({ filters: { country: targetMarkets } });
+    if (marketCodes.length === 1) return marketCodes[0]!.toUpperCase();
+  }
+  const kwText = (query.keywords ?? []).join(' ');
+  if (LEGACY_GERMAN_PUMP_KW_RE.test(kwText)) return 'DE';
+  const queryCodes = targetCountryCodes({ filters: { country: query.filters?.country } });
+  if (queryCodes.length === 1) return queryCodes[0]!.toUpperCase();
+  return 'DE';
+}
+
 export function prepareBuyerScenarioQueries<T extends PlanQueryShape>(
   queries: readonly T[],
   scenario: BuyerProcurementScenario | null,
+  targetMarkets?: unknown,
 ): T[] {
   if (!scenario) return [...queries];
   return queries.map((query) => {
-    const filters: Record<string, unknown> = { ...query.filters, country: 'DE', procurement_scenario: scenario };
+    const country = resolveScenarioCountry(query, targetMarkets);
+    const filters: Record<string, unknown> = { ...query.filters, country, procurement_scenario: scenario };
     for (const key of ['iso_country', 'buyer_country', 'region']) delete filters[key];
     if (scenario === 'distribution') {
       // TED reads ISO-3 buyer_country, not the ordinary country filter.
-      if (filters.source_hint === TED_QUERY_SOURCE.providerKey) filters.buyer_country = 'DEU';
+      if (filters.source_hint === TED_QUERY_SOURCE.providerKey) {
+        filters.buyer_country = ISO2_TO_ISO3[country] ?? country;
+      }
       return { ...query, filters: { ...filters, trade_side: 'distributor' } };
     }
 
     for (const key of ['trade_side', 'business_model', 'establishment_type', 'role']) {
       delete filters[key];
     }
-    // Free text is not a company role. Removing a phrase because it contains
-    // “Fabrik” loses valid searches for factories as buyers. Prefer the
-    // planner's full local phrases; a bare category alone needs a fallback.
     const localPhrases = searchableTerms(query.keywords, searchLanguageFor({ filters }))
       .filter((keyword) => keyword.split(/\s+/u).filter((word) => /\p{L}/u.test(word)).length >= 2);
     const byLowercase = new Set<string>();
-    const keywords = (localPhrases.length ? localPhrases : SCENARIOS[scenario].keywords)
+    const fallbackKeywords =
+      country === 'DE' && LEGACY_GERMAN_PUMP_KW_RE.test((query.keywords ?? []).join(' '))
+        ? SCENARIOS[scenario].keywords
+        : query.keywords;
+    const keywords = (localPhrases.length ? localPhrases : fallbackKeywords)
       .filter((keyword) => {
         const key = keyword.toLowerCase().replace(/\s+/gu, ' ');
         if (byLowercase.has(key)) return false;
@@ -141,8 +171,11 @@ export function addConfirmedBuyerScenarioDrafts(
 ): void {
   const offering = offeringBasis === 'selected_products' && offerings.length === 1 ? offerings[0] : undefined;
   if (!offering?.id || confirmedMarkets?.length !== 1) return;
-  const drafts = draftIndustrialPumpBuyerScenarios({
-    product: offering.name, productId: offering.id, targetMarket: confirmedMarkets[0]!, evidenceRefs: [`offering:${offering.id}`],
+  const drafts = draftBuyerProcurementScenarios({
+    product: offering.name,
+    productId: offering.id,
+    targetMarket: confirmedMarkets[0]!,
+    evidenceRefs: [`offering:${offering.id}`],
   });
   if (drafts.length) attributes.procurement_scenario_drafts = drafts;
 }
@@ -151,13 +184,21 @@ export function assertSupportedBuyerScenario(
   input: unknown, markets: unknown, scenario: BuyerProcurementScenario | null,
 ): void {
   const attributes = input as Record<string, unknown> | null;
-  if (attributes?.procurement_scenario != null && (!scenario || !isGermanIndustrialPumpPilot(attributes.product, markets))) {
+  if (attributes?.procurement_scenario == null) return;
+  const countries = targetCountryCodes({ filters: { country: markets } });
+  if (!scenario || countries.length !== 1) {
     throw new ConflictException({ error: {
       code: 'PROCUREMENT_SCENARIO_NOT_SUPPORTED',
-      message: 'procurement scenes require a supported scenario, an industrial pump product, and Germany as the only market',
+      message: 'procurement scenarios require a supported scenario (distribution | factory_direct | equipment_integration) and a single target market',
     } });
   }
 }
+
+const SCENARIO_BUYER_TYPES: Readonly<Record<BuyerProcurementScenario, string>> = Object.freeze({
+  distribution: '行业分销商 / 批发商 / 进口商',
+  factory_direct: '终端工厂 / 项目采购方',
+  equipment_integration: 'EPC 工程承包商 / 设备成套集成商',
+});
 
 export function draftBuyerProcurementScenarios(input: {
   productId: string;
@@ -182,14 +223,22 @@ export function draftBuyerProcurementScenarios(input: {
   };
   return scenarioIds
     .filter((id) => input.allowed === undefined || input.allowed.includes(id))
-    .map((id) => ({
-      market,
-      productId: input.productId,
-      product,
-      evidenceRefs,
-      ...buyerProcurementCriteria(id),
-      keywords: defaultKeywords(id),
-    }));
+    .map((id) => {
+      const criteria = buyerProcurementCriteria(id);
+      return {
+        scenario: id,
+        market,
+        productId: input.productId,
+        product,
+        productLine: product,
+        buyerType: SCENARIO_BUYER_TYPES[id],
+        recommended: id === 'distribution',
+        rationale: criteria.searchPurpose,
+        evidenceRefs,
+        ...criteria,
+        keywords: defaultKeywords(id),
+      };
+    });
 }
 
 export function buyerScenarioPlannerNote(scenario: BuyerProcurementScenario | null): string {

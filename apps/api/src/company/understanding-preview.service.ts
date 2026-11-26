@@ -2,6 +2,10 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RequestContext } from '../auth/request-context';
+import {
+  classifySellerWebsiteChannel,
+  type SellerWebsiteChannel,
+} from './seller-source-allowlist';
 
 /**
  * 理解预览（注册即建档第 1 步，2026-11-10）：把一次真实 understanding run 的
@@ -35,10 +39,39 @@ export interface IndustrySuggestion {
   matched: boolean;
 }
 
+export interface UnderstandingPreviewDocumentItem {
+  id: string;
+  filename: string;
+  status: string;
+  mime: string;
+  chunkCount: number;
+  createdAt: string;
+}
+
+export interface UnderstandingPreviewDocumentClaim {
+  claimId: string;
+  type: string;
+  statement: string;
+  status: string;
+  documentId: string | null;
+  filename: string | null;
+}
+
+export interface UnderstandingPreviewDocumentsSummary {
+  total: number;
+  ready: number;
+  processing: number;
+  failed: number;
+  items: UnderstandingPreviewDocumentItem[];
+  extractedClaims: UnderstandingPreviewDocumentClaim[];
+}
+
 export interface UnderstandingPreview {
   companyId: string;
   name: string;
   website: string | null;
+  websiteChannel: SellerWebsiteChannel | null;
+  summary: string | null;
   status: string;
   state: 'not_started' | 'queued' | 'running' | 'ready' | 'failed';
   failure: { stage: string; code: string } | null;
@@ -53,6 +86,7 @@ export interface UnderstandingPreview {
     evidence: string;
     sourceUrl: string | null;
   }[];
+  documents: UnderstandingPreviewDocumentsSummary;
   updatedAt: string;
 }
 
@@ -242,10 +276,14 @@ export class UnderstandingPreviewService {
         claims.filter((claim) => belongsToSite(claim.evidence[0]?.sourceUrl, host)),
       );
 
+      const documents = await this.loadDocumentsSummary(tx, companyId);
+
       return {
         companyId: company.id,
         name: company.name,
         website: company.website,
+        websiteChannel: classifySellerWebsiteChannel(company.website),
+        summary: company.summary ?? null,
         status: company.status,
         state: stateOf(company),
         failure: parseFailure(company.understandingLastError),
@@ -253,9 +291,91 @@ export class UnderstandingPreviewService {
         industry: { raw: company.industry, suggested, options },
         products,
         markets,
+        documents,
         updatedAt: company.updatedAt.toISOString(),
       };
     });
+  }
+
+  /** S1a 溯源隔离：PDF 画册与文档派生 Claim 单独汇总，绝不冒充官网抽取结果。 */
+  private async loadDocumentsSummary(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+  ): Promise<UnderstandingPreviewDocumentsSummary> {
+    const docClient = (tx as unknown as {
+      sellerDocument?: {
+        findMany: (args: unknown) => Promise<
+          Array<{
+            id: string;
+            filename: string;
+            status: string;
+            mime: string;
+            createdAt: Date;
+            _count?: { chunks?: number };
+          }>
+        >;
+      };
+    }).sellerDocument;
+    if (!docClient?.findMany) {
+      return { total: 0, ready: 0, processing: 0, failed: 0, items: [], extractedClaims: [] };
+    }
+    const rows = await docClient.findMany({
+      where: { companyId, deletedAt: null },
+      select: {
+        id: true,
+        filename: true,
+        status: true,
+        mime: true,
+        createdAt: true,
+        _count: { select: { chunks: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+    if (rows.length === 0) {
+      return { total: 0, ready: 0, processing: 0, failed: 0, items: [], extractedClaims: [] };
+    }
+    const filenameByDocId = new Map(rows.map((r) => [r.id, r.filename]));
+    const docClaims = await tx.claim.findMany({
+      where: { companyId, status: { not: 'REVOKED' }, documentClaimEvidence: { some: {} } },
+      select: {
+        id: true,
+        type: true,
+        statement: true,
+        status: true,
+        documentClaimEvidence: {
+          select: { documentId: true },
+          take: 1,
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 30,
+    });
+    return {
+      total: rows.length,
+      ready: rows.filter((r) => r.status === 'ready').length,
+      processing: rows.filter((r) => r.status === 'queued' || r.status === 'processing').length,
+      failed: rows.filter((r) => r.status === 'failed_terminal' || r.status === 'rejected').length,
+      items: rows.map((r) => ({
+        id: r.id,
+        filename: r.filename,
+        status: r.status,
+        mime: r.mime,
+        chunkCount: r._count?.chunks ?? 0,
+        createdAt: r.createdAt.toISOString(),
+      })),
+      extractedClaims: docClaims.map((claim) => {
+        const docId = claim.documentClaimEvidence[0]?.documentId ?? null;
+        return {
+          claimId: claim.id,
+          type: claim.type,
+          statement: claim.statement,
+          status: claim.status,
+          documentId: docId,
+          filename: docId ? (filenameByDocId.get(docId) ?? null) : null,
+        };
+      }),
+    };
   }
 
   private suggestIndustry(

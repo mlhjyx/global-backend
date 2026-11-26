@@ -16,6 +16,7 @@ export const UNDERSTANDING_TASK_QUEUE =
   ACQ_SWEEP_CONTRACT.taskQueue as 'understanding';
 export const UNDERSTANDING_WORKFLOW = 'understandingWorkflow';
 export const DISCOVERY_WORKFLOW = 'discoveryWorkflow';
+export const DISCOVERY_STREAMING_WORKFLOW = 'discoveryStreamingWorkflow';
 export const QUALIFY_WORKFLOW = 'qualifyWorkflow';
 export const ACQUISITION_SWEEP_WORKFLOW = ACQ_SWEEP_CONTRACT.workflowType;
 export const ACQ_SWEEP_SCHEDULE_ID =

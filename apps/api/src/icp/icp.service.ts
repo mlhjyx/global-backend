@@ -68,6 +68,7 @@ import {
 } from '../execution-budget/execution-budget-authority.service';
 import { workspaceExecutionBudgetRequestScope } from '../execution-budget/execution-budget-request-scope';
 import { filterUnmatchableIcpRules, sanitizeIcpAttributesInPlace, sanitizeIcpExclusions } from './icp-output-sanitizer';
+import { buildMultiIcpPromptFocus, buildThreeLayerIcpAttributes, resolveOfferingsForOverrides, syncThreeLayerOnIcpPatch, type GenerateIcpOverrides } from './icp-three-layer';
 import {
   buildIcpGenerationPrompt,
   completeTargetMarkets,
@@ -145,6 +146,7 @@ export class IcpService {
     compactJws?: string,
     attemptId?: string,
     confirmedTargetMarkets?: string[],
+    overrides?: GenerateIcpOverrides,
   ) {
     const guardrailsEnabled = process.env.ICP_INPUT_GUARDRAILS === 'on';
     // Validate explicit confirmation before consuming the one-shot Grant.
@@ -194,14 +196,8 @@ export class IcpService {
     const contract = getTask('icp.design')!;
     const facts = claims.map((c) => `- [${c.type}] ${c.statement}`).join('\n');
     const profileMarkets = sellerIsoMarkets(company);
-    const prompt = buildIcpGenerationPrompt({
-      company,
-      facts,
-      offerings,
-      offeringBasis,
-      confirmedMarkets,
-      guardrailsEnabled,
-    });
+    const focusedOfferings = resolveOfferingsForOverrides(offerings, overrides?.productLines);
+    const prompt = buildIcpGenerationPrompt({ company, facts, offerings: focusedOfferings, offeringBasis, confirmedMarkets, guardrailsEnabled }) + buildMultiIcpPromptFocus(overrides);
 
     const result = await executeIcpBudgetedTask<IcpModelOutput>({
       budgetStore: this.budgetStore ?? new UnavailableBudgetStore('ICP generation requires an authoritative BudgetStore'),
@@ -229,19 +225,12 @@ export class IcpService {
       : guardrailsEnabled
         ? modelMarkets
         : completeTargetMarkets(out.target_markets, profileMarkets);
-    const companyAttributesForIcp = sanitizeIcpAttributesInPlace(
-      icpInputLineage({
-        modelCompanyAttributes: out.company_attributes,
-        offeringBasis,
-        confirmedMarkets,
-        guardrailsEnabled,
-        offerings,
-        modelMarkets,
-      }),
-    );
     const sanitizedExclusions = sanitizeIcpExclusions(out.exclusions);
-
-    addConfirmedBuyerScenarioDrafts(companyAttributesForIcp, offeringBasis, offerings, confirmedMarkets);
+    const companyAttributesForIcp = buildThreeLayerIcpAttributes({
+      company, offerings: focusedOfferings, exclusions: sanitizedExclusions, targetMarkets: targetMarketsForIcp, overrides,
+      companyAttributes: sanitizeIcpAttributesInPlace(icpInputLineage({ modelCompanyAttributes: out.company_attributes, offeringBasis, confirmedMarkets, guardrailsEnabled, offerings: focusedOfferings, modelMarkets })),
+    });
+    addConfirmedBuyerScenarioDrafts(companyAttributesForIcp, offeringBasis, focusedOfferings, confirmedMarkets);
     if (documentDependencies.length > 0) {
       Object.assign(companyAttributesForIcp as unknown as Record<string, unknown>, {
         documentClaimDependencies: documentDependencies,
@@ -272,7 +261,7 @@ export class IcpService {
           ...(icpId ? { id: icpId } : {}),
           workspaceId: ctx.workspaceId,
           companyId,
-          name: out.name ?? '未命名 ICP',
+          name: overrides?.name?.trim() || out.name || '未命名 ICP',
           status: 'HYPOTHESIS', // AI-generated, not yet backtested
           companyAttributes: json(companyAttributesForIcp),
           painPoints: json(out.pain_points),
@@ -357,7 +346,7 @@ export class IcpService {
    * Human Gate: promote to ACTIVE (PRD ICP state machine); emits ICPActivated.
    * Previous ACTIVE ICPs of the same company become SUPERSEDED (版本演进).
    */
-  async activate(ctx: RequestContext, icpId: string) {
+  async activate(ctx: RequestContext, icpId: string, opts?: { keepExistingActive?: boolean }) {
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       const icp = await tx.icpDefinition.findUnique({ where: { id: icpId } });
       if (!icp) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'icp not found' } });
@@ -366,10 +355,12 @@ export class IcpService {
           error: { code: 'INVALID_STATE', message: `icp is ${icp.status}; cannot activate` },
         });
       }
-      await tx.icpDefinition.updateMany({
-        where: { companyId: icp.companyId, status: 'ACTIVE', id: { not: icpId } },
-        data: { status: 'SUPERSEDED' },
-      });
+      if (!opts?.keepExistingActive) {
+        await tx.icpDefinition.updateMany({
+          where: { companyId: icp.companyId, status: 'ACTIVE', id: { not: icpId } },
+          data: { status: 'SUPERSEDED' },
+        });
+      }
       await tx.icpDefinition.update({
         where: { id: icpId },
         data: { status: 'ACTIVE', version: { increment: 1 } },
@@ -415,14 +406,15 @@ export class IcpService {
           error: { code: 'VERSION_CONFLICT', message: 'stale version', details: { current: icp.version } },
         });
       }
+      const synced = syncThreeLayerOnIcpPatch(icp.companyAttributes, patch.companyAttributes, patch.exclusions);
       await tx.icpDefinition.update({
         where: { id: icpId },
         data: {
           ...(patch.name !== undefined ? { name: patch.name } : {}),
-          ...(patch.companyAttributes !== undefined ? { companyAttributes: json(patch.companyAttributes) } : {}),
+          ...(synced.companyAttributes !== undefined ? { companyAttributes: json(synced.companyAttributes) } : {}),
           ...(patch.painPoints !== undefined ? { painPoints: json(patch.painPoints) } : {}),
           ...(patch.triggerSignals !== undefined ? { triggerSignals: json(patch.triggerSignals) } : {}),
-          ...(patch.exclusions !== undefined ? { exclusions: json(patch.exclusions) } : {}),
+          ...(synced.exclusions !== undefined ? { exclusions: json(synced.exclusions) } : {}),
           ...(patch.valueProps !== undefined ? { valueProps: json(patch.valueProps) } : {}),
           ...(patch.targetMarkets !== undefined ? { targetMarkets: json(patch.targetMarkets) } : {}),
           version: { increment: 1 },
@@ -769,7 +761,7 @@ export class IcpService {
     });
     queries = withIcpSniperAndSeedFilters(queries, icp.companyAttributes);
 
-    queries = prepareBuyerScenarioQueries(queries, scenario);
+    queries = prepareBuyerScenarioQueries(queries, scenario, icp.targetMarkets);
 
     const queryPlanId = result.durableReceipt
       ? domainAggregateIdForReceipt(result.durableReceipt, 'discovery.query_plan')
