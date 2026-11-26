@@ -6,6 +6,12 @@ import { artifactSubjectSkipReason } from '../../tools/artifact-subject-denial';
 import { BudgetExceededError, BudgetOperationReplayError } from '../../tools/budget-store';
 import type { HttpGetInput, HttpGetOutput } from '../../tools/source-tools';
 import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
+import { isCompanyWebsitePageUrl, isStatutoryDisclosurePageUrl } from '../impressum/find-legal-pages';
+import {
+  extractStatutoryDirectorsFromHtml,
+  type StatutoryDirector,
+} from '../impressum/statutory-director-extract';
+import { inspectPassiveDns, type PassiveDnsSummary } from '../providers/passive-dns';
 import {
   extractHtmlChannelsAndLinks,
   extractJsonLdFacts,
@@ -38,6 +44,7 @@ export interface StreamingExtractionChannels {
   readonly contactFormUrl: string | null;
   readonly contactPageUrl: string | null;
   readonly impressumUrl: string | null;
+  readonly statutoryDisclosureUrl?: string | null;
   readonly careersPageUrl: string | null;
 }
 
@@ -56,6 +63,8 @@ export interface StreamingCompanyExtraction {
   readonly channels: StreamingExtractionChannels;
   readonly pagesFetched: readonly string[];
   readonly failureReason: string | null;
+  readonly statutoryDirectors?: readonly StatutoryDirector[];
+  readonly passiveDns?: PassiveDnsSummary | null;
 }
 
 export interface ExtractCompanyWebsiteStreamingInput {
@@ -67,6 +76,7 @@ export interface ExtractCompanyWebsiteStreamingInput {
   readonly homepageUrl?: string;
   readonly robotsCache?: Map<string, readonly string[]>;
   readonly authorizeExternalAction?: () => Promise<boolean>;
+  readonly inspectPassiveDns?: typeof inspectPassiveDns;
 }
 
 interface PageFetchOutcome {
@@ -386,9 +396,25 @@ function mergeUnique(a: readonly string[], b: readonly string[], cap = 20): stri
   return out;
 }
 
+function mergeUniqueDirectors(
+  existing: readonly StatutoryDirector[],
+  incoming: readonly StatutoryDirector[],
+): StatutoryDirector[] {
+  const out: StatutoryDirector[] = [];
+  const seen = new Set<string>();
+  for (const item of [...existing, ...incoming]) {
+    const key = item.name.trim().toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+    if (out.length >= 8) break;
+  }
+  return out;
+}
+
 /**
  * Plan B single-activity extractor: Raw HTTP first -> in-memory HTML parse ->
- * thin-page (<200 visible chars) Crawl4AI fallback -> bounded 1-hop contact page merge.
+ * thin-page (<200 visible chars) Crawl4AI fallback -> bounded 1-hop contact/statutory page merge + passive DNS.
  */
 export async function extractCompanyWebsiteStreaming(
   input: ExtractCompanyWebsiteStreamingInput,
@@ -396,8 +422,17 @@ export async function extractCompanyWebsiteStreaming(
   const robotsCache = input.robotsCache ?? new Map<string, readonly string[]>();
   const scopedInput: ExtractCompanyWebsiteStreamingInput = { ...input, robotsCache };
   const initialUrl = normalizeHomepageUrl(input.domain, input.homepageUrl);
+  const passiveDnsFn = input.inspectPassiveDns ?? inspectPassiveDns;
 
-  const home = await fetchSinglePageHtml(scopedInput, initialUrl, 'home', true);
+  const [home, passiveDns] = await Promise.all([
+    fetchSinglePageHtml(scopedInput, initialUrl, 'home', true),
+    isPdfDocumentUrl(initialUrl)
+      ? Promise.resolve(null)
+      : passiveDnsFn({
+          domain: input.domain,
+          authorizeExternalAction: input.authorizeExternalAction,
+        }).catch(() => null),
+  ]);
   if (!home.html) {
     return {
       domain: input.domain,
@@ -428,13 +463,19 @@ export async function extractCompanyWebsiteStreaming(
         contactFormUrl: null,
         contactPageUrl: null,
         impressumUrl: null,
+        statutoryDisclosureUrl: null,
         careersPageUrl: null,
       },
       pagesFetched: [],
       failureReason: home.failureReason,
+      statutoryDirectors: [],
+      passiveDns,
     };
   }
 
+  let statutoryDirectors = isCompanyWebsitePageUrl(home.finalUrl, input.domain)
+    ? extractStatutoryDirectorsFromHtml(home.html, home.finalUrl)
+    : [];
   const homeText = extractVisibleBodyText(home.html);
   const homeJsonLd = extractJsonLdFacts(home.html);
   const homeChannels = extractHtmlChannelsAndLinks(home.html, home.finalUrl, input.domain);
@@ -453,7 +494,8 @@ export async function extractCompanyWebsiteStreaming(
   let pdfSkipped = home.pdfSkipped;
 
   if (homeChannels.contactPageUrl) {
-    const needRenderOnContact = roleEmails.length === 0 && !hasInquiryForm;
+    const contactIsDisclosure = isStatutoryDisclosurePageUrl(homeChannels.contactPageUrl);
+    const needRenderOnContact = !contactIsDisclosure && roleEmails.length === 0 && !hasInquiryForm;
     const contact = await fetchSinglePageHtml(
       scopedInput,
       homeChannels.contactPageUrl,
@@ -463,8 +505,13 @@ export async function extractCompanyWebsiteStreaming(
     usedCrawl4aiFallback = usedCrawl4aiFallback || contact.usedCrawl4aiFallback;
     usedWwwRetry = usedWwwRetry || contact.usedWwwRetry;
     pdfSkipped = pdfSkipped || contact.pdfSkipped;
-    if (contact.html) {
+    if (contact.html && isCompanyWebsitePageUrl(contact.finalUrl, input.domain) &&
+      (!contactIsDisclosure || isStatutoryDisclosurePageUrl(contact.finalUrl))) {
       pagesFetched.push(contact.finalUrl);
+      statutoryDirectors = mergeUniqueDirectors(
+        statutoryDirectors,
+        extractStatutoryDirectorsFromHtml(contact.html, contact.finalUrl),
+      );
       const contactText = extractVisibleBodyText(contact.html);
       if (contactText) {
         combinedText = `${combinedText}\n\n[CONTACT_PAGE]\n${contactText}`.slice(0, MAX_COMBINED_TEXT_CHARS);
@@ -491,6 +538,35 @@ export async function extractCompanyWebsiteStreaming(
     }
   }
 
+  const statutoryUrl = homeChannels.statutoryDisclosureUrl ?? homeChannels.impressumUrl ?? null;
+  const norm = (u: string | null | undefined) => (u ? u.replace(/\/+$/u, '').toLowerCase() : '');
+  const alreadyFetched = new Set(
+    [home.finalUrl, initialUrl, homeChannels.contactPageUrl].map(norm).filter(Boolean),
+  );
+  if (statutoryUrl && !alreadyFetched.has(norm(statutoryUrl)) &&
+    isCompanyWebsitePageUrl(statutoryUrl, input.domain)) {
+    const statutory = await fetchSinglePageHtml(scopedInput, statutoryUrl, 'statutory', false);
+    usedWwwRetry = usedWwwRetry || statutory.usedWwwRetry;
+    pdfSkipped = pdfSkipped || statutory.pdfSkipped;
+    if (statutory.html && isCompanyWebsitePageUrl(statutory.finalUrl, input.domain) &&
+      isStatutoryDisclosurePageUrl(statutory.finalUrl)) {
+      pagesFetched.push(statutory.finalUrl);
+      statutoryDirectors = mergeUniqueDirectors(
+        statutoryDirectors,
+        extractStatutoryDirectorsFromHtml(statutory.html, statutory.finalUrl),
+      );
+      const statutoryParsed = extractHtmlChannelsAndLinks(
+        statutory.html,
+        statutory.finalUrl,
+        input.domain,
+      );
+      roleEmails = mergeUnique(roleEmails, statutoryParsed.roleEmails, 15);
+      otherEmails = mergeUnique(otherEmails, statutoryParsed.otherEmails, 15);
+      phones = mergeUnique(phones, statutoryParsed.phones, 15);
+      socialLinks = mergeUnique(socialLinks, statutoryParsed.socialLinks, 15);
+    }
+  }
+
   return {
     domain: input.domain,
     homepageUrl: home.finalUrl,
@@ -512,9 +588,12 @@ export async function extractCompanyWebsiteStreaming(
       contactFormUrl,
       contactPageUrl: homeChannels.contactPageUrl,
       impressumUrl: homeChannels.impressumUrl,
+      statutoryDisclosureUrl: statutoryUrl,
       careersPageUrl: homeChannels.careersPageUrl,
     },
     pagesFetched,
     failureReason: null,
+    statutoryDirectors,
+    passiveDns,
   };
 }

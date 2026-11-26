@@ -59,7 +59,7 @@ import { parseGenericOperationProjection } from "../../tools/generic-operation-p
 import { EnrichmentExecutionRepository, EnrichmentExecutionQueryRepository, linkEnrichmentStepSettled, markEnrichmentStepHold, listCompanyEnrichmentHeads } from "./enrichment-execution.repository";
 import { EnrichmentOriginalResultRepository, EnrichmentResultReader } from "./enrichment-result-reader";
 import { GovernedEnrichmentInvoker } from "./governed-enrichment-invoker";
-import { EnrichmentDomainCommitter, parseEnrichmentContactApplyDecision } from "./enrichment-domain-commit";
+import { EnrichmentDomainCommitter, parseEnrichmentContactApplyDecision, type EnrichmentContactApplyDecision } from "./enrichment-domain-commit";
 import { ContactEnrichmentSafetyService } from "./contact-enrichment-safety.service";
 import { buildContactEnrichmentQualityResult, encodeContactEnrichmentResultCursor } from "./contact-enrichment-results.dto";
 import { readEnrichmentResultSnapshot } from "./enrichment-result-snapshot";
@@ -71,6 +71,22 @@ import { findReusableAttempt, recordEnrichmentAttempt } from "../waterfall/enric
 import { applyCircuitOutcome, circuitAllowsCall, PrismaCircuitBreakerStore, type CircuitBreakerStore } from "../waterfall/circuit-breaker";
 import { resolveVerificationVotes } from "../verification/verification-policy";
 import { parseContactEmailVerificationResult } from "../../durable-results/contact-email-verification-projections";
+import { ExecutionControlError, isExecutionControlError } from "../../execution-budget/execution-control-error";
+import { isTerminalExternalActionPolicyDenied } from "../../tools/tool-contract";
+
+function unknownContactResult(contactId: string, status: 'APPLIED' | 'SAVE_PENDING' = 'SAVE_PENDING'): EnrichmentContactApplyDecision {
+  return Object.freeze({
+    status,
+    contactId,
+    reasonCode: 'RESULT_UNKNOWN',
+    state: null,
+    pointRefs: [],
+    eventRefs: [],
+    attemptRefs: [],
+    newCandidatePoints: 0,
+  });
+}
+
 export interface ContactEnrichmentPreparationDeps {
   readonly prisma: WorkspaceEnrichmentTransactions & PrismaClient;
   readonly env?: NodeJS.ProcessEnv; readonly clock?: () => Date; readonly broker?: ExecutionBroker;
@@ -178,7 +194,7 @@ export interface ContactEnrichmentSafetyRuntimeDeps {
   readonly artifacts?: import('./enrichment-result-reader').EnrichmentResultReaderDeps['artifacts'];
   readonly finderMaterializer?: import('./enrichment-result-reader').EnrichmentResultReaderDeps['finderMaterializer'];
   readonly finderMaterializers?: import('./enrichment-result-reader').EnrichmentResultReaderDeps['finderMaterializers'];
-  readonly loadTrustedInput?: (stepId: string, context: { workspaceId: string }) => Promise<import('../../tools/contact-enrichment-safety-tools').ControlledEnrichmentWireInput>;
+  readonly loadTrustedInput?: (stepId: string, context: { workspaceId: string }, deriveOnly?: boolean) => Promise<import('../../tools/contact-enrichment-safety-tools').ControlledEnrichmentWireInput>;
   readonly materializeForDomain?: import('./enrichment-result-reader').EnrichmentResultReader['materializeForDomain'];
   readonly acknowledge?: import('./enrichment-domain-commit').EnrichmentDomainCommitDeps['acknowledge'];
   readonly env?: NodeJS.ProcessEnv;
@@ -384,7 +400,7 @@ export function createContactEnrichmentSafetyRuntime(deps: ContactEnrichmentSafe
     let onSuccess: (() => Promise<void>) | null = null;
     let paidHold = false;
     if (!finderTicket) {
-      const wire = deps.loadTrustedInput ? await deps.loadTrustedInput(finder.id, { workspaceId }) : null;
+      const wire = deps.loadTrustedInput ? await deps.loadTrustedInput(finder.id, { workspaceId }, true) : null;
       if (!wire?.finder) throw new EnrichmentSafetyError('HOLD');
       const finderProvider = finder.provider as 'hunter' | 'prospeo';
       const requestHash = enrichmentRequestHash(target.contactId, finderProvider, wire.finder);
@@ -398,7 +414,7 @@ export function createContactEnrichmentSafetyRuntime(deps: ContactEnrichmentSafe
       const circuitState = await circuits.load(finderProvider);
       if (!circuitAllowsCall(circuitState, now)) {
         await recordAttempt({ workspaceId, contactId: target.contactId, providerKey: finderProvider, requestHash, outcome: 'error', errorCode: 'circuit_open', retryable: true, runId: record.businessRunId, accountKey: finder.account_key, attemptedAt: now });
-        const decision = Object.freeze({ status: 'SAVE_PENDING' as const, contactId: target.contactId, reasonCode: 'RESULT_UNKNOWN' as const, state: null, pointRefs: [], eventRefs: [], attemptRefs: [], newCandidatePoints: 0 });
+        const decision = unknownContactResult(target.contactId, 'APPLIED');
         return { kind: 'decided', decision: await committer.commitSkipped({ workspaceId, companyId, executionId, contactId: target.contactId }, decision) };
       }
       record = await load();
@@ -419,9 +435,37 @@ export function createContactEnrichmentSafetyRuntime(deps: ContactEnrichmentSafe
     try {
       await invoker.invoke(bound, trustedContext(workspaceId, companyId));
     } catch (error) {
-      if (onFailure) await onFailure();
       if (paidHold) throw new EnrichmentSafetyError('HOLD');
-      throw error;
+      record = await load().catch(() => { throw new EnrichmentSafetyError('HOLD'); });
+      const afterFinder = finderFor(record, contactSteps[0]!);
+      const unresolvedOriginal = hasOriginalTicket(afterFinder) && afterFinder.budget_status !== 'RELEASED';
+      const explicitDenial = error instanceof ExecutionControlError || isTerminalExternalActionPolicyDenied(error) ||
+        (error instanceof EnrichmentSafetyError && error.code !== 'HOLD');
+      const controlDenied = explicitDenial || (!(error instanceof EnrichmentSafetyError) && isExecutionControlError(error));
+      if (!unresolvedOriginal && controlDenied) throw error;
+      if (onFailure) await onFailure();
+      if (unresolvedOriginal) {
+        try {
+          await prisma.withWorkspace(workspaceId, (tx) =>
+            deps.store.savePending(
+              tx,
+              { workspaceId, companyId, executionId, contactId: target.contactId },
+              'RESULT_UNKNOWN',
+            ),
+          );
+        } catch {
+          // The original paid operation is unresolved. Keep its plan for recovery.
+          throw new EnrichmentSafetyError('HOLD');
+        }
+        return { kind: 'decided', decision: unknownContactResult(target.contactId) };
+      }
+      return {
+        kind: 'decided',
+        decision: await committer.commitSkipped(
+          { workspaceId, companyId, executionId, contactId: target.contactId },
+          unknownContactResult(target.contactId, 'APPLIED'),
+        ),
+      };
     }
     if (onSuccess) await onSuccess();
     record = await load();
@@ -532,6 +576,11 @@ export function createContactEnrichmentSafetyRuntime(deps: ContactEnrichmentSafe
       if (existing) {
         const active = contactHasActiveOriginal(record, target.contactId);
         if (existing.status !== 'SAVE_PENDING' && !active) { decisions.set(target.contactId, existing); continue; }
+        if (!active && existing.reasonCode === 'RESULT_UNKNOWN' && requiredOriginalStepIds(record, target.contactId).length === 0) {
+          // Older circuit-open decisions used SAVE_PENDING even though no result can be recovered.
+          decisions.set(target.contactId, existing);
+          continue;
+        }
         await recoverSettledIndexes(record, target);
         record = await load();
         if (existing.status !== 'SAVE_PENDING') throw new EnrichmentSafetyError('HOLD');
@@ -602,14 +651,14 @@ export function createContactEnrichmentSafetyRuntime(deps: ContactEnrichmentSafe
     if (row.contact_id === null || row.account_key === null) throw new EnrichmentSafetyError("HOLD");
     const operationKey = paidOperationKey([row.account_key, "tool-budget", row.tool_id, row.tool_version, row.id]);
     if (row.phase === "FINDER") {
-      const input = deps.loadTrustedInput ? await deps.loadTrustedInput(row.id, { workspaceId: row.workspace_id }) : null;
+      const input = deps.loadTrustedInput ? await deps.loadTrustedInput(row.id, { workspaceId: row.workspace_id }, true) : null;
       if (!input?.finder) throw new EnrichmentSafetyError("HOLD");
       const inputVersion = enrichmentInputVersion(input.finder);
       return repository.bindStepInput({ workspaceId: row.workspace_id, companyId: row.company_id!, stepId: row.id, expectedRevision: row.revision, inputFingerprint: finderPhysicalInputFingerprint({ workspaceId: row.workspace_id, contactId: row.contact_id, inputVersion }), operationKey, candidateRef: null });
     }
     if (row.phase !== "VERIFY") throw new EnrichmentSafetyError("HOLD");
     const finderRow = finderFor(record, row);
-    const finderInput = deps.loadTrustedInput ? await deps.loadTrustedInput(finderRow.id, { workspaceId: row.workspace_id }) : null;
+    const finderInput = deps.loadTrustedInput ? await deps.loadTrustedInput(finderRow.id, { workspaceId: row.workspace_id }, true) : null;
     if (!finderInput?.finder || finderRow.budget_original_id === null || finderRow.budget_result_digest === null || finderRow.budget_result_json === null) throw new EnrichmentSafetyError("HOLD");
     const materialized = await materializeForDomain(finderRow.id, { workspaceId: row.workspace_id, companyId: row.company_id! });
     const email = materialized?.phase === "FINDER" ? materialized.result.email : null;
@@ -661,7 +710,7 @@ export function createContactEnrichmentSafetyRuntime(deps: ContactEnrichmentSafe
       try {
         return await executeView(view, workspaceId, companyId, actorId, mode);
       } catch (error) {
-        if (mode === 'EXECUTE') {
+        if (mode === 'EXECUTE' && !(error instanceof EnrichmentSafetyError && error.code === 'HOLD')) {
           await releaseUnstartedAdmittedSteps(prisma, workspaceId, view.executionId);
         }
         throw error;
@@ -807,7 +856,7 @@ export async function createManagedContactEnrichmentSafety(input: {
         'contact-email-find-prospeo/v1': contactEmailFindProspeoMaterializer,
       },
       budgets: input.budgetStore,
-      loadTrustedInput: (stepId, context) => ports!.loadTrustedInput(stepId, { workspaceId: context.workspaceId, runId: 'safety', purpose: 'enrichment', authorizeExternalAction: async () => true, artifactSubject: { subjectType: 'contact', subjectId: '00000000-0000-4000-8000-000000000000' } }, true),
+      loadTrustedInput: (stepId, context, deriveOnly = true) => ports!.loadTrustedInput(stepId, { workspaceId: context.workspaceId, runId: 'safety', purpose: 'enrichment', authorizeExternalAction: async () => true, artifactSubject: { subjectType: 'contact', subjectId: '00000000-0000-4000-8000-000000000000' } }, deriveOnly),
       prepare: createContactEnrichmentSafetyPreparer({ prisma, env, broker }),
       authorizeRecovery: async (context, companyId) => prisma.withWorkspace(context.workspaceId, async (tx) => {
         const company = await tx.canonicalCompany.findUnique({ where: { id: companyId }, select: { status: true } });
@@ -1083,15 +1132,30 @@ export function createSqlEnrichmentDomainCommitStore(transactions: ContactEnrich
       });
     },
     savePending: async (tx, address, reason) => {
-      void reason;
       const heads = await tx.$queryRaw<Array<{ result_snapshot: unknown; target_snapshot: unknown; frozen_limits: unknown; status: string }>>`SELECT result_snapshot,target_snapshot,frozen_limits,status FROM public.contact_enrichment_execution
         WHERE workspace_id=${address.workspaceId}::uuid AND id=${address.executionId}::uuid AND company_id=${address.companyId}::uuid FOR UPDATE`;
       if (heads.length !== 1 || !heads[0] || heads[0].status === 'REDACTED' || heads[0].status === 'COMPLETED' || heads[0].status === 'FAILED') throw new EnrichmentSafetyError('HOLD');
       const frozen = closedSafetyRecord(heads[0].frozen_limits, ['caps','admittedAtMs','deadlineAtMs','targetCount','executionOptions']);
       const targetCount = safetyInteger(frozen.targetCount, 0, 10);
-      const snapshot = heads[0].result_snapshot === null ? { contacts: [] } : heads[0].result_snapshot as { contacts?: unknown };
+      const head = heads[0];
+      const snapshot = head.result_snapshot === null ? null : readEnrichmentResultSnapshot(head.result_snapshot);
+      const parsed = (snapshot?.contacts ?? []).map(parseEnrichmentContactApplyDecision);
+      const existing = parsed.find((entry) => entry.contactId === address.contactId);
+      if (reason === 'RESULT_UNKNOWN') {
+        const targets = Array.isArray(head.target_snapshot) ? head.target_snapshot : [];
+        if (targets.length !== targetCount ||
+            !targets.some((target) => (target as { contactId?: unknown })?.contactId === address.contactId) ||
+            (existing && existing.status !== 'SAVE_PENDING')) throw new EnrichmentSafetyError('HOLD');
+        if (existing?.reasonCode !== 'RESULT_UNKNOWN') {
+          const contacts = [...parsed.filter((entry) => entry.contactId !== address.contactId), unknownContactResult(address.contactId)];
+          if (contacts.length > targetCount) throw new EnrichmentSafetyError('HOLD');
+          const newCandidatePoints = contacts.reduce((sum, entry) => sum + entry.newCandidatePoints, 0);
+          await tx.$queryRaw`UPDATE public.contact_enrichment_execution
+            SET result_snapshot=${canonicalSafetyJson({ version: 2, targetCount, newCandidatePoints, contacts, quality: { version: 1, contacts: snapshot?.quality ?? [] } })}::jsonb,result_revision=result_revision+1
+            WHERE workspace_id=${address.workspaceId}::uuid AND id=${address.executionId}::uuid AND company_id=${address.companyId}::uuid`;
+        }
+      }
       await tx.$queryRaw`UPDATE public.contact_enrichment_execution_step SET domain_state='SAVE_PENDING' WHERE workspace_id=${address.workspaceId}::uuid AND execution_id=${address.executionId}::uuid AND contact_id=${address.contactId}::uuid AND domain_state='PENDING'`;
-      const parsed = (Array.isArray(snapshot.contacts) ? snapshot.contacts : []).map(parseEnrichmentContactApplyDecision);
       const remaining = await tx.$queryRaw<Array<{ count: bigint }>>`SELECT count(*)::bigint AS count FROM public.contact_enrichment_execution_step
         WHERE workspace_id=${address.workspaceId}::uuid AND execution_id=${address.executionId}::uuid AND dispatch_phase NOT IN ('SETTLED','RELEASED','REDACTED')`;
       const facts = await readHeadFacts(tx, address);

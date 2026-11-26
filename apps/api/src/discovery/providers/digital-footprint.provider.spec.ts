@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { extractJsonLd, detectAdPixels, detectPlatform, detectServedMarkets } from './digital-footprint.provider';
+import {
+  classifyMxProvider,
+  detectAdPixels,
+  detectPlatform,
+  detectServedMarkets,
+  extractJsonLd,
+} from './digital-footprint.provider';
 
 describe('数字足迹指纹 · 纯解析器', () => {
   it('JSON-LD：抽 Organization 事实 + Product + JobPosting（含 @graph/数组）', () => {
@@ -53,5 +59,11 @@ describe('数字足迹指纹 · 纯解析器', () => {
     expect(m.countries).toEqual(expect.arrayContaining(['US', 'DE']));
     expect(m.langs).toEqual(expect.arrayContaining(['en', 'de', 'zh']));
     expect(m.countries).not.toContain('DEFAULT');
+  });
+
+  it('classifyMxProvider respects authorizeExternalAction=false without touching DNS', async () => {
+    await expect(
+      classifyMxProvider('sunforge.example', { authorizeExternalAction: async () => false }),
+    ).resolves.toBeUndefined();
   });
 });

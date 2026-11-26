@@ -23,6 +23,7 @@ vi.mock('../../model-runtime/structured-task-runtime-bridge', () => ({
 }));
 
 import { isAllowedByRobots } from '../../adapters/robots';
+import { executeStructuredTaskWithRuntime } from '../../model-runtime/structured-task-runtime-bridge';
 import {
   DecisionMakerProvider,
   extractAnchorsFromHtml,
@@ -154,8 +155,7 @@ describe('raw-HTML anchor fallback（M5：markdown 丢链接时补抽人物页�
     const crawlUrls = calls.filter((call) => call.tool === 'crawl4ai.fetch').map((call) => call.url);
     expect(calls.some((call) => call.tool === 'http.get' && call.url === 'https://acme.de/')).toBe(true);
     // 只有锚点补抽能找到的非标准路径，且排在固定路径之前。
-    expect(crawlUrls).toContain('https://www.acme.de/common/info/impressum.html');
-    expect(crawlUrls[1]).toBe('https://www.acme.de/common/info/impressum.html');
+    expect(calls[2]).toEqual({ tool: 'http.get', url: 'https://www.acme.de/common/info/impressum.html' });
     expect(crawlUrls).toContain('https://www.acme.de/team');
   });
 
@@ -198,8 +198,7 @@ describe('raw-HTML anchor fallback（M5：markdown 丢链接时补抽人物页�
     );
 
     expect(calls.some((call) => call.tool === 'http.get' && call.url === 'https://acme.de/')).toBe(true);
-    const crawlUrls = calls.filter((call) => call.tool === 'crawl4ai.fetch').map((call) => call.url);
-    expect(crawlUrls).toContain('https://acme.de/common/info/impressum.html');
+    expect(calls).toContainEqual({ tool: 'http.get', url: 'https://acme.de/common/info/impressum.html' });
   });
 });
 
@@ -399,6 +398,77 @@ describe('DecisionMakerProvider execution envelope', () => {
     }));
 
     expect(DecisionMakerProvider.toContactRecords(people)).toHaveLength(25);
+  });
+});
+
+describe('statutory disclosure extraction', () => {
+  const home = 'https://sunforge.example/';
+  const legal = `${home}impressum.html`;
+  const ctx = {
+    workspaceId: 'test-workspace',
+    runId: 'test-run',
+    artifactSubject: { subjectType: 'company', subjectId: 'test-company' },
+  } as never;
+
+  function providerForLegalPage(html: string, finalUrl = legal, linked = true) {
+    const broker = {
+      invoke: vi.fn(async (tool: string, { url }: { url: string }) => {
+        if (tool === 'crawl4ai.fetch' && url === home) {
+          return { data: { url, text: linked ? `[Impressum](${legal})` : '' } };
+        }
+        if (tool === 'http.get' && (url === legal || (!linked && url === `${home}impressum`))) {
+          return { data: { status: 200, ok: true, mediaType: 'text/plain', text: html, finalUrl } };
+        }
+        if (tool === 'crawl4ai.fetch') return { data: { url, text: html } };
+        return { data: { status: 404, ok: false, mediaType: 'text/plain', text: '' } };
+      }),
+    } as unknown as ExecutionBroker;
+    return new DecisionMakerProvider({ gateway: {} as never, broker });
+  }
+
+  it.each([true, false])('keeps a short verified disclosure role and its final URL (linked=%s)', async (linked) => {
+    vi.mocked(executeStructuredTaskWithRuntime).mockClear();
+    const finalUrl = 'https://www.sunforge.example/impressum.html';
+    const provider = providerForLegalPage(
+      '<p><strong>Vertreten durch</strong> Mira Levin</p>',
+      finalUrl,
+      linked,
+    );
+    const people = await provider.findDecisionMakers({ domain: 'sunforge.example', country: 'DE' }, ctx);
+
+    expect(people).toEqual([
+      expect.objectContaining({
+        fullName: 'Mira Levin',
+        title: 'Vertretungsberechtigte Person',
+        sourcePage: finalUrl,
+        contentHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+        isTargetRole: false,
+        personalData: true,
+      }),
+    ]);
+    expect(people[0]?.buyingRole).toBeUndefined();
+    expect(executeStructuredTaskWithRuntime).not.toHaveBeenCalled();
+  });
+
+  it('does not send a verified legal page containing only editorial contacts to role inference', async () => {
+    vi.mocked(executeStructuredTaskWithRuntime).mockClear();
+    const provider = providerForLegalPage(
+      `<p>Verantwortlich für redaktionelle Inhalte: Mira Levin</p><p>PAGE-PEOPLE ${'Rechtliche Hinweise '.repeat(12)}</p>`,
+    );
+    const people = await provider.findDecisionMakers({ domain: 'sunforge.example', country: 'DE' }, ctx);
+
+    expect(people).toEqual([]);
+    expect(executeStructuredTaskWithRuntime).not.toHaveBeenCalled();
+  });
+
+  it('drops legal evidence after an off-site redirect', async () => {
+    const provider = providerForLegalPage(
+      `<p>Geschäftsführer: Mira Levin</p><p>PAGE-PEOPLE ${'Rechtliche Hinweise '.repeat(12)}</p>`,
+      'https://unrelated.example/impressum.html',
+    );
+    const people = await provider.findDecisionMakers({ domain: 'sunforge.example', country: 'DE' }, ctx);
+
+    expect(people).toEqual([]);
   });
 });
 

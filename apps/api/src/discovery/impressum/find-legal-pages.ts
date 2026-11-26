@@ -14,7 +14,10 @@ export interface LegalPageCandidate {
 }
 
 const IMPRESSUM_SEGMENT_RE =
-  /^(?:impressum|imprint|legal[-_]?notice|site[-_]?notice|mentions[-_]?l[ée]gales|rechtliches?|anbieterkennzeichnung|note[-_]?legali|dati[-_]?societari|aviso[-_]?legal)$/iu;
+  /^(?:impressum|imprint|legal[-_]?notice|site[-_]?notice|mentions[-_]?l[ée]gales|rechtliches?|anbieterkennzeichnung|note[-_]?legali|dati[-_]?societari|aviso[-_]?legal|company[-_]?profile|corporate[-_]?profile|kaisha[-_]?gaiyou|gaiyou|会社概要|会社案内|企業情報)$/iu;
+
+const PRIVACY_DISCLOSURE_SEGMENT_RE =
+  /^(?:informativa[-_]?privacy|privacy(?:[-_]?policy|[-_]?notice)?|datenschutz|politique[-_]?de[-_]?confidentialite)$/iu;
 
 const CONTACT_SEGMENT_RE =
   /^(?:kontakt|kontakte|kontaktformular|kontaktseite|kontaktaufnahme|kontaktieren|contact|contacts|contact[-_]?us|contactus|contact[-_]?form|get[-_]?in[-_]?touch|contatti|contatto|contattaci|contacto|contactenos|cont[áa]ctenos|contactez[-_]?nous|nous[-_]?contacter|contato|contatos|fale[-_]?conosco|contacteer[-_]?ons|iletisim|iletişim|anfrage|anfragen|anfrageformular)$/iu;
@@ -29,7 +32,7 @@ const PAGE_EXT_RE = /\.(?:html?|php|aspx?|jsp|shtml)$/iu;
 /** 资产、电商商品页与低价值页面（严格按路径段/扩展名排除，杜绝 phoenix-contact 等商品页误判为联系页）。 */
 const EXCLUDE_ASSET_RE = /\.(?:pdf|jpe?g|png|gif|svg|webp|css|js|xml|json|zip)([?#]|$)/iu;
 const EXCLUDE_SEGMENT_RE =
-  /^(?:privacy|privacy[-_]?policy|datenschutz|cookie|cookies|terms|terms[-_]?of[-_]?use|agb|blog|news|search|suche|tag|tags|product|products|prodotti|prodotto|produkte|produkt|shop|store|catalog|catalogo|katalog|accessori|accessories|brand|brands|marchi|category|categorie|kategorie|cart|warenkorb|checkout|login|signin|account|register)$/iu;
+  /^(?:cookie|cookies|terms|terms[-_]?of[-_]?use|agb|blog|news|search|suche|tag|tags|product|products|prodotti|prodotto|produkte|produkt|shop|store|catalog|catalogo|katalog|accessori|accessories|brand|brands|marchi|category|categorie|kategorie|cart|warenkorb|checkout|login|signin|account|register)$/iu;
 
 function decodePathSegments(pathname: string): string[] | null {
   const rawSegments = pathname.split('/').filter((segment) => segment.length > 0);
@@ -48,15 +51,28 @@ function stripPageExt(segment: string): string {
   return segment.replace(PAGE_EXT_RE, '').toLowerCase();
 }
 
-function classifyLegalSegments(segments: readonly string[]): { kind: LegalPageKind; score: number } | null {
+function classifyLegalSegments(
+  segments: readonly string[],
+  includePrivacy = false,
+): { kind: LegalPageKind; score: number } | null {
   if (segments.length === 0) return null;
   const cleaned = segments.map(stripPageExt);
   if (cleaned.some((seg) => EXCLUDE_SEGMENT_RE.test(seg))) return null;
+  if (!includePrivacy && cleaned.some((seg) => PRIVACY_DISCLOSURE_SEGMENT_RE.test(seg))) {
+    return null;
+  }
   const last = cleaned.at(-1)!;
   const prev = cleaned.length >= 2 ? cleaned.at(-2)! : '';
 
   if (IMPRESSUM_SEGMENT_RE.test(last) || (cleaned.length <= 3 && cleaned.some((seg) => IMPRESSUM_SEGMENT_RE.test(seg)))) {
     return { kind: 'impressum', score: 100 };
+  }
+  if (
+    includePrivacy &&
+    (PRIVACY_DISCLOSURE_SEGMENT_RE.test(last) ||
+      (cleaned.length <= 3 && cleaned.some((seg) => PRIVACY_DISCLOSURE_SEGMENT_RE.test(seg))))
+  ) {
+    return { kind: 'impressum', score: 70 };
   }
   if (
     cleaned.length <= 4 &&
@@ -86,6 +102,23 @@ export function isStrictContactPageUrl(rawUrl: string): boolean {
   return classified?.kind === 'contact';
 }
 
+export function isStatutoryDisclosurePageUrl(url: string): boolean {
+  return rankLegalPageLinks([url], { includePrivacy: true })[0]?.kind === 'impressum';
+}
+
+/** Only the site's own hostname and its www variant can supply official disclosure evidence. */
+export function isCompanyWebsitePageUrl(url: string, domain: string): boolean {
+  try {
+    const parsed = new URL(url);
+    const siteHost = domain.trim().toLowerCase().replace(/^www\./u, '').replace(/\.$/u, '');
+    const pageHost = parsed.hostname.replace(/^www\./u, '').replace(/\.$/u, '');
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
+      !parsed.username && !parsed.password && !parsed.port && pageHost === siteHost;
+  } catch {
+    return false;
+  }
+}
+
 function pathDepth(rawUrl: string): number {
   try {
     return new URL(rawUrl).pathname.split('/').filter(Boolean).length;
@@ -112,7 +145,11 @@ const FIXED_PATHS: { path: string; kind: LegalPageKind }[] = [
 ];
 
 /** 首页同站链接 → 按 kind/score 排序的法律页候选（同路径去重，保留带尾斜杠形态）。 */
-export function rankLegalPageLinks(links: readonly string[]): LegalPageCandidate[] {
+export function rankLegalPageLinks(
+  links: readonly string[],
+  opts?: { includePrivacy?: boolean },
+): LegalPageCandidate[] {
+  const includePrivacy = opts?.includePrivacy === true;
   const byKey = new Map<string, LegalPageCandidate>();
   for (const link of links) {
     let url: URL;
@@ -125,7 +162,7 @@ export function rankLegalPageLinks(links: readonly string[]): LegalPageCandidate
     if (EXCLUDE_ASSET_RE.test(url.pathname)) continue;
     const segments = decodePathSegments(url.pathname);
     if (!segments) continue;
-    const best = classifyLegalSegments(segments);
+    const best = classifyLegalSegments(segments, includePrivacy);
     if (!best) continue;
     url.hash = '';
     url.search = '';
@@ -149,11 +186,11 @@ export function rankLegalPageLinks(links: readonly string[]): LegalPageCandidate
 export function legalPageCandidates(
   baseUrl: string,
   homepageLinks: readonly string[],
-  opts?: { maxPages?: number },
+  opts?: { maxPages?: number; includePrivacy?: boolean },
 ): LegalPageCandidate[] {
   const maxPages = opts?.maxPages ?? 6;
   const base = new URL(baseUrl);
-  const ranked = rankLegalPageLinks(homepageLinks).filter(
+  const ranked = rankLegalPageLinks(homepageLinks, { includePrivacy: opts?.includePrivacy }).filter(
     (candidate) => new URL(candidate.url).hostname.replace(/^www\./u, '') === base.hostname.replace(/^www\./u, ''),
   );
   const out: LegalPageCandidate[] = [];

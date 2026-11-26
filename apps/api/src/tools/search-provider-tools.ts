@@ -29,6 +29,7 @@ import {
 import { assertToolExternalActionAuthorized, type Tool } from './tool-contract';
 import { type ToolRegistry } from './tool-registry';
 import { durableTitle, isDurableText, isPersonProfileUrl } from './durable-text';
+import { normalizeSocialProfileUrl, redactSocialSearchHighlights, redactSocialSearchText } from './social-search-retention';
 
 const hash = (value: string): string =>
   createHash('sha256').update(value).digest('hex').slice(0, 24);
@@ -46,7 +47,12 @@ const EXA_REQUEST_COST_CENTS = 1;
 /** Google Places New Text Search (Enterprise field websiteUri ≈ $0.035/req → ceil 4¢). */
 const GOOGLE_PLACES_REQUEST_COST_CENTS = 4;
 
-export type SearchProviderResultItem = { url: string; title?: string };
+export type SearchProviderResultItem = {
+  url: string;
+  title?: string;
+  snippet?: string;
+  highlights?: string[];
+};
 export type SearchProviderOutput = { results: SearchProviderResultItem[] };
 
 export interface SerperSearchToolInput {
@@ -520,18 +526,19 @@ export const braveSearchTool = createBraveSearchTool();
 function durablePersonSearchHits(hits: readonly SearchProviderHit[]): SearchProviderResultItem[] {
   return hits
     .flatMap((hit): SearchProviderResultItem[] => {
-      const url = sanitizeSearchProviderUrl(hit.url);
-      if (
-        !url ||
-        url.length > URL_MAX_CHARS ||
-        !isDurableText(url) ||
-        !isPersonProfileUrl(url)
-      ) {
-        return [];
-      }
-      const title =
-        typeof hit.title === 'string' ? durableTitle(hit.title, TITLE_MAX_CHARS) : null;
-      return [title === null ? { url } : { url, title }];
+      const url = normalizeSocialProfileUrl(hit?.url);
+      if (!url) return [];
+      const title = redactSocialSearchText(hit.title, TITLE_MAX_CHARS);
+      const snippet = redactSocialSearchText(hit.snippet);
+      const highlights = redactSocialSearchHighlights(hit.highlights);
+      return [
+        {
+          url,
+          ...(title !== undefined ? { title } : {}),
+          ...(snippet !== undefined ? { snippet } : {}),
+          ...(highlights !== undefined ? { highlights } : {}),
+        },
+      ];
     })
     .slice(0, SEARCH_PROVIDER_MAX_RESULTS);
 }
@@ -542,13 +549,7 @@ function replayPersonSearchResult(result: {
   degraded?: boolean;
 }) {
   return {
-    data: {
-      results: result.data.results.map((item) =>
-        typeof item.title === 'string' && item.title.length > 0
-          ? { url: item.url, title: item.title }
-          : { url: item.url },
-      ),
-    },
+    data: { results: durablePersonSearchHits(result.data.results) },
     costCents: result.costCents,
     ...(result.degraded === undefined ? {} : { degraded: result.degraded }),
   };
@@ -598,7 +599,7 @@ export function createSocialSerperSearchTool(
       }
       await assertToolExternalActionAuthorized(ctx);
       const response = await dependencies.serperSearch(
-        { query, num, gl: input.gl, hl: input.hl },
+        { query, num, gl: input.gl, hl: input.hl, includeSnippet: true },
         {
           apiKey,
           beforeRequest: async () => {

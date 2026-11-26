@@ -12,6 +12,7 @@ import { canonicalSafetyJson } from "./enrichment-safety.contract";
 import { HunterProvider } from "../finders/hunter.provider";
 import { enrichmentInputVersion } from "../finders/email-enrichment-provider";
 import type { ContactEnrichmentPreparationInput } from "./contact-enrichment-safety.service";
+import { ExecutionControlError } from "../../execution-budget/execution-control-error";
 const W = '00000000-0000-4000-8000-000000000001', C = '00000000-0000-4000-8000-000000000002', CONTACT = '00000000-0000-4000-8000-000000000003';
 function world(options: { extraEnv?: Record<string,string>; noKeys?: boolean; disabled?: boolean; aTier?: boolean; retention?: number; denied?: boolean; artifacts?: boolean } = {}) {
   const env = { ...(options.noKeys ? {} : { HUNTER_API_KEY: 'fake-hunter', MILLIONVERIFIER_API_KEY: 'fake-millionverifier', EMAILABLE_API_KEY: 'fake-emailable' }), ...options.extraEnv };
@@ -110,14 +111,28 @@ describe('full safety runtime composition drives bound steps through the origina
     expect(result).toMatchObject({ admission: 'ADMITTED', operationRef: 'd'.repeat(64) });
     expect(x.events).toContain('BROKER_INVOKE'); expect(x.events.indexOf('SEAL')).toBeLessThan(x.events.indexOf('BROKER_INVOKE')); expect(x.store.persist).toHaveBeenCalled();
   });
-  it('does not persist or re-execute after a broker ACK loss, releases unstarted ADMITTED steps, and reports HOLD', async () => {
+  it('preserves the original paid ticket and unstarted verifier slots after a broker ACK loss', async () => {
     const x = world({ crash: true }); const runtime = createContactEnrichmentSafetyRuntime(x.deps as never);
-    await expect(runtime.service.executeRun({ workspaceId: W, companyId: C, businessRunId: plan.businessRunId!, binding, lawfulBasis: { basis: 'legitimate_interest' }, remainingMicrousd: '250000', actorId: 'discovery-run:test' })).rejects.toThrow();
-    expect(x.store.persist).not.toHaveBeenCalled(); expect(x.broker.invoke).toHaveBeenCalledTimes(1);
+    const result = await runtime.service.executeRun({ workspaceId: W, companyId: C, businessRunId: plan.businessRunId!, binding, lawfulBasis: { basis: 'legitimate_interest' }, remainingMicrousd: '250000', actorId: 'discovery-run:test' });
+    expect(result.results).toEqual([{ contactId: CONTACT, status: 'skipped_compliance', reason: 'RESULT_UNKNOWN' }]);
+    expect(x.store.persist).not.toHaveBeenCalled();
+    expect(x.store.savePending).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ contactId: CONTACT }), 'RESULT_UNKNOWN');
+    expect(x.broker.invoke).toHaveBeenCalledTimes(1);
     const releasedCalls = (x.deps.prisma.withWorkspace as ReturnType<typeof vi.fn>).mock.calls.length;
     expect(releasedCalls).toBeGreaterThan(0);
     const queries = (x.queryRaw as ReturnType<typeof vi.fn>).mock.calls.map(([strings]) => (strings as TemplateStringsArray).join('?'));
-    expect(queries.some((sql) => sql.includes("UPDATE public.contact_enrichment_execution_step SET dispatch_phase='RELEASED'") && sql.includes("dispatch_phase='ADMITTED' AND budget_operation_id IS NULL"))).toBe(true);
+    expect(queries.some((sql) => sql.includes("UPDATE public.contact_enrichment_execution_step SET dispatch_phase='RELEASED'"))).toBe(false);
+  });
+
+  it('surfaces a durable pending-write failure and keeps the original execution recoverable', async () => {
+    const x = world({ crash: true });
+    x.store.savePending.mockRejectedValueOnce(new Error('synthetic pending write failure'));
+    const runtime = createContactEnrichmentSafetyRuntime(x.deps as never);
+    await expect(runtime.service.executeRun({ workspaceId: W, companyId: C, businessRunId: plan.businessRunId!, binding, lawfulBasis: { basis: 'legitimate_interest' }, remainingMicrousd: '250000', actorId: 'discovery-run:test' })).rejects.toMatchObject({ code: 'HOLD' });
+    expect(x.store.persist).not.toHaveBeenCalled();
+    expect(x.broker.invoke).toHaveBeenCalledTimes(1);
+    const queries = (x.queryRaw as ReturnType<typeof vi.fn>).mock.calls.map(([strings]) => (strings as TemplateStringsArray).join('?'));
+    expect(queries.some((sql) => sql.includes("UPDATE public.contact_enrichment_execution_step SET dispatch_phase='RELEASED'"))).toBe(false);
   });
 });
 
@@ -187,6 +202,7 @@ function sqlTx(options: { plan: ReturnType<typeof sqlPlan>; head: ReturnType<typ
       if (text.includes('SELECT result_snapshot,target_snapshot,frozen_limits,status')) return [{ result_snapshot: state.snapshot, target_snapshot: options.plan.targets, frozen_limits: options.head.frozen_limits, status: state.status }];
       if (text.includes("SET dispatch_phase='SETTLED'")) { state.updates.push('SETTLED'); return []; }
       if (text.includes("SET dispatch_phase='RELEASED'")) { state.updates.push('RELEASED'); return []; }
+      if (text.includes("SET domain_state='SAVE_PENDING'")) { state.updates.push('PENDING'); return []; }
       if (text.includes('SELECT count(*)::bigint AS count')) return [{ count: BigInt(state.remaining) }];
       if (text.includes('SELECT contact_id::text,domain_state,dispatch_phase')) return (options.rows as Array<{ contact_id: string; domain_state: string; dispatch_phase: string }>).map((row) => ({ contact_id: row.contact_id, domain_state: row.domain_state, dispatch_phase: row.dispatch_phase }));
       if (text.includes("SET status='APPLY_PENDING'") && text.includes("status='RUNNING'")) { state.status = 'APPLY_PENDING'; state.updates.push('FINISH'); return []; }
@@ -202,6 +218,26 @@ function sqlDecision(contactId: string, pointId: string) {
 }
 
 describe('SQL domain store/guards F09–F13', () => {
+  it('persists the paid unknown result for readback without replacing another contact decision or releasing verifier slots', async () => {
+    const plan = sqlPlan();
+    const applied = sqlDecision(SQL_C1, SQL_P1);
+    const head = sqlHead(plan, { version: 1, targetCount: 2, newCandidatePoints: 1, contacts: [applied] });
+    const finder = { ...sqlFinderRow(SQL_C2, 1, SQL_F2, SQL_OPF2, SQL_DIG2), budget_status: 'RESERVED', dispatch_phase: 'RESERVED' };
+    const { tx, state } = sqlTx({ plan, head, rows: [finder, sqlVerifyRow(SQL_C2, 1, SQL_V2)] });
+    const store = createSqlEnrichmentDomainCommitStore({ withWorkspace: (_w, fn) => fn(tx) } as never, {});
+    const address = { workspaceId: SQL_W, companyId: SQL_COMPANY, executionId: SQL_EXEC, contactId: SQL_C2 };
+
+    await store.savePending(tx as never, address, 'RESULT_UNKNOWN');
+    await store.savePending(tx as never, address, 'RESULT_UNKNOWN');
+    expect(state.snapshot).toMatchObject({ targetCount: 2, newCandidatePoints: 1, contacts: [
+      applied, expect.objectContaining({ status: 'SAVE_PENDING', contactId: SQL_C2, reasonCode: 'RESULT_UNKNOWN' }),
+    ] });
+    expect(state.headSql.filter((sql) => sql.includes('SET result_snapshot='))).toHaveLength(1);
+    expect(state.status).toBe('APPLY_PENDING');
+    expect(state.updates).not.toContain('RELEASED');
+    await expect(store.readCommitted(tx as never, address)).resolves.toMatchObject({ reasonCode: 'RESULT_UNKNOWN' });
+  });
+
   it('F09/F10/F12: loads real company_id, only the requested contact rows, and an existing committed decision', async () => {
     const plan = sqlPlan(); const committed = sqlDecision(SQL_C1, SQL_P1);
     const head = sqlHead(plan, { version: 1, targetCount: 2, newCandidatePoints: 1, contacts: [committed] });
@@ -570,6 +606,8 @@ throw new Error('unexpected flow SQL: ' + sql.slice(0, 140));
   });
   it('F17 OPEN not expired stays wire 0; expired OPEN and CLOSED call and record success', async () => {
     const blocked = flowWorld({ circuitState: 'OPEN_FRESH' }); const blockedResult = await run(blocked);
+    const replay = await run(blocked);
+    expect(replay.results).toEqual(blockedResult.results);
     expect(blocked.broker.invoke).not.toHaveBeenCalled(); expect(blockedResult.results[0]?.status).not.toBe('stored');
     expect((blocked.deps.recordAttempt as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(expect.objectContaining({ errorCode: 'circuit_open' }));
     const expired = flowWorld({ circuitState: 'OPEN_EXPIRED' }); await run(expired);
@@ -579,12 +617,43 @@ throw new Error('unexpected flow SQL: ' + sql.slice(0, 140));
     expect(closed.broker.invoke).toHaveBeenCalledTimes(1);
     expect((closed.deps.circuit as { save: ReturnType<typeof vi.fn> }).save).toHaveBeenCalled();
   });
-  it('F17 a provider error is recorded in the original circuit and attempt ports', async () => {
+  it('preserves a pre-wire control denial without inventing a durable paid pending result', async () => {
+    const x = flowWorld();
+    const denial = new ExecutionControlError('EXECUTION_BUDGET_SCOPE_MISMATCH');
+    x.broker.invoke.mockRejectedValueOnce(denial);
+    await expect(run(x)).rejects.toBe(denial);
+    expect(x.deps.store.savePending).not.toHaveBeenCalled();
+    expect(x.deps.store.persist).not.toHaveBeenCalled();
+  });
+  it('F17 a provider error is recorded in the original circuit and attempt ports and isolated to SAVE_PENDING', async () => {
     const x = flowWorld({ circuitState: 'CLOSED', finderError: true });
-    await expect(run(x)).rejects.toThrow();
+    const result = await run(x);
+    expect(result.results).toEqual([{ contactId: CA, status: 'skipped_compliance', reason: 'RESULT_UNKNOWN' }]);
     expect(x.broker.invoke).toHaveBeenCalledTimes(1);
     expect((x.deps.circuit as { save: ReturnType<typeof vi.fn> }).save).toHaveBeenCalled();
     expect((x.deps.recordAttempt as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'error', errorCode: 'provider_error' }));
+  });
+
+  it('F7 passes deriveOnly=true to loadTrustedInput and isolates per-contact finder errors across multiple contacts', async () => {
+    const x = flowWorld({ contacts: 2, verifiers: [{ provider: 'millionverifier', state: 'VALID' }] });
+    let firstFailed = false;
+    const baseInvoke = x.broker.invoke;
+    x.broker.invoke = vi.fn(async (toolId: string, input: { stepId: string }, ctx: { beforePhysicalWire?: () => Promise<void> }) => {
+      const step = x.steps.find((s) => s.id === input.stepId)!;
+      if (step.slot.contactId === CA && step.slot.phase === 'FINDER' && !firstFailed) {
+        firstFailed = true;
+        await ctx.beforePhysicalWire!();
+        throw new Error('synthetic_first_contact_provider_error');
+      }
+      return baseInvoke(toolId, input, ctx);
+    }) as typeof x.broker.invoke;
+
+    const result = await run(x);
+    expect((x.deps.loadTrustedInput as ReturnType<typeof vi.fn>).mock.calls.every(([, , deriveOnly]) => deriveOnly === true)).toBe(true);
+    expect(result.results).toEqual([
+      { contactId: CA, status: 'skipped_compliance', reason: 'RESULT_UNKNOWN' },
+      { contactId: CB, status: 'stored' },
+    ]);
   });
 
   it('C4: recover links a SETTLED ledger held on a RESERVED typed step without wire', async () => {

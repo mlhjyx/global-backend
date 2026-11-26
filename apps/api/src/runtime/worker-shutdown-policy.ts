@@ -9,7 +9,8 @@
  * operator recreated it by hand.
  */
 export const WORKER_SHUTDOWN_GRACE = '30s' as const;
-export const WORKER_SHUTDOWN_FORCE = '60s' as const;
+const WORKER_SHUTDOWN_FORCE_SECONDS = 60;
+export const WORKER_SHUTDOWN_FORCE = `${WORKER_SHUTDOWN_FORCE_SECONDS}s` as const;
 
 /** Passed to every managed Worker.create so both workers share one bound. */
 export const WORKER_SHUTDOWN_OPTIONS = Object.freeze({
@@ -19,6 +20,8 @@ export const WORKER_SHUTDOWN_OPTIONS = Object.freeze({
 
 /** How long shutdown cleanup may take before the process exits on its own. */
 export const WORKER_EXIT_DEADLINE_MS = 15_000;
+/** How long a worker may stay in startup not-ready hold before exiting non-zero for container restart. */
+export const WORKER_NOT_READY_MAX_HOLD_MS = 5 * 60_000;
 
 export interface WorkerExitDeadlineHandle {
   clear(): void;
@@ -32,8 +35,9 @@ export interface WorkerExitDeadlineHandle {
 export function armWorkerExitDeadline(
   deadlineMs: number = WORKER_EXIT_DEADLINE_MS,
   exit: (code: number) => void = (code) => process.exit(code),
+  exitCode = 0,
 ): WorkerExitDeadlineHandle {
-  const timer = setTimeout(() => exit(0), deadlineMs);
+  const timer = setTimeout(() => exit(exitCode), deadlineMs);
   timer.unref?.();
   let cleared = false;
   return Object.freeze({
@@ -42,5 +46,39 @@ export function armWorkerExitDeadline(
       cleared = true;
       clearTimeout(timer);
     },
+  });
+}
+
+export function armWorkerLeaseLossDeadline(exit?: (code: number) => void): WorkerExitDeadlineHandle {
+  // Leave Temporal's full drain window plus time for the completed drain callback.
+  return armWorkerExitDeadline((WORKER_SHUTDOWN_FORCE_SECONDS + 5) * 1_000, exit, 1);
+}
+
+export function holdWorkerNotReadyBounded(input: {
+  code: string;
+  logIntervalMs?: number;
+  maxHoldMs?: number;
+  onTick?: () => void;
+  exit?: (code: number) => void;
+}): Promise<never> {
+  const logIntervalMs = input.logIntervalMs ?? 30_000;
+  const maxHoldMs = Math.max(1, input.maxHoldMs ?? WORKER_NOT_READY_MAX_HOLD_MS);
+  const exit = input.exit ?? ((code) => process.exit(code));
+  console.error(
+    `[worker] not ready: ${input.code}; Temporal polling remains disabled`,
+  );
+  return new Promise<never>(() => {
+    const interval = setInterval(() => {
+      console.error(`[worker] still not ready: ${input.code}`);
+      input.onTick?.();
+    }, logIntervalMs);
+    const deadline = setTimeout(() => {
+      clearInterval(interval);
+      console.error(
+        `[worker] readiness hold expired (${maxHoldMs}ms) for ${input.code}; exiting non-zero`,
+      );
+      exit(1);
+    }, maxHoldMs);
+    deadline.unref?.();
   });
 }

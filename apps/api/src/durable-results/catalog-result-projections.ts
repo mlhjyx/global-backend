@@ -1,4 +1,5 @@
 import { types } from 'node:util';
+import { socialSearchExaPeopleProjection, socialSearchSerperProjection } from './social-search-result-projection';
 import { viesCheckResultProjection } from './vies-result-projection';
 import { ALL_CLAIM_PROPERTIES, ENTITY_PROPERTIES, STRING_PROPERTIES, WIKIDATA_COMPANY_KEYS } from './wikidata-entity-properties';
 import { normForMatch } from '../discovery/name-match';
@@ -13,9 +14,7 @@ import {
   platformExecutionToolContract,
 } from '../platform-authority/platform-execution-contract';
 
-type JsonSchema = Readonly<Record<string, unknown>>;
-type UnknownRecord = Record<string, unknown>;
-type Transform = (value: unknown) => unknown;
+type JsonSchema = Readonly<Record<string, unknown>>; type UnknownRecord = Record<string, unknown>; type Transform = (value: unknown) => unknown;
 export const CATALOG_RESULT_TOOL_IDS = Object.freeze([
   'searxng.search', 'social.search', 'social.fetch', 'wikidata.sparql', 'osm.overpass',
   'wikidata.entity', 'gleif.fetch', 'companies_house.search', 'inpi_rne.search',
@@ -953,7 +952,7 @@ export const CATALOG_RESULT_PROJECTION_DEFINITIONS = Object.freeze([
   deepseekSearchDefinition, deepseekFetchDefinition,
   searchResultDefinition('serper-search/v1'), searchResultDefinition('brave-search/v1'),
   searchResultDefinition('exa-search/v1'), googlePlacesSearchDefinition, viesCheckResultProjection,
-  searchResultDefinition('social-search-serper/v1'), searchResultDefinition('social-search-exa-people/v1'),
+  socialSearchSerperProjection, socialSearchExaPeopleProjection,
 ] as const);
 
 export function getCatalogResultProjectionSchema(toolId: string): TypedProjectionSchema {

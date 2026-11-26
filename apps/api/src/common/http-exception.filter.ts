@@ -1,4 +1,8 @@
 import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus, Logger } from '@nestjs/common';
+import { existsSync } from 'node:fs';
+import { METHODS } from 'node:http';
+import { resolve, sep } from 'node:path';
+import { types } from 'node:util';
 import { Response } from 'express';
 import { PLATFORM_EXECUTION_TECHNICAL_QUOTE_HTTP_PATH } from '@global/contracts/platform-authority';
 import { PLATFORM_AUTHORITY_TARGET_LOOKUP_PATH } from '../platform-authority/platform-target-lookup.service';
@@ -23,6 +27,73 @@ function dataProperty(value: object, name: string): unknown {
     current = Object.getPrototypeOf(current) as object | null;
   }
   return undefined;
+}
+
+const APP_ROOT = resolve(__dirname, '..') + sep;
+const ERROR_NAMES = new Set([
+  'Error', 'TypeError', 'RangeError', 'ReferenceError', 'SyntaxError',
+  'PrismaClientKnownRequestError', 'PrismaClientUnknownRequestError',
+]);
+const ERROR_CODES = new Set([
+  'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EPIPE', 'ENOTFOUND', 'EAI_AGAIN',
+  'P1000', 'P1001', 'P1002', 'P2002', 'P2024', 'P2025', 'P2028', 'P2034',
+]);
+const HTTP_METHODS = new Set(METHODS);
+const NATIVE_STACK_GETTER = Object.getOwnPropertyDescriptor(new Error(), 'stack')?.get;
+
+type DiagnosticRequest = { originalUrl?: unknown; method?: unknown; route?: { path?: unknown } };
+
+function nativeErrorStack(error: Error): unknown {
+  const stack = Object.getOwnPropertyDescriptor(error, 'stack');
+  if (stack && Object.hasOwn(stack, 'value')) return stack.value;
+  if (!stack?.get || stack.get !== NATIVE_STACK_GETTER) return undefined;
+  try {
+    return stack.get.call(error);
+  } catch {
+    return undefined;
+  }
+}
+
+function applicationFrames(stack: unknown): string[] {
+  if (typeof stack !== 'string') return [];
+  const frames: string[] = [];
+  // Ignore frame names and metadata. Keep only locations of existing application files.
+  for (const line of stack.slice(0, 8_192).split('\n')) {
+    const match = /^\s*at (?:.* \()?((?:file:\/\/)?\/[^()\s]+):([1-9]\d{0,6}):([1-9]\d{0,5})\)?$/u.exec(line);
+    if (!match) continue;
+    const file = resolve(match[1]!.replace(/^file:\/\//u, ''));
+    if (!file.startsWith(APP_ROOT)) continue;
+    const relativeFile = file.slice(APP_ROOT.length);
+    if (!/^[A-Za-z0-9_./-]{1,140}\.[cm]?[jt]s$/u.test(relativeFile) || !existsSync(file)) continue;
+    frames.push(`${relativeFile}:${match[2]}:${match[3]}`);
+    if (frames.length === 5) break;
+  }
+  return frames;
+}
+
+function safeUnknownDiagnostic(
+  exception: unknown,
+  req: DiagnosticRequest | undefined,
+) {
+  const error = types.isNativeError(exception) ? exception : null;
+  const name = error ? dataProperty(error, 'name') : undefined;
+  const rawCode = error ? dataProperty(error, 'code') : undefined;
+  // V8 can lazily format a stack using the error's name and message.
+  const stack = error && typeof name === 'string' && typeof dataProperty(error, 'message') === 'string'
+    ? nativeErrorStack(error)
+    : undefined;
+  const route = req?.route?.path;
+  const method = typeof req?.method === 'string' && HTTP_METHODS.has(req.method) ? req.method : null;
+
+  return {
+    code: 'INTERNAL',
+    status: HttpStatus.INTERNAL_SERVER_ERROR,
+    errorName: typeof name === 'string' && ERROR_NAMES.has(name) ? name : 'Unknown',
+    path: typeof route === 'string' && /^\/[A-Za-z0-9_./:-]{0,190}$/u.test(route) ? route : null,
+    method,
+    errorCode: typeof rawCode === 'string' && ERROR_CODES.has(rawCode) ? rawCode : null,
+    topFrames: applicationFrames(stack),
+  };
 }
 
 function boundedHttpStatus(exception: unknown): number | null {
@@ -63,7 +134,7 @@ export class GlobalHttpExceptionFilter implements ExceptionFilter {
 
   catch(exception: unknown, host: ArgumentsHost): void {
     const res = host.switchToHttp().getResponse<Response>();
-    const req = host.switchToHttp().getRequest<{ originalUrl?: unknown }>();
+    const req = host.switchToHttp().getRequest<DiagnosticRequest>();
     const originalUrl = req?.originalUrl;
     const requestPath =
       typeof originalUrl === 'string' ? originalUrl.split('?', 1)[0] : null;
@@ -133,15 +204,8 @@ export class GlobalHttpExceptionFilter implements ExceptionFilter {
       return;
     }
 
-    // Unknown failures may contain credentials or payloads, including in stack
-    // getters and string coercion. Emit only a fixed diagnostic at this boundary;
-    // the error class name is developer-controlled and names the failure without
-    // exposing any message or stack content.
-    const errorName =
-      exception instanceof Error && /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(exception.name)
-        ? exception.name
-        : 'Unknown';
-    this.logger.error({ code: 'INTERNAL', status: HttpStatus.INTERNAL_SERVER_ERROR, errorName });
+    // Keep the client response stable and omit untrusted request and exception text.
+    this.logger.error(safeUnknownDiagnostic(exception, req));
     res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
       error: { code: 'INTERNAL', message: 'internal server error' },
     });

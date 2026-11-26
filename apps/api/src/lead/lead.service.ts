@@ -29,14 +29,14 @@ import {
   companyMatchesSuppression,
 } from '../discovery/suppression-value';
 import { storageRightsContextForLead } from '../compliance/data-rights.context';
-import { SanctionsScreeningService, reconcileReviewState, matchesFromJson, storedScreeningBlocks,
-} from '../sanctions/sanctions-screening.service';
+import { SanctionsScreeningService, reconcileReviewState, matchesFromJson, storedScreeningBlocks } from '../sanctions/sanctions-screening.service';
 import { lockWorkspaceSuppressionPolicy } from '../discovery/suppression-policy-lock';
 import { contactSuppressionKeys } from '../discovery/identity';
 import { blindContactKeyCandidates, PII_PURPOSE } from '../compliance/pii-crypto';
 import { isSyntheticDiscoveryProvenance } from '../discovery/evidence-license';
 import { collectProductReadPage } from '../discovery/product-read-pagination';
 import { isLeadScored, leadQueueBasis, summarizeLeadQueues, withQueueBasis } from './lead-queue-basis';
+import { isLeadAcceptBlockedByFit } from './lead-fit-score';
 
 /** 列表/详情行的队列依据探针：只取一条 reject 裁决（有界），不把裁决历史拉进行。 */
 const REJECT_DECISION_PROBE = { where: { action: 'reject' }, select: { id: true }, take: 1 } as const;
@@ -59,19 +59,19 @@ export class LeadService {
     private readonly sanctions: SanctionsScreeningService,
     @Optional() private readonly feedback?: IcpFeedbackService,
   ) {}
+  private assertLeadAcceptFitEligible(action: 'accept' | 'reject', lead: { fitVerdict?: string | null; fitReasons?: unknown }): void {
+    if (action !== 'accept' || !isLeadAcceptBlockedByFit(lead)) return;
+    const message = 'lead failed fit evaluation (mismatch or core criterion failure) and cannot be accepted';
+    throw new ConflictException({ error: { code: 'INVALID_STATE', message } });
+  }
 
   /** 触发对某 ACTIVE ICP 的评分（异步，Temporal）。 */
   async qualify(ctx: RequestContext, icpId: string) {
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-      const icp = await tx.icpDefinition.findUnique({ where: { id: icpId }, select: { id: true, status: true },
-      });
-      if (!icp) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'icp not found' },
-        });
+      const icp = await tx.icpDefinition.findUnique({ where: { id: icpId }, select: { id: true, status: true } });
+      if (!icp) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'icp not found' } });
       if (icp.status !== 'ACTIVE') {
-        throw new ConflictException({
-          error: { code: 'INVALID_STATE', message: `icp is ${icp.status}; qualify requires ACTIVE`,
-          },
-        });
+        throw new ConflictException({ error: { code: 'INVALID_STATE', message: `icp is ${icp.status}; qualify requires ACTIVE` } });
       }
       const ev = await tx.outboxEvent.create({
         data: {
@@ -518,6 +518,7 @@ export class LeadService {
           },
         });
       }
+      this.assertLeadAcceptFitEligible(action, lead);
       const status = action === 'accept' ? 'QUALIFIED' : 'REJECTED';
       const alreadyAtTarget = lead.status === status;
       // reject 重试没有外部交棒，仍可立即幂等返回。accept 重试必须重新经过 suppression、

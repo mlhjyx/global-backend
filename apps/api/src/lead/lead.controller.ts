@@ -576,7 +576,7 @@ export class LeadController {
   })
   @ApiResponse({
     status: 409,
-    description: '当前 suppression/合规/制裁状态阻断交付',
+    description: '当前匹配、抑制、合规或制裁状态阻断交付',
     schema: leadDecisionErrorSchema([
       'SUPPRESSED',
       'INVALID_STATE',

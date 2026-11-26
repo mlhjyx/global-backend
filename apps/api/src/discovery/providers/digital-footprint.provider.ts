@@ -1,16 +1,15 @@
 import { createHash } from 'node:crypto';
-import { resolveMx } from 'node:dns/promises';
 import {
   CompanyEnrichmentAdapter,
   CompanyEnrichmentInput,
   EnrichmentResult,
   ExecutionContext,
-  externalActionAuthorized,
 } from '../provider-contract';
 import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
 import type { CrawlHtmlResult } from '../../adapters/web-crawler';
 import { isAllowedByRobots } from '../../adapters/robots';
 import { isExecutionControlError } from '../../execution-budget/execution-control-error';
+import { inspectPassiveDns, type PassiveDnsSummary } from './passive-dns';
 
 const PARSER_VERSION = 'digital-footprint/v1';
 
@@ -61,7 +60,10 @@ export class DigitalFootprintProvider implements CompanyEnrichmentAdapter {
     const pixels = detectAdPixels(html);
     const platforms = detectPlatform(html, headers);
     const markets = detectServedMarkets(html);
-    const emailProvider = await classifyMxProvider(input.domain, ctx).catch(() => undefined);
+    const passiveDns: PassiveDnsSummary | null = await inspectPassiveDns({
+      domain: input.domain,
+      authorizeExternalAction: ctx.authorizeExternalAction,
+    }).catch(() => null);
 
     const attributes = prune({
       tech_platform: platforms.length ? platforms : undefined,
@@ -77,7 +79,14 @@ export class DigitalFootprintProvider implements CompanyEnrichmentAdapter {
         : undefined,
       structured_org: jsonld.organization,
       structured_products: jsonld.products.length ? jsonld.products.slice(0, 12) : undefined,
-      email_provider: emailProvider,
+      email_provider: passiveDns?.mxProvider,
+      seg_vendors: passiveDns?.segVendors.length ? passiveDns.segVendors : undefined,
+      dmarc_policy: passiveDns?.dmarcPolicy ?? undefined,
+      spf_includes: passiveDns?.spfIncludes.length ? passiveDns.spfIncludes : undefined,
+      dns_tech_signals: passiveDns?.techSignals.length ? passiveDns.techSignals : undefined,
+      dns_verification_tokens: passiveDns?.verificationTokens.length
+        ? passiveDns.verificationTokens
+        : undefined,
     });
     if (Object.keys(attributes).length === 0) return miss();
 
@@ -230,23 +239,11 @@ export async function classifyMxProvider(
   domain: string,
   ctx: Pick<ExecutionContext, 'authorizeExternalAction'> = {},
 ): Promise<string | undefined> {
-  let mx: { exchange: string }[];
-  try {
-    if (!(await externalActionAuthorized(ctx))) return undefined;
-    mx = await resolveMx(domain);
-  } catch {
-    return undefined;
-  }
-  if (!mx.length) return undefined;
-  const hosts = mx.map((r) => r.exchange.toLowerCase()).join(' ');
-  if (/aspmx|google|googlemail/.test(hosts)) return 'google_workspace';
-  if (/protection\.outlook|outlook|office365/.test(hosts)) return 'microsoft_365';
-  if (/pphosted|proofpoint/.test(hosts)) return 'proofpoint';
-  if (/mimecast/.test(hosts)) return 'mimecast';
-  if (/secureserver\.net/.test(hosts)) return 'godaddy';
-  if (/zoho/.test(hosts)) return 'zoho';
-  if (/barracuda/.test(hosts)) return 'barracuda';
-  return 'other_or_self_hosted';
+  const summary = await inspectPassiveDns({
+    domain,
+    authorizeExternalAction: ctx.authorizeExternalAction,
+  });
+  return summary?.mxProvider;
 }
 
 // ─────────────────────── helpers ───────────────────────

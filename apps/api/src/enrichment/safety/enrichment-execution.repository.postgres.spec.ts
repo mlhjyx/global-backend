@@ -7,7 +7,8 @@ import {
   EnrichmentExecutionRepository,
   listCompanyEnrichmentHeads,
 } from './enrichment-execution.repository';
-import { metadataMoney } from './contact-enrichment-results.dto';
+import { buildContactEnrichmentQualityResult, metadataMoney } from './contact-enrichment-results.dto';
+import { createSqlEnrichmentDomainCommitStore } from './contact-enrichment-safety.composition';
 import type { ExecutionBudgetBinding } from '../../execution-budget/execution-budget-binding';
 import type { VerifiedExecutionBudgetAuthority } from '../../execution-budget/execution-budget-authority.types';
 
@@ -970,6 +971,24 @@ describe.runIf(Boolean(ownerUrl && appUrl))('contact enrichment execution on Pos
         candidateRef: null,
       }));
     expect(cross).toMatchObject({ ok: false });
+    const transactions = { withWorkspace: inWorkspace } as never;
+    const commitStore = createSqlEnrichmentDomainCommitStore(transactions, {});
+    const pendingAddress = { workspaceId: workspaceA, companyId: companyA, executionId: view.executionId, contactId: admitContact2 };
+    await inWorkspace(workspaceA, (tx) => commitStore.savePending(tx, pendingAddress, 'RESULT_UNKNOWN'));
+    const query = new EnrichmentExecutionQueryRepository(transactions);
+    const first = await query.loadById({ workspaceId: workspaceA, companyId: companyA }, view.executionId);
+    expect(first?.view.status).toBe('APPLY_PENDING');
+    expect(buildContactEnrichmentQualityResult(first!).perContact).toMatchObject([
+      { contactId: admitContact2, reasonCode: 'RESULT_UNKNOWN' },
+    ]);
+    expect(first?.steps.find((row) => row.id === step!.id)).toMatchObject({
+      budget_status: 'RESERVED',
+      budget_operation_id: claimOperation,
+      domain_state: 'SAVE_PENDING',
+    });
+    await inWorkspace(workspaceA, (tx) => commitStore.savePending(tx, pendingAddress, 'RESULT_UNKNOWN'));
+    const repeated = await query.loadById({ workspaceId: workspaceA, companyId: companyA }, view.executionId);
+    expect(repeated?.resultRevision).toBe(first?.resultRevision);
   });
 
   it('loads a settled artifact-ref finder ledger row and derives its charge from the real usage shape', async () => {
