@@ -32,9 +32,19 @@ test("current repository keeps representative business and dynamic chains comple
       node.id.startsWith("service:temporal-schedule:") &&
       !node.id.includes("registration"),
   );
-  // 生产调度面拆分：8 个客户侧周期 sweep（sweep-scheduler.service.ts CUSTOMER_SWEEPS）
-  // + 4 个平台受控 schedule（platform-execution-contract.ts rows）= 12。
-  assert.equal(schedules.length, 12);
+  // 生产调度面拆分：9 个客户侧周期 sweep（sweep-scheduler.service.ts CUSTOMER_SWEEPS）
+  // + 4 个平台受控 schedule（platform-execution-contract.ts rows）= 13。
+  assert.equal(schedules.length, 13);
+  assert.equal(
+    graph.edges.some(
+      (edge) =>
+        edge.from === "service:temporal-schedule:seller-document-pending-cleanup" &&
+        edge.kind === "calls" &&
+        edge.to === "workflow:temporal:sellerDocumentPendingCleanupWorkflow",
+    ),
+    true,
+    "seller-document-pending-cleanup must point to sellerDocumentPendingCleanupWorkflow",
+  );
   assert.equal(
     graph.edges.some(
       (edge) =>

@@ -799,7 +799,7 @@ describe("M1-e-B ReleaseManifest v2", () => {
         buildRunId: snapshot.buildRunId,
         producerToken: "80000000-0000-4000-8000-000000000001",
         artifactPrefix:
-          "sites/22222222-2222-4222-8222-222222222222/releases/50000000-0000-4000-8000-000000000001",
+          `ws/${snapshot.workspaceId}/sites/22222222-2222-4222-8222-222222222222/releases/50000000-0000-4000-8000-000000000001`,
         releaseCreatedAt: new Date("2026-07-23T00:00:00.000Z"),
         buildIdentity: "site-renderer@test",
       });
@@ -851,7 +851,7 @@ describe("M1-e-B ReleaseManifest v2", () => {
           buildRunId: snapshot.buildRunId,
           producerToken: "80000000-0000-4000-8000-000000000001",
           artifactPrefix:
-            "sites/22222222-2222-4222-8222-222222222222/releases/50000000-0000-4000-8000-000000000001",
+            `ws/${snapshot.workspaceId}/sites/22222222-2222-4222-8222-222222222222/releases/50000000-0000-4000-8000-000000000001`,
           releaseCreatedAt: new Date("2026-07-23T00:00:00.000Z"),
           buildIdentity: "site-renderer@test",
         }),
@@ -874,7 +874,7 @@ describe("M1-e-B ReleaseManifest v2", () => {
           buildRunId: snapshot.buildRunId,
           producerToken: "80000000-0000-4000-8000-000000000001",
           artifactPrefix:
-            "sites/22222222-2222-4222-8222-222222222222/releases/50000000-0000-4000-8000-000000000001",
+            `ws/${snapshot.workspaceId}/sites/22222222-2222-4222-8222-222222222222/releases/50000000-0000-4000-8000-000000000001`,
           releaseCreatedAt: new Date("2026-07-23T00:00:00.000Z"),
           buildIdentity: "site-renderer@test",
         }),

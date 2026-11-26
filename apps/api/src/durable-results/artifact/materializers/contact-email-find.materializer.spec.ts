@@ -50,7 +50,10 @@ function manifest(
     authorityId: "00000000-0000-4000-8000-000000000003",
     operationId: "00000000-0000-4000-8000-000000000004",
     resultSchema: SCHEMA,
-    objectKey: contentAddressedObjectKey(sha256, "PERSONAL_DATA"),
+    objectKey: contentAddressedObjectKey(sha256, "PERSONAL_DATA", {
+      scopeKind: "workspace",
+      workspaceId: "00000000-0000-4000-8000-000000000002",
+    }),
     sha256,
     sizeBytes: String(Buffer.byteLength(body)),
     mediaType: "application/octet-stream",

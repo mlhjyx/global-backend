@@ -125,12 +125,25 @@ function notFound(error: unknown): boolean {
   );
 }
 
+const WORKSPACE_ID = '00000000-0000-4000-8000-0000000000a1';
+const OTHER_WORKSPACE_ID = '00000000-0000-4000-8000-0000000000b2';
+
 /** Erasure as the cleanup service drives it: one durable command at a time. */
 function erase(
   adapter: S3PersonalArtifactCleanupAdapter,
-  input: Readonly<{ sha256: string; versionId: string }>,
+  input: Readonly<{
+    workspaceId?: string;
+    sha256: string;
+    versionId: string;
+    objectScope?: 'workspace' | 'legacy_global';
+  }>,
 ): Promise<'DELETED' | 'ABSENT'> {
-  return adapter.eraseFinalObject(input);
+  return adapter.eraseFinalObject({
+    workspaceId: input.workspaceId ?? WORKSPACE_ID,
+    sha256: input.sha256,
+    versionId: input.versionId,
+    objectScope: input.objectScope ?? 'workspace',
+  });
 }
 
 type FinalVersion = Readonly<{ key: string; versionId: string }>;
@@ -167,6 +180,7 @@ async function stage(
   privacyClass: 'PERSONAL_DATA' | 'CONFIDENTIAL_TENANT',
   value: Uint8Array,
   ledger: CleanupLedger,
+  workspaceId = WORKSPACE_ID,
 ): Promise<StagedArtifact> {
   const artifactId = randomUUID();
   ledger.keys.push(stagingObjectKey(artifactId));
@@ -182,7 +196,10 @@ async function stage(
     privacyClass,
   });
   ledger.keys.push(
-    contentAddressedObjectKey(staged.sha256, staged.privacyClass),
+    contentAddressedObjectKey(staged.sha256, staged.privacyClass, {
+      scopeKind: 'workspace',
+      workspaceId,
+    }),
   );
   return staged;
 }
@@ -191,13 +208,19 @@ async function promote(
   privacyClass: 'PERSONAL_DATA' | 'CONFIDENTIAL_TENANT',
   byte: number,
   ledger: CleanupLedger,
+  workspaceId = WORKSPACE_ID,
 ) {
   const { s3, store } = artifactStore(ledger);
   const value = new TextEncoder().encode(`${byte}:${randomUUID()}`);
-  const staged = await stage(store, privacyClass, value, ledger);
-  const stored = await store.promote(staged);
+  const staged = await stage(store, privacyClass, value, ledger, workspaceId);
+  const stored = await store.promote(
+    staged,
+    privacyClass === 'PERSONAL_DATA'
+      ? { scope: { scopeKind: 'workspace', workspaceId } }
+      : undefined,
+  );
   ledger.versions.push({ key: stored.objectKey, versionId: stored.versionId });
-  return { s3, store, staged, stored, value };
+  return { s3, store, staged, stored, value, workspaceId };
 }
 
 /**
@@ -210,9 +233,15 @@ async function refreshWithoutSettlement(
   store: S3GenericOperationArtifactStore,
   staged: StagedArtifact,
   ledger: CleanupLedger,
+  workspaceId = WORKSPACE_ID,
 ): Promise<StoredArtifact> {
   const later = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString();
-  const refreshed = await store.promote(staged, { retainUntil: later });
+  const refreshed = await store.promote(staged, {
+    retainUntil: later,
+    ...(staged.privacyClass === 'PERSONAL_DATA'
+      ? { scope: { scopeKind: 'workspace', workspaceId } }
+      : {}),
+  });
   ledger.versions.push({
     key: refreshed.objectKey,
     versionId: refreshed.versionId,
@@ -360,7 +389,10 @@ describe.runIf(enabled)('PERSONAL_DATA cleanup real MinIO boundary', () => {
           personal.s3.send(
             new PutObjectCommand({
               Bucket: bucket,
-              Key: contentAddressedObjectKey(sha256, prefixClass),
+              Key: contentAddressedObjectKey(sha256, prefixClass, {
+                scopeKind: 'workspace',
+                workspaceId: WORKSPACE_ID,
+              }),
               Body: Uint8Array.of(0x71),
               ContentType: 'application/octet-stream',
               ServerSideEncryption: 'AES256',
@@ -424,12 +456,18 @@ describe.runIf(enabled)('PERSONAL_DATA cleanup real MinIO boundary', () => {
         0,
         personal.stored.objectKey.lastIndexOf('/') + 1,
       );
+      const personalWorkspaceRoot = personal.stored.objectKey.slice(
+        0,
+        personal.stored.objectKey.indexOf('/sha256/') + 1,
+      );
       for (const prefix of [
         confidential.stored.objectKey,
         'generic-operation-results/v1/final/',
         'generic-operation-results/v1/staging/',
         'generic-operation-results/v1/final/personal-data/',
         'generic-operation-results/v1/final/personal-data/sha256/',
+        'generic-operation-results/v1/final/personal-data/ws/',
+        personalWorkspaceRoot,
         personalShard,
         personal.stored.objectKey.slice(0, -1),
       ]) {
@@ -526,10 +564,14 @@ describe.runIf(enabled)('PERSONAL_DATA cleanup real MinIO boundary', () => {
 
       await expectNoVersionLeft(root, bucket, first.stored.objectKey);
       await expect(
-        first.store.inspect(first.stored.sha256, 'PERSONAL_DATA'),
+        first.store.inspect(first.stored.sha256, 'PERSONAL_DATA', undefined, {
+          scope: { scopeKind: 'workspace', workspaceId: first.workspaceId },
+        }),
       ).resolves.toBeNull();
       await expect(
-        first.store.read(first.stored.sha256, 'PERSONAL_DATA'),
+        first.store.read(first.stored.sha256, 'PERSONAL_DATA', undefined, {
+          scope: { scopeKind: 'workspace', workspaceId: first.workspaceId },
+        }),
       ).rejects.toEqual(
         new ArtifactStorageError('GENERIC_OPERATION_ARTIFACT_OBJECT_MISSING'),
       );
@@ -718,7 +760,10 @@ describe.runIf(enabled)('PERSONAL_DATA cleanup real MinIO boundary', () => {
       const second = await root.send(
         new PutObjectCommand({
           Bucket: bucket,
-          Key: contentAddressedObjectKey(sha256, 'PERSONAL_DATA'),
+          Key: contentAddressedObjectKey(sha256, 'PERSONAL_DATA', {
+            scopeKind: 'workspace',
+            workspaceId: first.workspaceId,
+          }),
           Body: bytes,
           ContentType: 'application/octet-stream',
           Metadata: objectMetadata({
@@ -858,7 +903,7 @@ describe.runIf(enabled)('PERSONAL_DATA cleanup real MinIO boundary', () => {
       await expectNoVersionLeft(root, bucket, first.stored.objectKey);
 
       // The other subject's manifest is still live in the database; replay reads it.
-      const workspaceId = randomUUID();
+      const workspaceId = WORKSPACE_ID;
       const authorityId = randomUUID();
       const operationId = randomUUID();
       const artifactId = otherStaged.artifactId;
@@ -989,4 +1034,57 @@ describe.runIf(enabled)('PERSONAL_DATA cleanup real MinIO boundary', () => {
       cleanup.destroy();
     }
   });
+
+  it('isolates identical PERSONAL_DATA bytes per workspace so erasing Tenant A leaves Tenant B intact', async () => {
+    const ledger = cleanupLedger();
+    const cleanup = cleanupClient();
+    const root = rootClient();
+    const bucket = required('PERSONAL_ARTIFACT_CLEANUP_MINIO_BUCKET');
+    const adapter = new S3PersonalArtifactCleanupAdapter({
+      bucket,
+      client: cleanup as never,
+    });
+    try {
+      const tenantA = await promote('PERSONAL_DATA', 0x70, ledger, WORKSPACE_ID);
+      const tenantBStore = artifactStore(ledger).store;
+      const tenantBStaged = await stage(
+        tenantBStore,
+        'PERSONAL_DATA',
+        tenantA.value,
+        ledger,
+        OTHER_WORKSPACE_ID,
+      );
+      const tenantBStored = await tenantBStore.promote(tenantBStaged, {
+        scope: { scopeKind: 'workspace', workspaceId: OTHER_WORKSPACE_ID },
+      });
+      ledger.versions.push({
+        key: tenantBStored.objectKey,
+        versionId: tenantBStored.versionId,
+      });
+
+      expect(tenantA.stored.sha256).toBe(tenantBStored.sha256);
+      expect(tenantA.stored.objectKey).not.toBe(tenantBStored.objectKey);
+
+      await expect(
+        erase(adapter, {
+          workspaceId: WORKSPACE_ID,
+          sha256: tenantA.stored.sha256,
+          versionId: tenantA.stored.versionId,
+          objectScope: 'workspace',
+        }),
+      ).resolves.toBe('DELETED');
+
+      await expectNoVersionLeft(root, bucket, tenantA.stored.objectKey);
+      await expect(
+        tenantBStore.inspect(tenantBStored.sha256, 'PERSONAL_DATA', undefined, {
+          scope: { scopeKind: 'workspace', workspaceId: OTHER_WORKSPACE_ID },
+        }),
+      ).resolves.toEqual(tenantBStored);
+    } finally {
+      await cleanupTrackedObjects(root, bucket, ledger);
+      for (const client of ledger.clients) client.destroy();
+      cleanup.destroy();
+      root.destroy();
+    }
+  }, 20_000);
 });

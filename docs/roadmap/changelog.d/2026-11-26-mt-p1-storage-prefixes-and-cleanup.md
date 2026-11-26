@@ -1,0 +1,14 @@
+---
+date: 2026-11-26
+pr:
+title: "feat(storage): 隔离 PERSONAL_DATA 与 site_release 租户前缀并定时清理超时 pending_upload"
+---
+
+- 起因：MT-P1 后端存储隔离与清理收口三项遗留风险：(1) `PERSONAL_DATA` 对象仍以全局 `sha256` 跨租户去重，导致 Tenant A 与 Tenant B 相同内容共享同一 S3 对象、DSR 删除互锁 (`shared_hold` / `cleanup_fence`)；(2) `site_release` 的 `artifact_prefix` 仅含 `sites/{siteId}/releases/{releaseId}` 而缺少 `ws/{workspaceId}/` 租户前缀；(3) `seller_document` 中 24 小时以上未确认的 `pending_upload` 占位行与 staging 对象没有自动清收任务，长期占用数量与字节配额。
+- 改动：
+  1. **废除 `PERSONAL_DATA` 跨租户 S3 去重**：将 `PERSONAL_DATA` 写入路径收敛为 `generic-operation-results/v1/final/personal-data/ws/<workspaceId>/sha256/<2>/<sha256>`（`PUBLIC_ORGANIZATION` 与 `CONFIDENTIAL_TENANT` 保持共享），同步更新 `infra/minio/bootstrap.sh` 的 `cleanup_policy` 前缀匹配与 `personal-artifact-cleanup` 边界（传入 `workspaceId` 与 `objectScope: 'workspace' | 'legacy_global'`），并通过迁移 `20261126030000_personal_artifact_workspace_prefix` 与 `schema.prisma` 将 `generic_operation_artifact_object` / `generic_operation_artifact_object_version` / `personal_artifact_cleanup_command` 及相关 `SECURITY DEFINER` 函数切换为按 `object_key` 主键与加锁，兼容存量历史行读取与清理。
+  2. **为 `site_release` 补齐 `ws/{workspaceId}/` 前缀**：新增迁移 `20261126040000_site_release_workspace_prefix` 放宽 `site_release_artifact_prefix_check` 以同时接受 `ws/<workspaceId>/sites/<siteId>/releases/<id>` 与存量 `sites/<siteId>/releases/<id>`，更新 `SiteReleaseService.claim()` 与 `release-artifact.ts`（新构建强制 `ws/{wid}/...`，清单校验兼容存量 `sites/...` 并拒绝跨租户前缀）。
+  3. **24 小时超时 `pending_upload` 定时清收**：新增迁移 `20261126050000_seller_document_pending_upload_cleanup` 提供 `app_user` 可调用的 `SECURITY DEFINER` 游标枚举函数 `public.list_stale_pending_seller_document_workspaces_v1`（保持 `runtime_customer_worker_ops` 对 `public.seller_document` 与该函数的拒绝权限），新增 `seller-document-pending-cleanup.activities.ts` 与 `seller-document-pending-cleanup.workflow.ts` 并接入 `SweepSchedulerService`（支持 `SELLER_DOCUMENT_PENDING_UPLOAD_TTL_HOURS`，默认 24 小时），逐行 `FOR UPDATE SKIP LOCKED` 校验 staging key 后删除 S3（容忍 `NoSuchKey`/404、S3 5xx 回滚保留）并软删释放配额；新增 `seller-document-pending-cleanup.postgres.spec.ts` 并接入 `.github/workflows/ci.yml`。
+  4. **基线同步**：更新 `copy-runtime-eligibility.json` 与 `docs/implementation-records/copy-fixed-source-impact-governance.md` 指纹与 receipt SHA-256。
+- 测试：已在隔离 worktree 与一次性 PG16 / MinIO 容器完成 `@global/db generate`、`@global/contracts` 与 `@global/api` 构建、20 个受影响单测与合同测试文件（358 tests）、`eslint`（0 error）、两个真实 MinIO 集成套件（19/19）、`prisma-drift-gate`、`rls-catalog-gate`、`generic-operation-artifact-subject.rls.spec.mjs`（10/10）、`site_release_artifact_prefix_check` 正/负向 SQL 校验、`run-db-tests.mjs --group service`、全部 7 个 PG16 PostgreSQL spec（含新增 `seller-document-pending-cleanup.postgres.spec.ts` 与 `generic-operation-artifact-object-version.postgres.spec.ts` 跨租户隔离测试，共 55/55）以及 `test-manufacturer-network-postgres.mts`（10/10）；全量单测中 2 个依赖宿主 Node `>=22.23.4` 的 Astro 渲染测试（`renderer-build.spec.ts`、`browser-quality-runner.spec.ts`）因宿主 Node 为 `v22.23.1` 失败，属环境版本限制。
+- 未做：已本地验证通过，尚未推送远程、创建/合并 PR 或部署至现网。

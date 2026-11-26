@@ -21,6 +21,7 @@ import {
   type QualityArtifactSetV1,
   type SiteSpec,
 } from "@global/contracts";
+import { isAllowedSiteReleaseArtifactPrefix, siteReleaseArtifactPrefix } from "./site-release-prefix";
 
 export const RELEASE_MANIFEST_V1_SCHEMA_VERSION =
   "site-builder-release-manifest/v1" as const;
@@ -878,8 +879,7 @@ function releaseManifestCommonValid(value: Record<string, unknown>): boolean {
   const files = value.files as ReleaseManifestFile[];
   const componentTypes = value.componentTypes as string[];
   return (
-    value.artifactPrefix ===
-      `sites/${value.siteId}/releases/${value.releaseId}` &&
+    isAllowedSiteReleaseArtifactPrefix(value.artifactPrefix, value.workspaceId, value.siteId, value.releaseId) &&
     value.artifactDigest === releaseArtifactDigest(files) &&
     new Set(componentTypes).size === componentTypes.length &&
     new Set(files.map((file) => file.path)).size === files.length &&
@@ -1020,7 +1020,7 @@ function validateIdentity(input: BuildReleaseArtifactInput): void {
   ]) {
     if (!UUID.test(value)) throw new Error("SITE_RELEASE_INVALID_IDENTITY");
   }
-  const expectedPrefix = `sites/${input.siteId}/releases/${input.releaseId}`;
+  const expectedPrefix = siteReleaseArtifactPrefix(input.workspaceId, input.siteId, input.releaseId);
   if (input.artifactPrefix !== expectedPrefix) {
     throw new Error("SITE_RELEASE_INVALID_ARTIFACT_PREFIX");
   }

@@ -16,6 +16,7 @@ export { siteBuildCostReconciliationSweepWorkflow } from "./site-build-cost-reco
 export { refurbishWorkflow } from "./refurbish.workflow";
 export { kbIngestWorkflow } from "./kb-ingest.workflow";
 export { sellerDocumentIngestWorkflow } from "../seller-knowledge/seller-document-ingest.workflow";
+export { sellerDocumentPendingCleanupWorkflow } from "./seller-document-pending-cleanup.workflow";
 export { kbRecoverySweepWorkflow } from "./kb-recovery.workflow";
 export { contactReverifySweepWorkflow } from "./contact-reverify.workflow";
 export { contactWeeklyReportWorkflow } from "./contact-weekly-report.workflow";

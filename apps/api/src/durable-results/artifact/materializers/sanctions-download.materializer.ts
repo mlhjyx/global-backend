@@ -77,7 +77,9 @@ export const sanctionsDownloadMaterializer: ArtifactMaterializer<SanctionsDownlo
       input: AsyncIterable<Uint8Array>,
       manifest: GenericOperationArtifactManifest,
     ): Promise<SanctionsDownloadOutput> {
-      const boundManifest = parseGenericOperationArtifactManifest(manifest);
+      const boundManifest = parseGenericOperationArtifactManifest(manifest, {
+        allowLegacyPersonalData: true,
+      });
       const body = await readBoundedArtifactUtf8(input, boundManifest, CONTRACT);
       validateSanctionsXml(body);
       return Object.freeze({

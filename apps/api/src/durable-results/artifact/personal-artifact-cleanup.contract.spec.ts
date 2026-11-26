@@ -25,6 +25,7 @@ function command(
     artifactId: ARTIFACT_ID,
     sha256: SHA256,
     versionId: VERSION_ID,
+    objectScope: "workspace",
     tombstonedAt: "2026-08-24T08:00:00.000Z",
     attempt: 1,
     ...overrides,
@@ -135,11 +136,18 @@ describe("PersonalArtifactCleanupService", () => {
       "complete",
     ]);
     expect(store.eraseFinalObject).toHaveBeenCalledWith({
+      workspaceId: WORKSPACE_ID,
       sha256: SHA256,
       versionId: VERSION_ID,
+      objectScope: "workspace",
     });
     const storeInput = vi.mocked(store.eraseFinalObject).mock.calls[0]?.[0];
-    expect(Reflect.ownKeys(storeInput ?? {})).toEqual(["sha256", "versionId"]);
+    expect(Reflect.ownKeys(storeInput ?? {})).toEqual([
+      "workspaceId",
+      "sha256",
+      "versionId",
+      "objectScope",
+    ]);
     expect(durable).not.toHaveProperty("objectKey");
     expect(durable).not.toHaveProperty("body");
     expect(durable).not.toHaveProperty("subjectId");

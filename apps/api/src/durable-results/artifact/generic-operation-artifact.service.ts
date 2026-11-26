@@ -6,7 +6,10 @@ import type {
   BudgetStore,
 } from '../../tools/budget-store';
 import { artifactExecutionReceiptFacts } from '../execution-receipt-facts';
-import { contentAddressedObjectKey } from './artifact-key';
+import {
+  contentAddressedObjectKey,
+  type ArtifactObjectScope,
+} from './artifact-key';
 import {
   parseArtifactExpectedFactsForResultSchema,
   type ArtifactExpectedFacts,
@@ -197,6 +200,17 @@ function assertReservationBinding(
  * schema are the first writer's and may differ from this manifest's, which
  * is what the materializer reads (see sameArtifact in the object contract).
  */
+function toArtifactScope(
+  binding: Pick<GenericOperationArtifactManifest, 'scopeKind' | 'workspaceId'>,
+): ArtifactObjectScope {
+  if (binding.scopeKind === 'platform') {
+    if (binding.workspaceId !== null) return invalid();
+    return { scopeKind: 'platform', workspaceId: null };
+  }
+  if (!isCanonicalArtifactUuid(binding.workspaceId)) return invalid();
+  return { scopeKind: 'workspace', workspaceId: binding.workspaceId };
+}
+
 function sameStoredArtifact(
   actual: StoredArtifact | null,
   expected: Pick<
@@ -307,6 +321,7 @@ function snapshotExpectedManifest(
       authorityId,
       allowReplay,
     );
+    const scope = toArtifactScope(binding);
     const reference = referenceFromManifest(value);
     const createdAt = canonicalTimestamp(value.createdAt);
     if (
@@ -315,9 +330,9 @@ function snapshotExpectedManifest(
       value.workspaceId !== binding.workspaceId ||
       value.authorityId !== authorityId ||
       value.operationId !== reservation.operationId ||
-      value.objectKey !==
-        contentAddressedObjectKey(reference.sha256, value.privacyClass) ||
       !PRIVACY_CLASSES.has(value.privacyClass) ||
+      value.objectKey !==
+        contentAddressedObjectKey(reference.sha256, value.privacyClass, scope) ||
       (value.sourceDigest !== null &&
         !isCanonicalArtifactSha256(value.sourceDigest)) ||
       createdAt === null ||
@@ -486,13 +501,20 @@ export class GenericOperationArtifactService {
 
     const now = this.now();
     if (!(now instanceof Date) || !Number.isFinite(now.getTime())) return invalid();
+    const persistBinding = assertReservationBinding(
+      input.reservation,
+      input.authorityId,
+    );
+    const scope = toArtifactScope(persistBinding);
+    const expectedObjectKey = contentAddressedObjectKey(
+      staged.sha256,
+      staged.privacyClass,
+      scope,
+    );
     const manifest = buildManifest(
       input,
       {
-        objectKey: contentAddressedObjectKey(
-          staged.sha256,
-          staged.privacyClass,
-        ),
+        objectKey: expectedObjectKey,
         sha256: staged.sha256,
         sizeBytes: staged.sizeBytes,
         mediaType: staged.mediaType,
@@ -507,11 +529,12 @@ export class GenericOperationArtifactService {
 
     let promoted: StoredArtifact;
     try {
-      // The object is shared by every manifest with these bytes and the bucket
-      // expires it by the age of its current version: a reuse must keep it
-      // alive until this manifest's own expiry.
+      // The object is shared by every manifest with these bytes (within its
+      // tenant boundary for PERSONAL_DATA) and the bucket expires it by the age
+      // of its current version: a reuse must keep it alive until this manifest's own expiry.
       promoted = await this.store.promote(staged, {
         retainUntil: manifest.expiresAt,
+        scope,
       });
     } catch (error) {
       await this.markUnknownOnAmbiguousWrite(
@@ -524,10 +547,7 @@ export class GenericOperationArtifactService {
     }
     if (!sameStoredArtifact(promoted, {
       ...staged,
-      objectKey: contentAddressedObjectKey(
-        staged.sha256,
-        staged.privacyClass,
-      ),
+      objectKey: expectedObjectKey,
     })) {
       return invalid();
     }
@@ -536,6 +556,7 @@ export class GenericOperationArtifactService {
       promoted.sha256,
       promoted.privacyClass,
       input.signal,
+      { scope, objectKey: promoted.objectKey },
     );
     // Another reuse may have refreshed the object again in between, so the
     // current version id may differ; the key, bytes and privacy boundary may
@@ -553,7 +574,17 @@ export class GenericOperationArtifactService {
     ) {
       return invalid();
     }
-    await this.drainVerifiedBody(promoted, input.signal);
+    await this.drainVerifiedBody(
+      {
+        sha256: promoted.sha256,
+        sizeBytes: promoted.sizeBytes,
+        privacyClass: promoted.privacyClass,
+        objectKey: promoted.objectKey,
+        scopeKind: manifest.scopeKind,
+        workspaceId: manifest.workspaceId,
+      },
+      input.signal,
+    );
 
     const reference = referenceFromManifest(manifest);
     const receiptFacts = artifactExecutionReceiptFacts({
@@ -622,10 +653,12 @@ export class GenericOperationArtifactService {
       input.subjectRef,
     );
     const snapshot = buildSnapshot(expected, loaded.expectedFacts);
+    const expectedScope = toArtifactScope(expected);
     const inspected = await this.store.inspect(
       expected.sha256,
       expected.privacyClass,
       input.signal,
+      { scope: expectedScope, objectKey: expected.objectKey },
     );
     if (!sameStoredArtifact(inspected, expected)) return invalid();
     await this.drainVerifiedBody(expected, input.signal);
@@ -687,10 +720,16 @@ export class GenericOperationArtifactService {
     ) {
       return invalid();
     }
+    const manifestScope = toArtifactScope(snapshot.manifest);
+    const readOptions = {
+      scope: manifestScope,
+      objectKey: snapshot.manifest.objectKey,
+    };
     const inspected = await this.store.inspect(
       reference.sha256,
       snapshot.manifest.privacyClass,
       input.signal,
+      readOptions,
     );
     // A live manifest whose object is gone (lifecycle, erasure, operator) is a
     // result that can no longer be reproduced, not a tampered one.
@@ -700,6 +739,7 @@ export class GenericOperationArtifactService {
       reference.sha256,
       snapshot.manifest.privacyClass,
       input.signal,
+      readOptions,
     );
     return Object.freeze({
       manifest: snapshot.manifest,
@@ -734,7 +774,7 @@ export class GenericOperationArtifactService {
   private async drainVerifiedBody(
     expected: Pick<
       GenericOperationArtifactManifest,
-      'sha256' | 'sizeBytes' | 'privacyClass'
+      'sha256' | 'sizeBytes' | 'privacyClass' | 'objectKey' | 'scopeKind' | 'workspaceId'
     >,
     signal?: AbortSignal,
   ): Promise<void> {
@@ -742,6 +782,10 @@ export class GenericOperationArtifactService {
       expected.sha256,
       expected.privacyClass,
       signal,
+      {
+        scope: toArtifactScope(expected),
+        objectKey: expected.objectKey,
+      },
     );
     for await (const _chunk of this.verifiedBody(body, expected, signal)) {
       // Drain before manifest append so only byte-verified objects become durable facts.

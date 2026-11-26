@@ -9,7 +9,9 @@ import {
   R1_RENDERER_COMPONENT_TYPES,
   assertReleaseContract,
   buildReleaseArtifact,
+  releaseArtifactDigest,
   uploadReleaseArtifact,
+  validateReleaseManifest,
 } from './release-artifact';
 
 const roots: string[] = [];
@@ -66,7 +68,7 @@ const identity = {
   buildRunId: '30000000-0000-0000-0000-000000000001',
   producerToken: '60000000-0000-0000-0000-000000000001',
   artifactPrefix:
-    'sites/20000000-0000-0000-0000-000000000001/releases/50000000-0000-0000-0000-000000000001',
+    'ws/10000000-0000-0000-0000-000000000001/sites/20000000-0000-0000-0000-000000000001/releases/50000000-0000-0000-0000-000000000001',
   releaseCreatedAt: new Date('2026-07-20T00:00:00.000Z'),
   buildIdentity: 'site-renderer@1.0.0+test',
 };
@@ -557,5 +559,66 @@ describe('R1 deterministic release artifact', () => {
     await expect(uploadReleaseArtifact(release, storage)).rejects.toThrow(
       'SITE_RELEASE_OBJECT_INTEGRITY_MISMATCH',
     );
+  });
+
+  it('rejects legacy un-prefixed or cross-workspace artifactPrefix on buildReleaseArtifact while validateReleaseManifest accepts legacy compatibility manifests', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'r1-release-'));
+    roots.push(root);
+    await writeFile(path.join(root, 'index.html'), 'hello');
+
+    await expect(
+      buildReleaseArtifact({
+        ...identity,
+        artifactPrefix: `sites/${identity.siteId}/releases/${identity.releaseId}`,
+        root,
+        spec: spec(),
+        storedSpecVersion: '1.0.0',
+      }),
+    ).rejects.toThrow('SITE_RELEASE_INVALID_ARTIFACT_PREFIX');
+
+    await expect(
+      buildReleaseArtifact({
+        ...identity,
+        artifactPrefix: `ws/99999999-0000-0000-0000-000000000009/sites/${identity.siteId}/releases/${identity.releaseId}`,
+        root,
+        spec: spec(),
+        storedSpecVersion: '1.0.0',
+      }),
+    ).rejects.toThrow('SITE_RELEASE_INVALID_ARTIFACT_PREFIX');
+
+    const canonical = await buildReleaseArtifact({
+      ...identity,
+      root,
+      spec: spec(),
+      storedSpecVersion: '1.0.0',
+    });
+    expect(canonical.manifest.artifactPrefix).toBe(identity.artifactPrefix);
+
+    const legacyPrefix = `sites/${identity.siteId}/releases/${identity.releaseId}`;
+    const legacyFiles = canonical.manifest.files.map((file) => ({
+      ...file,
+      objectKey: `${legacyPrefix}/attempts/${identity.producerToken}/files/${file.path}`,
+    }));
+    const legacyManifest = {
+      ...canonical.manifest,
+      artifactPrefix: legacyPrefix,
+      artifactDigest: releaseArtifactDigest(legacyFiles),
+      files: legacyFiles,
+    };
+    expect(validateReleaseManifest(legacyManifest)).toEqual(legacyManifest);
+
+    const crossWorkspacePrefix = `ws/99999999-0000-0000-0000-000000000009/sites/${identity.siteId}/releases/${identity.releaseId}`;
+    const crossWorkspaceFiles = canonical.manifest.files.map((file) => ({
+      ...file,
+      objectKey: `${crossWorkspacePrefix}/attempts/${identity.producerToken}/files/${file.path}`,
+    }));
+    expect(() =>
+      validateReleaseManifest({
+        ...canonical.manifest,
+        artifactPrefix: crossWorkspacePrefix,
+        artifactDigest: releaseArtifactDigest(crossWorkspaceFiles),
+        files: crossWorkspaceFiles,
+      }),
+    ).toThrow('SITE_RELEASE_MANIFEST_INVALID');
   });
 });

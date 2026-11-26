@@ -6,7 +6,11 @@ import {
   PutObjectCommand,
 } from '@aws-sdk/client-s3';
 import { describe, expect, it, vi } from 'vitest';
-import { contentAddressedObjectKey, stagingObjectKey } from './artifact-key';
+import {
+  contentAddressedObjectKey,
+  legacyPersonalDataObjectKey,
+  stagingObjectKey,
+} from './artifact-key';
 import { parseLifecycleExpiration } from './generic-operation-artifact.object-contract';
 import {
   ArtifactStorageError,
@@ -29,6 +33,15 @@ import {
   stage,
   store,
 } from './generic-operation-artifact.store.spec-helper';
+
+const WORKSPACE_SCOPE = Object.freeze({
+  scopeKind: 'workspace' as const,
+  workspaceId: 'e03abddd-1307-47cb-a731-7e7a786615a0',
+});
+const OTHER_WORKSPACE_SCOPE = Object.freeze({
+  scopeKind: 'workspace' as const,
+  workspaceId: 'f14bcdee-2418-48dc-b842-8f8b897726b1',
+});
 
 describe('S3GenericOperationArtifactStore stage', () => {
   it('streams and hashes a zero-byte source without rejecting an empty result', async () => {
@@ -599,7 +612,9 @@ describe('S3GenericOperationArtifactStore promote/inspect', () => {
   it('returns null only for an absent digest-derived object', async () => {
     const { store: target } = store();
     await expect(
-      target.inspect('cd'.repeat(32), 'PERSONAL_DATA'),
+      target.inspect('cd'.repeat(32), 'PERSONAL_DATA', undefined, {
+        scope: WORKSPACE_SCOPE,
+      }),
     ).resolves.toBeNull();
   });
 
@@ -609,7 +624,9 @@ describe('S3GenericOperationArtifactStore promote/inspect', () => {
       'endpoint=https://secret.invalid credential=secret',
     );
     const { store: target } = store(client);
-    const result = target.inspect('cd'.repeat(32), 'PERSONAL_DATA');
+    const result = target.inspect('cd'.repeat(32), 'PERSONAL_DATA', undefined, {
+      scope: WORKSPACE_SCOPE,
+    });
     await expectStorageCode(
       result,
       'GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE',
@@ -618,7 +635,9 @@ describe('S3GenericOperationArtifactStore promote/inspect', () => {
     const abort = new AbortController();
     abort.abort();
     await expectStorageCode(
-      target.inspect('cd'.repeat(32), 'PERSONAL_DATA', abort.signal),
+      target.inspect('cd'.repeat(32), 'PERSONAL_DATA', abort.signal, {
+        scope: WORKSPACE_SCOPE,
+      }),
       'GENERIC_OPERATION_ARTIFACT_ABORTED',
     );
   });
@@ -645,7 +664,9 @@ describe('S3GenericOperationArtifactStore read/delete/readiness', () => {
       'bucket=private endpoint=https://secret.invalid credential=secret',
     );
     const { store: target } = store(client);
-    const result = target.read('ef'.repeat(32), 'PERSONAL_DATA');
+    const result = target.read('ef'.repeat(32), 'PERSONAL_DATA', undefined, {
+      scope: WORKSPACE_SCOPE,
+    });
     await expectStorageCode(
       result,
       'GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE',
@@ -669,7 +690,9 @@ describe('S3GenericOperationArtifactStore read/delete/readiness', () => {
       bucket: BUCKET,
       client: firstClient,
     });
-    const failingBody = await firstStore.read(digest, 'PERSONAL_DATA');
+    const failingBody = await firstStore.read(digest, 'PERSONAL_DATA', undefined, {
+      scope: WORKSPACE_SCOPE,
+    });
     const failingIterator = failingBody[Symbol.asyncIterator]();
     await expect(failingIterator.next()).resolves.toEqual({
       done: false,
@@ -685,6 +708,7 @@ describe('S3GenericOperationArtifactStore read/delete/readiness', () => {
       digest,
       'PERSONAL_DATA',
       abort.signal,
+      { scope: WORKSPACE_SCOPE },
     );
     const abortingIterator = abortingBody[Symbol.asyncIterator]();
     await expect(abortingIterator.next()).resolves.toMatchObject({
@@ -781,21 +805,67 @@ describe('S3GenericOperationArtifactStore read/delete/readiness', () => {
   it('reports a final object the bucket no longer holds with the bounded OBJECT_MISSING code', async () => {
     const { store: target } = store();
     await expectStorageCode(
-      target.read('ef'.repeat(32), 'PERSONAL_DATA'),
+      target.read('ef'.repeat(32), 'PERSONAL_DATA', undefined, {
+        scope: WORKSPACE_SCOPE,
+      }),
       'GENERIC_OPERATION_ARTIFACT_OBJECT_MISSING',
     );
     await expect(
-      target.inspect('ef'.repeat(32), 'PERSONAL_DATA'),
+      target.inspect('ef'.repeat(32), 'PERSONAL_DATA', undefined, {
+        scope: WORKSPACE_SCOPE,
+      }),
     ).resolves.toBeNull();
+  });
+
+  it('isolates identical PERSONAL_DATA bytes per workspace prefix and rejects missing scope on promote', async () => {
+    const { client, store: target } = store();
+    const stagedA = await target.stage({
+      artifactId: ARTIFACT_ID,
+      source: source([bytes(10, 20)]),
+      maxBytes: 2,
+      resultSchema: RESULT_SCHEMA,
+      privacyClass: 'PERSONAL_DATA',
+    });
+    await expectStorageCode(
+      target.promote(stagedA),
+      'GENERIC_OPERATION_ARTIFACT_INVALID',
+    );
+    const storedA = await target.promote(stagedA, { scope: WORKSPACE_SCOPE });
+
+    const stagedB = await target.stage({
+      artifactId: '5d1c3b8e-2f0a-4a4e-9a51-3f7d2b6c8e10',
+      source: source([bytes(10, 20)]),
+      maxBytes: 2,
+      resultSchema: RESULT_SCHEMA,
+      privacyClass: 'PERSONAL_DATA',
+    });
+    const storedB = await target.promote(stagedB, { scope: OTHER_WORKSPACE_SCOPE });
+
+    expect(storedA.objectKey).toBe(
+      contentAddressedObjectKey(stagedA.sha256, 'PERSONAL_DATA', WORKSPACE_SCOPE),
+    );
+    expect(storedB.objectKey).toBe(
+      contentAddressedObjectKey(stagedB.sha256, 'PERSONAL_DATA', OTHER_WORKSPACE_SCOPE),
+    );
+    expect(storedA.objectKey).not.toBe(storedB.objectKey);
+
+    const legacyKey = legacyPersonalDataObjectKey(stagedA.sha256);
+    client.objects.set(legacyKey, client.objects.get(storedA.objectKey)!);
+    await expect(
+      collect(
+        await target.read(stagedA.sha256, 'PERSONAL_DATA', undefined, {
+          scope: WORKSPACE_SCOPE,
+          objectKey: legacyKey,
+        }),
+      ),
+    ).resolves.toEqual([bytes(10, 20)]);
   });
 });
 
 /*
- * The content object is shared by every manifest with the same bytes, but the
- * bucket lifecycle expires it by the age of its current version. A later
- * manifest therefore has to move that age forward when its own expiry would
- * outlive the version the first writer created (xin, 2026-10-14: 23 live rows
- * pointed at an object MinIO had already deleted).
+ * The content object is shared by every manifest with the same bytes (within its
+ * workspace prefix for PERSONAL_DATA), and the bucket lifecycle expires it by
+ * the age of its current version.
  */
 describe('S3GenericOperationArtifactStore retention refresh on reuse', () => {
   const FIRST_WRITE = new Date('2026-10-12T17:34:40.000Z');
@@ -815,7 +885,7 @@ describe('S3GenericOperationArtifactStore retention refresh on reuse', () => {
       resultSchema: RESULT_SCHEMA,
       privacyClass: 'PERSONAL_DATA',
     });
-    const stored = await target.promote(staged);
+    const stored = await target.promote(staged, { scope: WORKSPACE_SCOPE });
     expect(stored.versionId).toBe('version-1');
     return { target, staged, stored };
   }
@@ -838,6 +908,7 @@ describe('S3GenericOperationArtifactStore retention refresh on reuse', () => {
     client.now = REUSE;
     const reused = await target.promote(staged, {
       retainUntil: REUSE_EXPIRES_AT,
+      scope: WORKSPACE_SCOPE,
     });
 
     const [copy, ...rest] = copies(client);
@@ -868,7 +939,9 @@ describe('S3GenericOperationArtifactStore retention refresh on reuse', () => {
       minioLifecycleExpiry(REUSE, 1).getTime(),
     ).toBeGreaterThanOrEqual(Date.parse(REUSE_EXPIRES_AT));
     await expect(
-      target.inspect(staged.sha256, 'PERSONAL_DATA'),
+      target.inspect(staged.sha256, 'PERSONAL_DATA', undefined, {
+        scope: WORKSPACE_SCOPE,
+      }),
     ).resolves.toEqual(reused);
   });
 
@@ -879,6 +952,7 @@ describe('S3GenericOperationArtifactStore retention refresh on reuse', () => {
     client.now = new Date('2026-10-12T17:40:00.000Z');
     const reused = await target.promote(staged, {
       retainUntil: '2026-10-13T17:40:00.000Z',
+      scope: WORKSPACE_SCOPE,
     });
 
     expect(copies(client)).toHaveLength(0);
@@ -896,6 +970,7 @@ describe('S3GenericOperationArtifactStore retention refresh on reuse', () => {
     client.now = new Date('2026-10-12T17:40:00.000Z');
     const reused = await target.promote(staged, {
       retainUntil: '2026-10-13T17:40:00.000Z',
+      scope: WORKSPACE_SCOPE,
     });
 
     expect(copies(client)).toHaveLength(1);
@@ -907,7 +982,9 @@ describe('S3GenericOperationArtifactStore retention refresh on reuse', () => {
     const { target, staged, stored } = await firstWrite(client);
 
     client.now = REUSE;
-    await expect(target.promote(staged)).resolves.toEqual(stored);
+    await expect(
+      target.promote(staged, { scope: WORKSPACE_SCOPE }),
+    ).resolves.toEqual(stored);
     expect(copies(client)).toHaveLength(0);
   });
 
@@ -921,7 +998,10 @@ describe('S3GenericOperationArtifactStore retention refresh on reuse', () => {
 
     client.now = REUSE;
     await expect(
-      target.promote(staged, { retainUntil: REUSE_EXPIRES_AT }),
+      target.promote(staged, {
+        retainUntil: REUSE_EXPIRES_AT,
+        scope: WORKSPACE_SCOPE,
+      }),
     ).resolves.toEqual(stored);
 
     expect(logger.warn).toHaveBeenCalledTimes(1);
@@ -941,6 +1021,7 @@ describe('S3GenericOperationArtifactStore retention refresh on reuse', () => {
     client.now = REUSE;
     const reused = await target.promote(staged, {
       retainUntil: REUSE_EXPIRES_AT,
+      scope: WORKSPACE_SCOPE,
     });
 
     // Without a version in the copy response the current version is the only truth.
@@ -962,6 +1043,7 @@ describe('S3GenericOperationArtifactStore retention refresh on reuse', () => {
         resultSchema: 'crawl4ai-fetch/v1',
         privacyClass: 'PERSONAL_DATA',
       }),
+      { scope: WORKSPACE_SCOPE },
     );
     const firstObject = client.objects.get(first.objectKey);
     const firstMetadata = { ...firstObject?.metadata };
@@ -976,7 +1058,7 @@ describe('S3GenericOperationArtifactStore retention refresh on reuse', () => {
         resultSchema: 'http-get/v1',
         privacyClass: 'PERSONAL_DATA',
       }),
-      { retainUntil: REUSE_EXPIRES_AT },
+      { retainUntil: REUSE_EXPIRES_AT, scope: WORKSPACE_SCOPE },
     );
 
     const [copy, ...rest] = copies(client);
@@ -1011,7 +1093,10 @@ describe('S3GenericOperationArtifactStore retention refresh on reuse', () => {
 
     client.now = REUSE;
     await expectStorageCode(
-      target.promote(staged, { retainUntil: REUSE_EXPIRES_AT }),
+      target.promote(staged, {
+        retainUntil: REUSE_EXPIRES_AT,
+        scope: WORKSPACE_SCOPE,
+      }),
       'GENERIC_OPERATION_ARTIFACT_INVALID',
     );
   });
@@ -1034,7 +1119,7 @@ describe('S3GenericOperationArtifactStore retention refresh on reuse', () => {
           resultSchema: 'crawl4ai-fetch/v1',
           privacyClass: 'PERSONAL_DATA',
         }),
-        { retainUntil: REUSE_EXPIRES_AT },
+        { retainUntil: REUSE_EXPIRES_AT, scope: WORKSPACE_SCOPE },
       ),
       'GENERIC_OPERATION_ARTIFACT_INVALID',
     );
@@ -1068,7 +1153,7 @@ describe('S3GenericOperationArtifactStore retention refresh on reuse', () => {
     const before = client.commands.length;
 
     await expectStorageCode(
-      target.promote(staged, { retainUntil }),
+      target.promote(staged, { retainUntil, scope: WORKSPACE_SCOPE }),
       'GENERIC_OPERATION_ARTIFACT_INVALID',
     );
     expect(client.commands).toHaveLength(before);

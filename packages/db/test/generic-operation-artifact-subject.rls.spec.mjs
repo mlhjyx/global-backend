@@ -42,9 +42,13 @@ const PRIVACY_PATH = Object.freeze({
   PERSONAL_DATA: "personal-data",
 });
 
-function objectKey(sha256, privacyClass) {
+function objectKey(sha256, privacyClass, workspaceId = null) {
   const privacyPath = PRIVACY_PATH[privacyClass];
   assert.ok(privacyPath, `unknown privacy class ${privacyClass}`);
+  if (privacyClass === "PERSONAL_DATA") {
+    assert.ok(workspaceId, "PERSONAL_DATA requires workspaceId");
+    return `generic-operation-results/v1/final/${privacyPath}/ws/${workspaceId}/sha256/${sha256.slice(0, 2)}/${sha256}`;
+  }
   return `generic-operation-results/v1/final/${privacyPath}/sha256/${sha256.slice(0, 2)}/${sha256}`;
 }
 
@@ -156,7 +160,7 @@ function artifactInput(binding, privacyClass, subjectRef = null) {
     ...binding,
     artifactId: randomUUID(),
     resultSchema: "http-get/v1",
-    objectKey: objectKey(sha256, privacyClass),
+    objectKey: objectKey(sha256, privacyClass, binding.workspaceId),
     sha256,
     sizeBytes: 1024n,
     mediaType: "text/html",

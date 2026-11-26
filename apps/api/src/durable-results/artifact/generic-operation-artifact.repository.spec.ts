@@ -1,7 +1,10 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 import type { PrismaService } from "../../prisma/prisma.service";
-import { contentAddressedObjectKey } from "./artifact-key";
+import {
+  contentAddressedObjectKey,
+  legacyPersonalDataObjectKey,
+} from "./artifact-key";
 import {
   GENERIC_OPERATION_ARTIFACT_MANIFEST_SCHEMA,
   GENERIC_OPERATION_ARTIFACT_REFERENCE_SCHEMA,
@@ -9,7 +12,10 @@ import {
   type GenericOperationArtifactManifest,
   type GenericOperationArtifactReference,
 } from "./artifact.types";
-import { GenericOperationArtifactRepository } from "./generic-operation-artifact.repository";
+import {
+  GenericOperationArtifactRepository,
+  parseGenericOperationArtifactManifest,
+} from "./generic-operation-artifact.repository";
 
 const WORKSPACE_ID = "e03abddd-1307-47cb-a731-7e7a786615a0";
 const AUTHORITY_ID = "42c863b9-7c7e-4d28-8678-60ef9a20219b";
@@ -416,12 +422,59 @@ describe("GenericOperationArtifactRepository", () => {
 
   it("rejects a well-formed append row that differs from the submitted manifest", async () => {
     const database = workspaceDatabase(async () => [
-      row(manifest({ privacyClass: "PERSONAL_DATA" })),
+      row(
+        manifest({
+          privacyClass: "PERSONAL_DATA",
+          objectKey: contentAddressedObjectKey(SHA256, "PERSONAL_DATA", {
+            scopeKind: "workspace",
+            workspaceId: WORKSPACE_ID,
+          }),
+        }),
+      ),
     ]);
     const repository = new GenericOperationArtifactRepository(database.prisma);
 
     await expect(
       repository.appendManifest(manifest(), EXPECTED_FACTS),
     ).rejects.toSatisfy(expectStableInvalid);
+  });
+
+  it("enforces ws/{workspaceId}/... on new PERSONAL_DATA manifests while reading legacy DB rows", () => {
+    const personalWsManifest = manifest({
+      privacyClass: "PERSONAL_DATA",
+      objectKey: contentAddressedObjectKey(SHA256, "PERSONAL_DATA", {
+        scopeKind: "workspace",
+        workspaceId: WORKSPACE_ID,
+      }),
+    });
+    expect(parseGenericOperationArtifactManifest(personalWsManifest)).toEqual(
+      personalWsManifest,
+    );
+
+    const legacyManifest = manifest({
+      privacyClass: "PERSONAL_DATA",
+      objectKey: legacyPersonalDataObjectKey(SHA256),
+    });
+    expect(() =>
+      parseGenericOperationArtifactManifest(legacyManifest),
+    ).toThrow("GENERIC_OPERATION_ARTIFACT_INVALID");
+    expect(
+      parseGenericOperationArtifactManifest(legacyManifest, {
+        allowLegacyPersonalData: true,
+      }),
+    ).toEqual(legacyManifest);
+
+    const otherWorkspaceManifest = manifest({
+      privacyClass: "PERSONAL_DATA",
+      objectKey: contentAddressedObjectKey(SHA256, "PERSONAL_DATA", {
+        scopeKind: "workspace",
+        workspaceId: "04599a0f-fd8b-49cf-8eaf-fdfcccbdd518",
+      }),
+    });
+    expect(() =>
+      parseGenericOperationArtifactManifest(otherWorkspaceManifest, {
+        allowLegacyPersonalData: true,
+      }),
+    ).toThrow("GENERIC_OPERATION_ARTIFACT_INVALID");
   });
 });

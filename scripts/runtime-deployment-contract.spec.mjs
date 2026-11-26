@@ -127,20 +127,27 @@ test('MinIO is pinned and provisioned by one idempotent deployment job', async (
   const cleanupPolicy = bootstrap.slice(bootstrap.indexOf('cat > "$cleanup_policy"'), bootstrap.indexOf('cat > "$personal_policy"'));
   assert.doesNotMatch(cleanupPolicy, /DeleteObjectVersion[\s\S]*ExistingObjectTag/u);
   // Erasure lists every version of one personal-data key (the version ledger can
-  // miss a refresh copy). The grant matches one full content-addressed key and
-  // nothing shorter: a wildcard prefix would let the cleanup credential, which
-  // already reads versions, enumerate and bulk-read every PERSONAL_DATA object.
-  const exactPersonalKeyPattern = `generic-operation-results/v1/final/personal-data/sha256/??/${'?'.repeat(64)}`;
+  // miss a refresh copy). Both workspace-scoped and legacy key patterns match
+  // one full key and nothing shorter: a wildcard prefix would let the cleanup
+  // credential, which already reads versions, enumerate and bulk-read every
+  // PERSONAL_DATA object.
+  const exactWorkspacePersonalKeyPattern = `generic-operation-results/v1/final/personal-data/ws/????????-????-????-????-????????????/sha256/??/${'?'.repeat(64)}`;
+  const exactLegacyPersonalKeyPattern = `generic-operation-results/v1/final/personal-data/sha256/??/${'?'.repeat(64)}`;
   // MinIO lets a plain StringLike condition pass when ANY value of a repeated
   // query parameter matches, while ListObjectVersions lists by the first value.
   // ForAllValues requires every prefix value to match; Null=false rejects a
   // request without one (ForAllValues is true for an empty set).
-  const listGrant = cleanupPolicy.match(LIST_VERSIONS_GRANT);
-  assert.equal(listGrant?.[1], exactPersonalKeyPattern);
+  const listGrantsMatches = [...cleanupPolicy.matchAll(new RegExp(LIST_VERSIONS_GRANT.source, 'gu'))].map(
+    (match) => match[1],
+  );
+  assert.deepEqual(listGrantsMatches, [
+    exactWorkspacePersonalKeyPattern,
+    exactLegacyPersonalKeyPattern,
+  ]);
   assert.doesNotMatch(cleanupPolicy, /"StringLike": \{\s*"s3:prefix"/u);
-  assert.equal(cleanupPolicy.match(/s3:ListBucketVersions/gu)?.length, 1);
-  // Exactly the ForAllValues pattern and its Null guard name s3:prefix.
-  assert.equal(cleanupPolicy.match(/"s3:prefix"/gu)?.length, 2);
+  assert.equal(cleanupPolicy.match(/s3:ListBucketVersions/gu)?.length, 2);
+  // Exactly the two ForAllValues patterns and their two Null guards name s3:prefix.
+  assert.equal(cleanupPolicy.match(/"s3:prefix"/gu)?.length, 4);
   assert.doesNotMatch(cleanupPolicy, /"s3:ListBucket"/u);
   assert.match(cleanupAdapter, /ListObjectVersionsCommand/);
   assert.match(cleanupAdapter, /GetObjectTaggingCommand/);
@@ -419,6 +426,9 @@ test('provisioning gives MinIO exactly the reviewed calls and policies, first de
   });
   assert.deepEqual(listGrants(named.runtime_policy), [listGrant('generic-operation-results/v1/readiness/*')]);
   assert.deepEqual(listGrants(named.cleanup_policy), [
+    listGrant(
+      `generic-operation-results/v1/final/personal-data/ws/????????-????-????-????-????????????/sha256/??/${'?'.repeat(64)}`,
+    ),
     listGrant(`generic-operation-results/v1/final/personal-data/sha256/??/${'?'.repeat(64)}`),
   ]);
   assert.deepEqual(listGrants(named.personal_policy), []);

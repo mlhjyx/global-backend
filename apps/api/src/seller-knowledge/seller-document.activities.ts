@@ -7,6 +7,7 @@ import { chunkMarkdown } from '../site-builder/chunker';
 import type { DoclingClient } from '../site-builder/docling.client';
 import type { EmbeddingsClient } from '../site-builder/embeddings.client';
 import type { SellerDocumentsStorage } from './seller-documents.storage';
+import { createSellerDocumentPendingCleanupActivities } from './seller-document-pending-cleanup.activities';
 
 /**
  * 卖家资料解析（模块 02 · Phase 2b）：租约认领 → 下载 → Docling/文本直读 →
@@ -217,6 +218,10 @@ export function createSellerDocumentActivities(deps: SellerDocumentActivityDeps)
   }
 
   return {
+    ...createSellerDocumentPendingCleanupActivities({
+      prisma: deps.prisma,
+      storage: deps.storage,
+    }),
     /** 单文档解析：一条工作流只处理一份资料（fenced lease 防重复写；5s 心跳 + 取消透传）。 */
     async processSellerDocument(
       input: SellerDocumentIngestInput,

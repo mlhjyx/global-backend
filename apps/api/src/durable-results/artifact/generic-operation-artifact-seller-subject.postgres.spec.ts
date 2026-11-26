@@ -74,8 +74,8 @@ function digest(): string {
   return randomUUID().replaceAll('-', '').repeat(2);
 }
 
-function objectKey(sha256: string): string {
-  return `generic-operation-results/v1/final/personal-data/sha256/${sha256.slice(0, 2)}/${sha256}`;
+function objectKey(sha256: string, workspaceId: string): string {
+  return `generic-operation-results/v1/final/personal-data/ws/${workspaceId}/sha256/${sha256.slice(0, 2)}/${sha256}`;
 }
 
 /** The message PostgreSQL raised through a Prisma raw query, or null. */
@@ -211,7 +211,7 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
         authorityId: artifact.authorityId,
         operationId: artifact.operationId,
         resultSchema: 'crawl4ai-fetch/v1',
-        objectKey: objectKey(artifact.sha256),
+        objectKey: objectKey(artifact.sha256, artifact.workspaceId),
         sha256: artifact.sha256,
         sizeBytes: '1024',
         mediaType: 'text/markdown',

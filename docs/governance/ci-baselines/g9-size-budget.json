@@ -760,15 +760,6 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/durable-results/artifact/generic-operation-artifact.object-contract.ts#parseStoredArtifactContract": {
-      "file": "apps/api/src/durable-results/artifact/generic-operation-artifact.object-contract.ts",
-      "name": "parseStoredArtifactContract",
-      "line": 60,
-      "complexity": 22,
-      "owner": "P6-CI-10",
-      "expiresAt": "2027-01-31",
-      "reason": "存量高复杂度函数（棘轮：只许降低）"
-    },
     "apps/api/src/durable-results/artifact/generic-operation-artifact.service.ts#snapshotExpectedManifest": {
       "file": "apps/api/src/durable-results/artifact/generic-operation-artifact.service.ts",
       "name": "snapshotExpectedManifest",

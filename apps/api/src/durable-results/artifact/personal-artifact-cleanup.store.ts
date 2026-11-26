@@ -5,11 +5,18 @@ import {
   ListObjectVersionsCommand,
 } from '@aws-sdk/client-s3';
 import { types } from 'node:util';
-import { contentAddressedObjectKey } from './artifact-key';
+import {
+  contentAddressedObjectKey,
+  legacyPersonalDataObjectKey,
+} from './artifact-key';
 import { isCanonicalArtifactObjectVersionId } from './generic-operation-artifact.object-contract';
-import { isCanonicalArtifactSha256 } from './artifact.types';
+import {
+  isCanonicalArtifactSha256,
+  isCanonicalArtifactUuid,
+} from './artifact.types';
 import {
   PERSONAL_ARTIFACT_CLEANUP_STORE_UNAVAILABLE,
+  type PersonalArtifactObjectScope,
   type PrivilegedPersonalArtifactCleanupPort,
 } from './personal-artifact-cleanup.contract';
 
@@ -24,7 +31,12 @@ export interface S3PersonalArtifactCleanupAdapterOptions {
   readonly now?: () => number;
 }
 
-const INPUT_KEYS = Object.freeze(['sha256', 'versionId']);
+const INPUT_KEYS = Object.freeze([
+  'workspaceId',
+  'sha256',
+  'versionId',
+  'objectScope',
+]);
 /** Listing-and-delete passes per command attempt before the durable retry takes over. */
 const ERASE_PASSES = 3;
 const LIST_PAGE_SIZE = 1_000;
@@ -44,7 +56,14 @@ const MAX_LISTED_ENTRIES = 10_000;
  */
 export const ERASE_TIME_BUDGET_MS = 60_000;
 /** A PERSONAL_DATA key no content can address in practice: the readiness probe lists it. */
-const LISTING_PROBE_KEY = contentAddressedObjectKey('0'.repeat(64), 'PERSONAL_DATA');
+const LISTING_PROBE_KEY = contentAddressedObjectKey(
+  '0'.repeat(64),
+  'PERSONAL_DATA',
+  {
+    scopeKind: 'workspace',
+    workspaceId: '00000000-0000-4000-8000-000000000000',
+  },
+);
 
 type KeyEntry = Readonly<{ versionId: string; isLatest: boolean }>;
 /** client.send that refuses to start a request once the attempt's time budget is spent. */
@@ -82,8 +101,10 @@ function isAmbiguousNotFound(error: unknown): boolean {
 }
 
 function parseInput(value: unknown): Readonly<{
+  workspaceId: string;
   sha256: string;
   versionId: string;
+  objectScope: PersonalArtifactObjectScope;
 }> {
   try {
     if (
@@ -107,15 +128,19 @@ function parseInput(value: unknown): Readonly<{
     ) {
       throw unavailable();
     }
+    const workspaceId = descriptors.workspaceId.value as unknown;
     const sha256 = descriptors.sha256.value as unknown;
     const versionId = descriptors.versionId.value as unknown;
+    const objectScope = descriptors.objectScope.value as unknown;
     if (
+      !isCanonicalArtifactUuid(workspaceId) ||
       !isCanonicalArtifactSha256(sha256) ||
-      !isCanonicalArtifactObjectVersionId(versionId)
+      !isCanonicalArtifactObjectVersionId(versionId) ||
+      (objectScope !== 'workspace' && objectScope !== 'legacy_global')
     ) {
       throw unavailable();
     }
-    return Object.freeze({ sha256, versionId });
+    return Object.freeze({ workspaceId, sha256, versionId, objectScope });
   } catch {
     throw unavailable();
   }
@@ -185,11 +210,19 @@ export class S3PersonalArtifactCleanupAdapter
    * sweep of the same key, or the lifecycle).
    */
   async eraseFinalObject(input: Readonly<{
+    workspaceId: string;
     sha256: string;
     versionId: string;
+    objectScope: PersonalArtifactObjectScope;
   }>): Promise<'DELETED' | 'ABSENT'> {
     const exact = parseInput(input);
-    const key = contentAddressedObjectKey(exact.sha256, 'PERSONAL_DATA');
+    const key =
+      exact.objectScope === 'workspace'
+        ? contentAddressedObjectKey(exact.sha256, 'PERSONAL_DATA', {
+            scopeKind: 'workspace',
+            workspaceId: exact.workspaceId,
+          })
+        : legacyPersonalDataObjectKey(exact.sha256);
     const deadline = this.now() + ERASE_TIME_BUDGET_MS;
     const send = (command: object): Promise<unknown> => {
       if (!(this.now() < deadline)) return Promise.reject(unavailable());

@@ -5,7 +5,11 @@ import {
   EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE,
 } from "../../execution-budget/execution-budget-authority.repository";
 import { PrismaService } from "../../prisma/prisma.service";
-import { contentAddressedObjectKey } from "./artifact-key";
+import {
+  contentAddressedObjectKey,
+  isCanonicalPersonalDataObjectKey,
+  type ArtifactObjectScope,
+} from "./artifact-key";
 import {
   artifactExpectedFactsColumns,
   parseArtifactExpectedFactsColumns,
@@ -193,8 +197,13 @@ function assertScope(
   }
 }
 
+export interface ParseArtifactManifestOptions {
+  readonly allowLegacyPersonalData?: boolean;
+}
+
 export function parseGenericOperationArtifactManifest(
   value: unknown,
+  options?: ParseArtifactManifestOptions,
 ): GenericOperationArtifactManifest {
   if (!isPlainClosedObject(value, MANIFEST_KEY_SET, MANIFEST_KEYS.length)) {
     return invalidGenericOperationArtifact();
@@ -209,6 +218,10 @@ export function parseGenericOperationArtifactManifest(
     return invalidGenericOperationArtifact();
   }
   const privacyClass = value.privacyClass as ArtifactPrivacyClass;
+  const scope: ArtifactObjectScope =
+    value.scopeKind === "platform"
+      ? { scopeKind: "platform", workspaceId: null }
+      : { scopeKind: "workspace", workspaceId: value.workspaceId as string };
   if (
     value.schemaVersion !== GENERIC_OPERATION_ARTIFACT_MANIFEST_SCHEMA ||
     !isCanonicalArtifactUuid(value.artifactId) ||
@@ -216,8 +229,17 @@ export function parseGenericOperationArtifactManifest(
     !isCanonicalArtifactUuid(value.operationId) ||
     !isCanonicalArtifactSha256(value.sha256) ||
     !isCanonicalArtifactSizeBytes(value.sizeBytes) ||
-    value.objectKey !==
-      contentAddressedObjectKey(value.sha256, privacyClass) ||
+    typeof value.objectKey !== "string" ||
+    (privacyClass === "PERSONAL_DATA"
+      ? scope.scopeKind !== "workspace" ||
+        !isCanonicalPersonalDataObjectKey(
+          value.objectKey,
+          value.sha256,
+          scope.workspaceId,
+          options?.allowLegacyPersonalData === true,
+        )
+      : value.objectKey !==
+        contentAddressedObjectKey(value.sha256, privacyClass, scope)) ||
     (value.sourceDigest !== null &&
       !isCanonicalArtifactSha256(value.sourceDigest)) ||
     createdAt === null ||
@@ -290,23 +312,26 @@ function parseRow(row: unknown): GenericOperationArtifactSnapshot {
   if (typeof typed.size_bytes !== "bigint" || typed.size_bytes < 0n) {
     return invalidGenericOperationArtifact();
   }
-  const manifest = parseGenericOperationArtifactManifest({
-    schemaVersion: GENERIC_OPERATION_ARTIFACT_MANIFEST_SCHEMA,
-    artifactId: typed.artifact_id,
-    scopeKind,
-    workspaceId: typed.workspace_id,
-    authorityId: typed.authority_id,
-    operationId: typed.operation_id,
-    resultSchema: typed.result_schema,
-    objectKey: typed.object_key,
-    sha256: typed.sha256,
-    sizeBytes: typed.size_bytes.toString(),
-    mediaType: typed.media_type,
-    privacyClass: typed.privacy_class,
-    sourceDigest: typed.source_digest,
-    createdAt: canonicalTimestamp(typed.created_at),
-    expiresAt: canonicalTimestamp(typed.expires_at),
-  });
+  const manifest = parseGenericOperationArtifactManifest(
+    {
+      schemaVersion: GENERIC_OPERATION_ARTIFACT_MANIFEST_SCHEMA,
+      artifactId: typed.artifact_id,
+      scopeKind,
+      workspaceId: typed.workspace_id,
+      authorityId: typed.authority_id,
+      operationId: typed.operation_id,
+      resultSchema: typed.result_schema,
+      objectKey: typed.object_key,
+      sha256: typed.sha256,
+      sizeBytes: typed.size_bytes.toString(),
+      mediaType: typed.media_type,
+      privacyClass: typed.privacy_class,
+      sourceDigest: typed.source_digest,
+      createdAt: canonicalTimestamp(typed.created_at),
+      expiresAt: canonicalTimestamp(typed.expires_at),
+    },
+    { allowLegacyPersonalData: true },
+  );
   const columns: ArtifactExpectedFactsColumns = Object.freeze({
     expectedHttpStatus: nullableNumber(typed.expected_http_status),
     expectedHttpOk: nullableBoolean(typed.expected_http_ok),

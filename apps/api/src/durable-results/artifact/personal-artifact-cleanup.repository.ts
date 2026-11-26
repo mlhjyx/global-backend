@@ -1,11 +1,16 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import type { PrismaService } from '../../prisma/prisma.service';
 import {
+  contentAddressedObjectKey,
+  legacyPersonalDataObjectKey,
+} from './artifact-key';
+import {
   PERSONAL_ARTIFACT_CLEANUP_COMMAND_SCHEMA,
   type PersonalArtifactCleanupClaim,
   type PersonalArtifactCleanupCommand,
   type PersonalArtifactCleanupCommandRepository,
   type PersonalArtifactCleanupFailure,
+  type PersonalArtifactObjectScope,
 } from './personal-artifact-cleanup.contract';
 
 type CleanupRow = Readonly<{
@@ -13,6 +18,7 @@ type CleanupRow = Readonly<{
   workspace_id: unknown;
   deletion_request_id: unknown;
   artifact_id: unknown;
+  object_key: unknown;
   sha256: unknown;
   object_version_id: unknown;
   tombstoned_at: unknown;
@@ -78,14 +84,32 @@ function commandFromRow(row: CleanupRow): PersonalArtifactCleanupCommand {
   ) {
     return invalid();
   }
+  const workspaceId = uuid(row.workspace_id);
+  const canonicalWorkspaceKey = contentAddressedObjectKey(
+    row.sha256,
+    'PERSONAL_DATA',
+    {
+      scopeKind: 'workspace',
+      workspaceId,
+    },
+  );
+  let objectScope: PersonalArtifactObjectScope;
+  if (row.object_key === canonicalWorkspaceKey) {
+    objectScope = 'workspace';
+  } else if (row.object_key === legacyPersonalDataObjectKey(row.sha256)) {
+    objectScope = 'legacy_global';
+  } else {
+    return invalid();
+  }
   return Object.freeze({
     schemaVersion: PERSONAL_ARTIFACT_CLEANUP_COMMAND_SCHEMA,
     commandId: uuid(row.command_id),
-    workspaceId: uuid(row.workspace_id),
+    workspaceId,
     deletionRequestId: uuid(row.deletion_request_id),
     artifactId: uuid(row.artifact_id),
     sha256: row.sha256,
     versionId: row.object_version_id,
+    objectScope,
     tombstonedAt: timestamp(row.tombstoned_at),
     attempt: row.attempt,
   });

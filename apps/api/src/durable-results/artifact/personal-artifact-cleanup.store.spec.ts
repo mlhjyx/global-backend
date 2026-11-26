@@ -5,7 +5,10 @@ import {
   ListObjectVersionsCommand,
 } from '@aws-sdk/client-s3';
 import { describe, expect, it, vi } from 'vitest';
-import { contentAddressedObjectKey } from './artifact-key';
+import {
+  contentAddressedObjectKey,
+  legacyPersonalDataObjectKey,
+} from './artifact-key';
 import {
   S3PersonalArtifactCleanupAdapter,
   type PersonalArtifactCleanupS3Client,
@@ -13,9 +16,26 @@ import {
 import { VersionedBucketFixture } from './personal-artifact-cleanup.versioned-bucket.test-fixture';
 
 const BUCKET = 'personal-cleanup-test';
+const WORKSPACE_ID = '00000000-0000-4000-8000-0000000000a1';
+const OTHER_WORKSPACE_ID = '00000000-0000-4000-8000-0000000000b2';
 const SHA256 = 'ab'.repeat(32);
-const KEY = contentAddressedObjectKey(SHA256, 'PERSONAL_DATA');
+const KEY = contentAddressedObjectKey(SHA256, 'PERSONAL_DATA', {
+  scopeKind: 'workspace',
+  workspaceId: WORKSPACE_ID,
+});
 const VERSION_ID = '3LgKp9Q4-exact-version';
+
+function eraseInput(
+  overrides: Partial<Parameters<S3PersonalArtifactCleanupAdapter['eraseFinalObject']>[0]> = {},
+) {
+  return {
+    workspaceId: WORKSPACE_ID,
+    sha256: SHA256,
+    versionId: VERSION_ID,
+    objectScope: 'workspace' as const,
+    ...overrides,
+  };
+}
 
 function adapterOver(client: PersonalArtifactCleanupS3Client): S3PersonalArtifactCleanupAdapter {
   return new S3PersonalArtifactCleanupAdapter({ bucket: BUCKET, client });
@@ -41,7 +61,7 @@ describe('S3PersonalArtifactCleanupAdapter', () => {
     const current = bucket.putVersion(KEY);
 
     await expect(
-      adapterOver(bucket).eraseFinalObject({ sha256: SHA256, versionId: VERSION_ID }),
+      adapterOver(bucket).eraseFinalObject(eraseInput()),
     ).resolves.toBe('DELETED');
 
     expect(bucket.versionIds(KEY)).toEqual({ objects: [], markers: [] });
@@ -66,7 +86,7 @@ describe('S3PersonalArtifactCleanupAdapter', () => {
     const unrecorded = bucket.putVersion(KEY, { versionId: 'refresh-copy-never-settled' });
 
     await expect(
-      adapterOver(bucket).eraseFinalObject({ sha256: SHA256, versionId: VERSION_ID }),
+      adapterOver(bucket).eraseFinalObject(eraseInput()),
     ).resolves.toBe('ABSENT');
 
     expect(deletedVersionIds(bucket)).toEqual([unrecorded]);
@@ -81,7 +101,7 @@ describe('S3PersonalArtifactCleanupAdapter', () => {
     const seeded = bucket.currentHistory.length;
 
     await expect(
-      adapterOver(bucket).eraseFinalObject({ sha256: SHA256, versionId: current }),
+      adapterOver(bucket).eraseFinalObject(eraseInput({ versionId: current })),
     ).resolves.toBe('DELETED');
 
     expect(bucket.currentHistory.slice(seeded).map((entry) => entry.current)).toEqual([
@@ -98,7 +118,7 @@ describe('S3PersonalArtifactCleanupAdapter', () => {
     const seeded = bucket.currentHistory.length;
 
     await expect(
-      adapterOver(bucket).eraseFinalObject({ sha256: SHA256, versionId: VERSION_ID }),
+      adapterOver(bucket).eraseFinalObject(eraseInput()),
     ).resolves.toBe('DELETED');
 
     expect(deletedVersionIds(bucket)).toEqual([VERSION_ID, marker]);
@@ -118,7 +138,7 @@ describe('S3PersonalArtifactCleanupAdapter', () => {
     const current = bucket.putVersion(KEY);
 
     await expect(
-      adapterOver(bucket).eraseFinalObject({ sha256: SHA256, versionId: current }),
+      adapterOver(bucket).eraseFinalObject(eraseInput({ versionId: current })),
     ).resolves.toBe('DELETED');
 
     const listings = bucket.commands.filter(
@@ -142,7 +162,7 @@ describe('S3PersonalArtifactCleanupAdapter', () => {
     const sibling = bucket.putVersion(`${KEY}-sibling`);
 
     await expect(
-      adapterOver(bucket).eraseFinalObject({ sha256: SHA256, versionId: VERSION_ID }),
+      adapterOver(bucket).eraseFinalObject(eraseInput()),
     ).resolves.toBe('DELETED');
 
     expect(bucket.versionIds(`${KEY}-sibling`)).toEqual({ objects: [sibling], markers: [] });
@@ -160,7 +180,7 @@ describe('S3PersonalArtifactCleanupAdapter', () => {
     };
 
     await expect(
-      adapterOver(bucket).eraseFinalObject({ sha256: SHA256, versionId: VERSION_ID }),
+      adapterOver(bucket).eraseFinalObject(eraseInput()),
     ).resolves.toBe('DELETED');
 
     expect(concurrent).not.toBeNull();
@@ -176,7 +196,7 @@ describe('S3PersonalArtifactCleanupAdapter', () => {
     };
 
     await expect(
-      adapterOver(bucket).eraseFinalObject({ sha256: SHA256, versionId: VERSION_ID }),
+      adapterOver(bucket).eraseFinalObject(eraseInput()),
     ).rejects.toThrow('PERSONAL_ARTIFACT_CLEANUP_STORE_UNAVAILABLE');
     const listings = bucket.commands.filter((command) => command instanceof ListObjectVersionsCommand);
     expect(listings).toHaveLength(4);
@@ -198,7 +218,7 @@ describe('S3PersonalArtifactCleanupAdapter', () => {
     const odd = bucket.putVersion(KEY, { tags });
 
     await expect(
-      adapterOver(bucket).eraseFinalObject({ sha256: SHA256, versionId: VERSION_ID }),
+      adapterOver(bucket).eraseFinalObject(eraseInput()),
     ).rejects.toThrow('PERSONAL_ARTIFACT_CLEANUP_STORE_UNAVAILABLE');
 
     expect(deletedVersionIds(bucket)).toEqual([]);
@@ -217,7 +237,7 @@ describe('S3PersonalArtifactCleanupAdapter', () => {
     };
 
     await expect(
-      adapterOver(bucket).eraseFinalObject({ sha256: SHA256, versionId: VERSION_ID }),
+      adapterOver(bucket).eraseFinalObject(eraseInput()),
     ).resolves.toBe('DELETED');
     expect(bucket.versionIds(KEY)).toEqual({ objects: [], markers: [] });
     expect(deletedVersionIds(bucket)).toContain(current);
@@ -242,7 +262,7 @@ describe('S3PersonalArtifactCleanupAdapter', () => {
     const seeded = bucket.currentHistory.length;
 
     await expect(
-      adapterOver(bucket).eraseFinalObject({ sha256: SHA256, versionId: VERSION_ID }),
+      adapterOver(bucket).eraseFinalObject(eraseInput()),
     ).resolves.toBe('DELETED');
 
     expect(raced).toBe(true);
@@ -275,7 +295,7 @@ describe('S3PersonalArtifactCleanupAdapter', () => {
     };
 
     await expect(
-      adapterOver(client).eraseFinalObject({ sha256: SHA256, versionId: VERSION_ID }),
+      adapterOver(client).eraseFinalObject(eraseInput()),
     ).rejects.toThrow('PERSONAL_ARTIFACT_CLEANUP_STORE_UNAVAILABLE');
 
     // Deleting the current version now would make the older one current again.
@@ -298,7 +318,7 @@ describe('S3PersonalArtifactCleanupAdapter', () => {
     const slow = new S3PersonalArtifactCleanupAdapter({ bucket: BUCKET, client: bucket, now: () => now });
 
     await expect(
-      slow.eraseFinalObject({ sha256: SHA256, versionId: VERSION_ID }),
+      slow.eraseFinalObject(eraseInput()),
     ).rejects.toThrow('PERSONAL_ARTIFACT_CLEANUP_STORE_UNAVAILABLE');
 
     // One listing, three tag reads and the two noncurrent deletes fit in 60 s;
@@ -312,7 +332,7 @@ describe('S3PersonalArtifactCleanupAdapter', () => {
 
     // The durable retry is a fresh attempt with a fresh budget.
     await expect(
-      slow.eraseFinalObject({ sha256: SHA256, versionId: VERSION_ID }),
+      slow.eraseFinalObject(eraseInput()),
     ).resolves.toBe('ABSENT');
     expect(bucket.versionIds(KEY)).toEqual({ objects: [], markers: [] });
   });
@@ -331,7 +351,7 @@ describe('S3PersonalArtifactCleanupAdapter', () => {
     });
 
     await expect(
-      adapterOver({ send }).eraseFinalObject({ sha256: SHA256, versionId: VERSION_ID }),
+      adapterOver({ send }).eraseFinalObject(eraseInput()),
     ).resolves.toBe('DELETED');
     expect(send.mock.calls.some(([command]) => command instanceof GetBucketLocationCommand)).toBe(true);
   });
@@ -346,7 +366,7 @@ describe('S3PersonalArtifactCleanupAdapter', () => {
     });
 
     await expect(
-      adapterOver({ send }).eraseFinalObject({ sha256: SHA256, versionId: VERSION_ID }),
+      adapterOver({ send }).eraseFinalObject(eraseInput()),
     ).rejects.toThrow('PERSONAL_ARTIFACT_CLEANUP_STORE_UNAVAILABLE');
     expect(send).toHaveBeenCalledOnce();
   });
@@ -362,7 +382,7 @@ describe('S3PersonalArtifactCleanupAdapter', () => {
     });
 
     await expect(
-      adapterOver({ send }).eraseFinalObject({ sha256: SHA256, versionId: VERSION_ID }),
+      adapterOver({ send }).eraseFinalObject(eraseInput()),
     ).rejects.toThrow('PERSONAL_ARTIFACT_CLEANUP_STORE_UNAVAILABLE');
     expect(send.mock.calls.some(([command]) => command instanceof DeleteObjectCommand)).toBe(false);
   });
@@ -383,7 +403,7 @@ describe('S3PersonalArtifactCleanupAdapter', () => {
     });
 
     await expect(
-      adapterOver({ send }).eraseFinalObject({ sha256: SHA256, versionId: VERSION_ID }),
+      adapterOver({ send }).eraseFinalObject(eraseInput()),
     ).rejects.toThrow('PERSONAL_ARTIFACT_CLEANUP_STORE_UNAVAILABLE');
   });
 
@@ -398,7 +418,7 @@ describe('S3PersonalArtifactCleanupAdapter', () => {
     });
 
     await expect(
-      adapterOver({ send }).eraseFinalObject({ sha256: SHA256, versionId: VERSION_ID }),
+      adapterOver({ send }).eraseFinalObject(eraseInput()),
     ).rejects.toThrow('PERSONAL_ARTIFACT_CLEANUP_STORE_UNAVAILABLE');
     expect(send).toHaveBeenCalledOnce();
   });
@@ -410,7 +430,10 @@ describe('S3PersonalArtifactCleanupAdapter', () => {
     expect(probe).toBeInstanceOf(ListObjectVersionsCommand);
     expect(probe?.input).toEqual({
       Bucket: BUCKET,
-      Prefix: contentAddressedObjectKey('0'.repeat(64), 'PERSONAL_DATA'),
+      Prefix: contentAddressedObjectKey('0'.repeat(64), 'PERSONAL_DATA', {
+        scopeKind: 'workspace',
+        workspaceId: '00000000-0000-4000-8000-000000000000',
+      }),
       MaxKeys: 1,
     });
 
@@ -422,10 +445,39 @@ describe('S3PersonalArtifactCleanupAdapter', () => {
     );
   });
 
+  it('isolates workspace-scoped erasure from another workspace with identical digest and supports legacy_global cleanup', async () => {
+    const bucket = new VersionedBucketFixture(BUCKET);
+    const otherKey = contentAddressedObjectKey(SHA256, 'PERSONAL_DATA', {
+      scopeKind: 'workspace',
+      workspaceId: OTHER_WORKSPACE_ID,
+    });
+    const legacyKey = legacyPersonalDataObjectKey(SHA256);
+    bucket.putVersion(KEY, { versionId: VERSION_ID });
+    const otherVersion = bucket.putVersion(otherKey);
+    const legacyVersion = bucket.putVersion(legacyKey);
+
+    await expect(
+      adapterOver(bucket).eraseFinalObject(eraseInput()),
+    ).resolves.toBe('DELETED');
+    expect(bucket.versionIds(KEY)).toEqual({ objects: [], markers: [] });
+    expect(bucket.versionIds(otherKey)).toEqual({ objects: [otherVersion], markers: [] });
+    expect(bucket.versionIds(legacyKey)).toEqual({ objects: [legacyVersion], markers: [] });
+
+    await expect(
+      adapterOver(bucket).eraseFinalObject(
+        eraseInput({ objectScope: 'legacy_global', versionId: legacyVersion }),
+      ),
+    ).resolves.toBe('DELETED');
+    expect(bucket.versionIds(legacyKey)).toEqual({ objects: [], markers: [] });
+    expect(bucket.versionIds(otherKey)).toEqual({ objects: [otherVersion], markers: [] });
+  });
+
   it.each([
-    ['invalid digest', { sha256: 'caller/key', versionId: VERSION_ID }],
-    ['missing version', { sha256: SHA256, versionId: '' }],
-    ['extra caller key', { sha256: SHA256, versionId: VERSION_ID, objectKey: 'chosen' }],
+    ['invalid digest', eraseInput({ sha256: 'caller/key' })],
+    ['invalid workspaceId', eraseInput({ workspaceId: 'not-a-uuid' })],
+    ['missing version', eraseInput({ versionId: '' })],
+    ['invalid objectScope', eraseInput({ objectScope: 'platform' as never })],
+    ['extra caller key', { ...eraseInput(), objectKey: 'chosen' }],
   ])('rejects %s before S3', async (_case, input) => {
     const send = vi.fn();
 
