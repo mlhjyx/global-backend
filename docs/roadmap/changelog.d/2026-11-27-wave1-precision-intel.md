@@ -7,7 +7,7 @@ title: "feat(precision-intel): 补齐波次一获客证据与联系人质量防�
 - 起因：Wave 1（Batch 1.8B）针对获客链路召回与精准度恢复、零成本 OSINT 补全、Stage C 非 bypass 500 与 bypass 租约中断、外发卖方语境退化、worker 租约丢失僵尸存活与试点脏数据问题进行集中收敛修复。
 - 改动：
   - 恢复 `social.search_serper`（<=240 字符脱敏 `snippet`）与 `social.search_exa_people`（<=3 条脱敏 `highlights`），抽离 `durable-results/social-search-result-projection.ts` 并保持历史 `{ url, title }` 回放兼容。
-  - 社媒归因以启发式对数几率排序，对明确提到前任经历的目标公司关联进入复核。按国家策略限制 LinkedIn L2 直抓，Exa 请求使用 `maxCharacters` 并保留本地截断。
+  - 社媒归因以启发式对数几率排序，对明确提到前任经历的目标公司关联进入复核。按法域限制 LinkedIn L2 直抓，国别无法解析时仍检查 `.eu` 域名和欧洲法定后缀。Exa 请求使用 `maxCharacters` 并保留本地截断。
   - 法定披露抽取覆盖 DE、IT、FR、JP、KR，保留原职务并排除发布、内容和隐私责任人。被动 DNS 留存经过语法检查的 SPF 域名及识别结果。
   - 修复混写产品摘要与第 19 列邮箱范围。富集入口保留原扣费票据和待验步骤，持久化结果不明状态并按联系人读回。仅公司富集接口映射该执行错误，未知 500 的日志限于受控元数据和应用代码位置。
   - Worker 丢失或无法续租时立即停止轮询，保留 Temporal 排空窗口。流式寻源共用主干 #1131 的租约实现。

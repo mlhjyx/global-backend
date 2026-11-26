@@ -80,17 +80,10 @@ export function isEuOrUkLinkedinBlocked(
   const host = hostname.toLowerCase().replace(/\.$/u, '');
   const sub = host.endsWith('.linkedin.com') ? host.slice(0, -'.linkedin.com'.length) : '';
   if (sub && EU_UK_LINKEDIN_SUBDOMAINS.has(sub)) return true;
-  const resolved = resolveCompanyJurisdiction({
-    name: company.name,
-    domain: company.domain,
-    country: company.country,
-  });
-  const jurisdiction = resolved?.iso
-    ? normalizeJurisdiction(resolved.iso)
-    : company.country
-      ? normalizeJurisdiction(company.country)
-      : (inferConservativeEuUkFallback({ name: company.name, domain: company.domain }) ?? 'OTHER');
-  return jurisdiction === 'EU' || jurisdiction === 'UK';
+  const resolved = resolveCompanyJurisdiction(company);
+  const jurisdiction = normalizeJurisdiction(resolved?.iso ?? company.country);
+  if (jurisdiction === 'EU' || jurisdiction === 'UK') return true;
+  return resolved === null && jurisdiction === 'OTHER' && inferConservativeEuUkFallback(company) !== null;
 }
 
 export const SOCIAL_PERSON_HOSTS: readonly { host: string; pathPrefix: string }[] = Object.freeze([

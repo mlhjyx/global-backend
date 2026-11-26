@@ -821,6 +821,8 @@ describe('social presence M2b: archive copies and live public pages (D1)', () =>
       { name: 'Pumpen Schmid GmbH', domain: 'pumpen-schmid.de', country: 'DE' },
       { name: 'Novacrest S.r.l.', domain: 'novacrest.example', country: 'IT' },
       { name: 'BritSolar Ltd', domain: 'britsolar.co.uk', country: 'GB' },
+      { name: 'Solar Bloc', domain: 'solarbloc.eu', country: 'unknown' },
+      { name: 'Example GmbH', domain: 'example.example', country: ' ' },
     ]) {
       let liveCalls = 0;
       const invoke = vi.fn(async (tool: string, input: { url?: string }) => {
