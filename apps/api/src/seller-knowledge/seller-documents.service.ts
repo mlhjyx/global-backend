@@ -15,7 +15,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import type { RequestContext } from '../auth/request-context';
 import { mimeMatchesSniffed, sniffMime } from '../site-builder/object-key';
 import { EmbeddingsClient } from '../site-builder/embeddings.client';
-import { isS3NotFoundError, SellerDocumentsStorage } from './seller-documents.storage';
+import {
+  isS3NotFoundError,
+  SELLER_DOCUMENT_MULTIPART_PART_SIZE,
+  SellerDocumentsStorage,
+} from './seller-documents.storage';
 import { SellerDocumentCleanupService } from './seller-document-cleanup.service';
 
 /** 允许的资料类型 → kind 与单文件上限（字节）。HTML/SVG/可执行类永不入列。 */
@@ -63,6 +67,26 @@ function envInt(name: string, fallback: number): number {
 
 const SIZE_TOLERANCE = 1.05;
 const SIZE_SLACK_BYTES = 1024;
+export const SELLER_DOCUMENT_MAX_PART_BYTES = 6 * 1024 * 1024;
+export const SELLER_DOCUMENT_MAX_PARTS = 100;
+
+function hasAsciiControlChar(value: string): boolean {
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i);
+    if (code <= 0x1f || code === 0x7f) return true;
+  }
+  return false;
+}
+
+function validMultipartUploadId(uploadId: string): string {
+  const trimmed = typeof uploadId === 'string' ? uploadId.trim() : '';
+  if (!trimmed || trimmed.length > 512 || hasAsciiControlChar(trimmed)) {
+    throw new BadRequestException({
+      error: { code: 'SELLER_DOCUMENT_UPLOAD_ID_INVALID', message: '分片上传标识不合法' },
+    });
+  }
+  return trimmed;
+}
 
 export function sellerDocumentStagingKey(workspaceId: string, documentId: string): string {
   return `ws/${workspaceId}/seller-documents/staging/${documentId}`;
@@ -129,7 +153,14 @@ export class SellerDocumentsService {
     ctx: RequestContext,
     companyId: string,
     input: { filename: string; mime: string; size: number },
-  ): Promise<{ documentId: string; uploadUrl: string; expiresAt: Date }> {
+  ): Promise<{
+    documentId: string;
+    uploadUrl: string;
+    expiresAt: Date;
+    uploadMode: 'direct' | 'multipart';
+    directUploadSupported: boolean;
+    partSizeBytes: number;
+  }> {
     const spec = MIME_KIND[input.mime];
     if (!spec) {
       throw new BadRequestException({
@@ -188,7 +219,127 @@ export class SellerDocumentsService {
     } catch {
       throw storageUnavailable();
     }
-    return { documentId, uploadUrl: signed.url, expiresAt: signed.expiresAt };
+    const directUploadSupported =
+      typeof this.storage.isDirectUploadSupported === 'function'
+        ? this.storage.isDirectUploadSupported()
+        : false;
+    return {
+      documentId,
+      uploadUrl: signed.url,
+      expiresAt: signed.expiresAt,
+      uploadMode: directUploadSupported ? 'direct' : 'multipart',
+      directUploadSupported,
+      partSizeBytes: SELLER_DOCUMENT_MULTIPART_PART_SIZE,
+    };
+  }
+
+  /** 初始化 S3 Multipart 分片上传（仅 pending_upload 可用，单片 5 MiB 降低峰值内存并支持断点续传）。 */
+  async initMultipartUpload(
+    ctx: RequestContext,
+    companyId: string,
+    documentId: string,
+  ): Promise<{ documentId: string; uploadId: string; partSizeBytes: number }> {
+    const row = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+      tx.sellerDocument.findFirst({ where: { id: documentId, companyId, deletedAt: null } }),
+    );
+    if (!row) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'document not found' } });
+    if (row.status !== 'pending_upload') {
+      throw new ConflictException({
+        error: { code: 'SELLER_DOCUMENT_NOT_PENDING_UPLOAD', message: '资料已上传或正在处理，不能初始化分片上传' },
+      });
+    }
+    try {
+      const { uploadId } = await this.storage.createMultipartUpload(row.objectKey, row.mime);
+      return { documentId, uploadId, partSizeBytes: SELLER_DOCUMENT_MULTIPART_PART_SIZE };
+    } catch {
+      throw storageUnavailable();
+    }
+  }
+
+  /** 上传单个分片（≤6 MiB，失败仅重传该分片，不影响已传完分片）。 */
+  async uploadMultipartPart(
+    ctx: RequestContext,
+    companyId: string,
+    documentId: string,
+    uploadId: string,
+    partNumber: number,
+    body: Buffer,
+  ): Promise<{ partNumber: number; etag: string }> {
+    const safeUploadId = validMultipartUploadId(uploadId);
+    if (!Number.isSafeInteger(partNumber) || partNumber < 1 || partNumber > SELLER_DOCUMENT_MAX_PARTS) {
+      throw new BadRequestException({
+        error: { code: 'SELLER_DOCUMENT_PART_INVALID', message: '分片编号须为 1–100 的整数' },
+      });
+    }
+    const bytes = body instanceof Uint8Array ? body : null;
+    if (!bytes || bytes.byteLength === 0 || bytes.byteLength > SELLER_DOCUMENT_MAX_PART_BYTES) {
+      throw new BadRequestException({
+        error: { code: 'SELLER_DOCUMENT_PART_SIZE_INVALID', message: '单个分片字节数须在 1 字节至 6 MiB 之间' },
+      });
+    }
+    const row = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+      tx.sellerDocument.findFirst({ where: { id: documentId, companyId, deletedAt: null } }),
+    );
+    if (!row) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'document not found' } });
+    if (row.status !== 'pending_upload') {
+      throw new ConflictException({
+        error: { code: 'SELLER_DOCUMENT_NOT_PENDING_UPLOAD', message: '资料已上传或正在处理，不能继续上传分片' },
+      });
+    }
+    try {
+      return await this.storage.uploadPart(row.objectKey, safeUploadId, partNumber, Buffer.from(bytes));
+    } catch {
+      throw storageUnavailable();
+    }
+  }
+
+  /** 合并已上传分片为完整 staging 对象，随后由客户端调用既有 commit 完成魔数/SHA-256 核验与入队。 */
+  async completeMultipartUpload(
+    ctx: RequestContext,
+    companyId: string,
+    documentId: string,
+    input: { uploadId: string; parts: ReadonlyArray<{ partNumber: number; etag: string }> },
+  ): Promise<SellerDocumentRow> {
+    const safeUploadId = validMultipartUploadId(input.uploadId);
+    if (!Array.isArray(input.parts) || input.parts.length === 0 || input.parts.length > SELLER_DOCUMENT_MAX_PARTS) {
+      throw new BadRequestException({
+        error: { code: 'SELLER_DOCUMENT_PARTS_INVALID', message: '分片列表须包含 1–100 个分片' },
+      });
+    }
+    const seen = new Set<number>();
+    const normalizedParts: Array<{ partNumber: number; etag: string }> = [];
+    for (const part of input.parts) {
+      const etag = typeof part?.etag === 'string' ? part.etag.trim() : '';
+      if (
+        !Number.isSafeInteger(part?.partNumber) ||
+        part.partNumber < 1 ||
+        part.partNumber > SELLER_DOCUMENT_MAX_PARTS ||
+        seen.has(part.partNumber) ||
+        !etag ||
+        etag.length > 200
+      ) {
+        throw new BadRequestException({
+          error: { code: 'SELLER_DOCUMENT_PARTS_INVALID', message: '分片编号重复或 ETag 格式不合法' },
+        });
+      }
+      seen.add(part.partNumber);
+      normalizedParts.push({ partNumber: part.partNumber, etag });
+    }
+    const row = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+      tx.sellerDocument.findFirst({ where: { id: documentId, companyId, deletedAt: null } }),
+    );
+    if (!row) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'document not found' } });
+    if (row.status !== 'pending_upload') {
+      throw new ConflictException({
+        error: { code: 'SELLER_DOCUMENT_NOT_PENDING_UPLOAD', message: '资料不处于待上传状态，无法合并分片' },
+      });
+    }
+    try {
+      await this.storage.completeMultipartUpload(row.objectKey, safeUploadId, normalizedParts);
+    } catch {
+      throw storageUnavailable();
+    }
+    return row;
   }
 
   /**

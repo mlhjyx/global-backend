@@ -25,9 +25,12 @@ import type { RequestContext } from '../auth/request-context';
 import { ApiEnvelope, ApiPageEnvelope } from '../common/api-envelope.decorator';
 import { envelope, pageEnvelope, type Enveloped, type PageEnveloped } from '../common/envelope';
 import {
+  CompleteSellerDocumentMultipartDto,
+  InitSellerDocumentMultipartResponseDto,
   PresignSellerDocumentDto,
   PresignSellerDocumentResponseDto,
   SellerDocumentDto,
+  UploadSellerDocumentPartResponseDto,
 } from './dto/seller-document.dto';
 import { formatContentDisposition, SellerDocumentsService } from './seller-documents.service';
 
@@ -84,6 +87,58 @@ export class SellerCompanyDocumentsController {
   ): Promise<Enveloped<SellerDocumentDto>> {
     const body = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
     const row = await this.documents.uploadContent(ctx, companyId, documentId, body, (contentType ?? '').split(';', 1)[0]!.trim());
+    return envelope(SellerDocumentDto.from(row));
+  }
+
+  @Post(':documentId/multipart/init')
+  @RequireScopes('acquisition:write')
+  @HttpCode(201)
+  @ApiOperation({ summary: '初始化资料分片上传（S3 Multipart，推荐 >5 MiB 文件走分片断点续传）' })
+  @ApiEnvelope(InitSellerDocumentMultipartResponseDto, { status: 201 })
+  async initMultipart(
+    @Ctx() ctx: RequestContext,
+    @Param('companyId', ParseUUIDPipe) companyId: string,
+    @Param('documentId', ParseUUIDPipe) documentId: string,
+  ): Promise<Enveloped<InitSellerDocumentMultipartResponseDto>> {
+    return envelope(await this.documents.initMultipartUpload(ctx, companyId, documentId));
+  }
+
+  @Put(':documentId/parts/:partNumber')
+  @RequireScopes('acquisition:write')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: '上传资料单个分片（单片上限 6 MiB，失败仅重传该分片）',
+    description: '需在查询参数传入 multipart/init 返回的 uploadId；返回 partNumber 与 etag 供后续合并。',
+  })
+  @ApiQuery({ name: 'uploadId', required: true, schema: { type: 'string', minLength: 1, maxLength: 512 } })
+  @ApiEnvelope(UploadSellerDocumentPartResponseDto)
+  async uploadPart(
+    @Ctx() ctx: RequestContext,
+    @Param('companyId', ParseUUIDPipe) companyId: string,
+    @Param('documentId', ParseUUIDPipe) documentId: string,
+    @Param('partNumber') rawPartNumber: string,
+    @Query('uploadId') uploadId: string,
+    @Req() req: { body?: unknown },
+  ): Promise<Enveloped<UploadSellerDocumentPartResponseDto>> {
+    const partNumber = /^\d{1,3}$/u.test(rawPartNumber) ? Number(rawPartNumber) : Number.NaN;
+    const body = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    return envelope(
+      await this.documents.uploadMultipartPart(ctx, companyId, documentId, uploadId ?? '', partNumber, body),
+    );
+  }
+
+  @Post(':documentId/multipart/complete')
+  @RequireScopes('acquisition:write')
+  @HttpCode(200)
+  @ApiOperation({ summary: '合并资料全部分片至暂存对象（随后调用 commit 完成校验与入队解析）' })
+  @ApiEnvelope(SellerDocumentDto)
+  async completeMultipart(
+    @Ctx() ctx: RequestContext,
+    @Param('companyId', ParseUUIDPipe) companyId: string,
+    @Param('documentId', ParseUUIDPipe) documentId: string,
+    @Body() dto: CompleteSellerDocumentMultipartDto,
+  ): Promise<Enveloped<SellerDocumentDto>> {
+    const row = await this.documents.completeMultipartUpload(ctx, companyId, documentId, dto);
     return envelope(SellerDocumentDto.from(row));
   }
 

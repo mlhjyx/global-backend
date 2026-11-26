@@ -7406,6 +7406,202 @@
         ]
       }
     },
+    "/api/v1/companies/{companyId}/seller-documents/{documentId}/multipart/init": {
+      "post": {
+        "operationId": "SellerCompanyDocumentsController_initMultipart_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "documentId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/InitSellerDocumentMultipartResponseDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "初始化资料分片上传（S3 Multipart，推荐 >5 MiB 文件走分片断点续传）",
+        "tags": [
+          "Seller Documents"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
+        ],
+        "description": "初始化资料 S3 Multipart 分片上传（仅 pending_upload 可用），返回 uploadId 与推荐分片大小 partSizeBytes（默认 5 MiB，符合对象存储非末片最小体积要求）。"
+      }
+    },
+    "/api/v1/companies/{companyId}/seller-documents/{documentId}/parts/{partNumber}": {
+      "put": {
+        "description": "需在查询参数传入 multipart/init 返回的 uploadId；返回 partNumber 与 etag 供后续合并。",
+        "operationId": "SellerCompanyDocumentsController_uploadPart_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "documentId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "partNumber",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "uploadId",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/UploadSellerDocumentPartResponseDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "上传资料单个分片（单片上限 6 MiB，失败仅重传该分片）",
+        "tags": [
+          "Seller Documents"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
+        ]
+      }
+    },
+    "/api/v1/companies/{companyId}/seller-documents/{documentId}/multipart/complete": {
+      "post": {
+        "operationId": "SellerCompanyDocumentsController_completeMultipart_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "documentId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteSellerDocumentMultipartDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SellerDocumentDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "合并资料全部分片至暂存对象（随后调用 commit 完成校验与入队解析）",
+        "tags": [
+          "Seller Documents"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
+        ],
+        "description": "按分片清单合并所有已上传分片为完整 staging 对象（仅 pending_upload 可用）；合并完成后客户端照常调用 commit 完成魔数/SHA-256 核验与入队解析。"
+      }
+    },
     "/api/v1/companies/{companyId}/seller-documents/search": {
       "get": {
         "operationId": "SellerCompanyDocumentsController_search_v1",
@@ -31412,6 +31608,23 @@
           "expiresAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "uploadMode": {
+            "type": "string",
+            "enum": [
+              "direct",
+              "multipart"
+            ],
+            "description": "推荐上传通道：配置独立公网对象存储时为 direct，其余环境推荐 multipart 分片上传"
+          },
+          "directUploadSupported": {
+            "type": "boolean",
+            "description": "是否支持浏览器直传 presigned uploadUrl（本地/内网穿透环境为 false）"
+          },
+          "partSizeBytes": {
+            "type": "number",
+            "description": "推荐分片大小（字节，S3/MinIO 协议下限 5 MiB）",
+            "example": 5242880
           }
         },
         "required": [
@@ -31497,6 +31710,11 @@
           "chunkCount": {
             "type": "number"
           },
+          "parsedMeta": {
+            "type": "object",
+            "additionalProperties": true,
+            "nullable": true
+          },
           "factsExtractedAt": {
             "type": "string",
             "format": "date-time",
@@ -31517,6 +31735,85 @@
           "status",
           "chunkCount",
           "createdAt"
+        ]
+      },
+      "InitSellerDocumentMultipartResponseDto": {
+        "type": "object",
+        "properties": {
+          "documentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "uploadId": {
+            "type": "string",
+            "description": "S3 Multipart UploadId，供后续分片上传与合并使用"
+          },
+          "partSizeBytes": {
+            "type": "number",
+            "description": "推荐分片大小（字节，默认 5 MiB）",
+            "example": 5242880
+          }
+        },
+        "required": [
+          "documentId",
+          "uploadId",
+          "partSizeBytes"
+        ]
+      },
+      "UploadSellerDocumentPartResponseDto": {
+        "type": "object",
+        "properties": {
+          "partNumber": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "etag": {
+            "type": "string",
+            "description": "对象存储返回的分片 ETag"
+          }
+        },
+        "required": [
+          "partNumber",
+          "etag"
+        ]
+      },
+      "MultipartCompletedPartDto": {
+        "type": "object",
+        "properties": {
+          "partNumber": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "etag": {
+            "type": "string",
+            "description": "分片上传返回的 ETag"
+          }
+        },
+        "required": [
+          "partNumber",
+          "etag"
+        ]
+      },
+      "CompleteSellerDocumentMultipartDto": {
+        "type": "object",
+        "properties": {
+          "uploadId": {
+            "type": "string",
+            "description": "multipart/init 返回的 uploadId"
+          },
+          "parts": {
+            "description": "已上传分片清单",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MultipartCompletedPartDto"
+            }
+          }
+        },
+        "required": [
+          "uploadId",
+          "parts"
         ]
       },
       "DocumentChunkViewDto": {

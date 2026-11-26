@@ -525,6 +525,7 @@ describe('non-Site-Builder model result projection registry', () => {
       'company_understanding.extract_claims',
       'company_understanding.extract_profile',
       'company_understanding.extract_offerings',
+      'seller_document.analyze',
       'icp.design',
       'discovery.query_plan',
       'taxonomy.normalize',
@@ -543,6 +544,7 @@ describe('non-Site-Builder model result projection registry', () => {
       'company_understanding.extract_claims': 'understanding-claims/v1',
       'company_understanding.extract_profile': 'understanding-profile/v1',
       'company_understanding.extract_offerings': 'understanding-offerings/v1',
+      'seller_document.analyze': 'seller-document-analyze/v1',
       'icp.design': 'icp-design/v1',
       'discovery.query_plan': 'icp-query-plan/v1',
       'taxonomy.normalize': 'taxonomy-code/v1',
@@ -561,6 +563,7 @@ describe('non-Site-Builder model result projection registry', () => {
       'understanding-claims/v1',
       'understanding-profile/v1',
       'understanding-offerings/v1',
+      'seller-document-analyze/v1',
       'icp-design/v1',
       'icp-query-plan/v1',
       'taxonomy-code/v1',
@@ -592,7 +595,7 @@ describe('non-Site-Builder model result projection registry', () => {
   });
 
   it('registers only closed, bounded, ASCII-camelCase, non-sensitive projection schemas', () => {
-    expect(MODEL_RESULT_PROJECTION_DEFINITIONS).toHaveLength(16);
+    expect(MODEL_RESULT_PROJECTION_DEFINITIONS).toHaveLength(17);
     for (const definition of MODEL_RESULT_PROJECTION_DEFINITIONS) {
       const names: string[] = [];
       expectRecursivelyClosedAndBounded(definition.jsonSchema, names);

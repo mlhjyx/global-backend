@@ -44,6 +44,7 @@ export const EXPECTED_MODEL_TASKS = Object.freeze([
   Object.freeze({ path: 'apps/api/src/temporal/understanding.activities.ts', taskId: 'company_understanding.extract_claims', schema: 'understanding-claims/v1' }),
   Object.freeze({ path: 'apps/api/src/temporal/understanding.activities.ts', taskId: 'company_understanding.extract_profile', schema: 'understanding-profile/v1' }),
   Object.freeze({ path: 'apps/api/src/temporal/understanding.activities.ts', taskId: 'company_understanding.extract_offerings', schema: 'understanding-offerings/v1' }),
+  Object.freeze({ path: 'apps/api/src/seller-knowledge/seller-document-ai-analyzer.ts', taskId: 'seller_document.analyze', schema: 'seller-document-analyze/v1' }),
   Object.freeze({ path: 'apps/api/src/icp/icp.service.ts', taskId: 'icp.design', schema: 'icp-design/v1' }),
   Object.freeze({ path: 'apps/api/src/icp/icp.service.ts', taskId: 'discovery.query_plan', schema: 'icp-query-plan/v1' }),
   Object.freeze({ path: 'apps/api/src/lead/outreach-draft.service.ts', taskId: 'outreach.first_contact_draft', schema: 'outreach-first-contact-draft/v1' }),
@@ -61,6 +62,7 @@ export const EXPECTED_MODEL_TASKS = Object.freeze([
 export const EXPECTED_MODEL_GATEWAY_BOUNDARIES = Object.freeze([
   'apps/api/src/model-runtime/site-builder-ai-task-bridge.ts#generateStructured#1',
   'apps/api/src/model-runtime/structured-task-runtime-bridge.ts#generateStructured#1',
+  'apps/api/src/model-runtime/structured-task-runtime-bridge.ts#reviewVision#1',
 ]);
 
 // The only `getTask` calls whose argument is not a task literal or constant:

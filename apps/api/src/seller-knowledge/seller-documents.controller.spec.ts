@@ -17,7 +17,10 @@ import { ROLES_TO_SCOPES_POLICY, type AuthorizationScope } from '../auth/scopes'
 import { ScopesGuard } from '../auth/scopes.guard';
 import { TokenVerifier } from '../auth/token-verifier';
 import { GlobalHttpExceptionFilter } from '../common/http-exception.filter';
-import { SellerDocumentsController } from './seller-documents.controller';
+import {
+  SellerCompanyDocumentsController,
+  SellerDocumentsController,
+} from './seller-documents.controller';
 import { SellerDocumentsService } from './seller-documents.service';
 
 const DOC_ID = '40000000-0000-4000-8000-000000000004';
@@ -39,6 +42,7 @@ const policy = {
 };
 
 Reflect.defineMetadata('design:paramtypes', [SellerDocumentsService], SellerDocumentsController);
+Reflect.defineMetadata('design:paramtypes', [SellerDocumentsService], SellerCompanyDocumentsController);
 Reflect.defineMetadata('design:paramtypes', [TokenVerifier, Object], AuthGuard);
 Reflect.defineMetadata('design:paramtypes', [Reflector], ScopesGuard);
 
@@ -155,5 +159,68 @@ describe('SellerDocumentsController · GET /api/v1/seller-documents/:documentId/
     } finally {
       await app.close();
     }
+  });
+});
+
+describe('SellerCompanyDocumentsController · S3 Multipart 分片上传路由', () => {
+  const COMPANY_ID = '30000000-0000-4000-8000-000000000003';
+  const WRITE_CTX: RequestContext = {
+    ...CTX,
+    scopes: ['acquisition:read', 'acquisition:write'],
+  };
+
+  it('initMultipart / uploadPart / completeMultipart 正确委派服务并返回标准信封', async () => {
+    const svc = {
+      initMultipartUpload: vi.fn(async () => ({
+        documentId: DOC_ID,
+        uploadId: 'up-999',
+        partSizeBytes: 5 * 1024 * 1024,
+      })),
+      uploadMultipartPart: vi.fn(async () => ({
+        partNumber: 2,
+        etag: '"etag-2"',
+      })),
+      completeMultipartUpload: vi.fn(async () => ({
+        id: DOC_ID,
+        companyId: COMPANY_ID,
+        filename: 'big.pdf',
+        mime: 'application/pdf',
+        sizeBytes: 12_000_000n,
+        kind: 'pdf',
+        status: 'pending_upload',
+        processingErrorCode: null,
+        chunkCount: 0,
+        parsedMeta: null,
+        factsExtractedAt: null,
+        createdAt: new Date('2026-11-26T12:00:00Z'),
+      })),
+    };
+    const controller = new SellerCompanyDocumentsController(svc as unknown as SellerDocumentsService);
+
+    const init = await controller.initMultipart(WRITE_CTX, COMPANY_ID, DOC_ID);
+    expect(init.data).toEqual({
+      documentId: DOC_ID,
+      uploadId: 'up-999',
+      partSizeBytes: 5 * 1024 * 1024,
+    });
+
+    const part = await controller.uploadPart(WRITE_CTX, COMPANY_ID, DOC_ID, '2', 'up-999', {
+      body: Buffer.from('part-bytes'),
+    });
+    expect(part.data).toEqual({ partNumber: 2, etag: '"etag-2"' });
+    expect(svc.uploadMultipartPart).toHaveBeenCalledWith(
+      WRITE_CTX,
+      COMPANY_ID,
+      DOC_ID,
+      'up-999',
+      2,
+      Buffer.from('part-bytes'),
+    );
+
+    const completed = await controller.completeMultipart(WRITE_CTX, COMPANY_ID, DOC_ID, {
+      uploadId: 'up-999',
+      parts: [{ partNumber: 1, etag: '"etag-1"' }, { partNumber: 2, etag: '"etag-2"' }],
+    });
+    expect(completed.data.id).toBe(DOC_ID);
   });
 });

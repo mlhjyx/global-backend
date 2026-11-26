@@ -1081,6 +1081,10 @@
     },
     {
       "from": "seller-knowledge",
+      "to": "ai-tasks"
+    },
+    {
+      "from": "seller-knowledge",
       "to": "auth"
     },
     {
@@ -1090,6 +1094,18 @@
     {
       "from": "seller-knowledge",
       "to": "common"
+    },
+    {
+      "from": "seller-knowledge",
+      "to": "company"
+    },
+    {
+      "from": "seller-knowledge",
+      "to": "discovery"
+    },
+    {
+      "from": "seller-knowledge",
+      "to": "model-runtime"
     },
     {
       "from": "seller-knowledge",

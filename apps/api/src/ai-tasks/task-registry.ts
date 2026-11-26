@@ -1,5 +1,6 @@
 import { GENERATION_INPUT_SCHEMA } from '../market-candidate-generation/generation-basis';
 import { GENERATION_OUTPUT_SCHEMA } from '../market-candidate-generation/generation-output';
+import { SELLER_DOCUMENT_ANALYZE_DESCRIPTION, SELLER_DOCUMENT_ANALYZE_OUTPUT_SCHEMA } from './seller-document-analyze-schema';
 import { boundedString, boundedNumber, boundedArray, closedObject, type OutputSchema } from './task-schema-bounds';
 import { AiTaskContract } from './task-contract';
 import {
@@ -256,6 +257,14 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     risk: 'low', // 只进结构化知识库，不直接对外
     humanGate: false,
     cacheable: true, // PR-B
+  },
+
+  'seller_document.analyze': {
+    id: 'seller_document.analyze', description: SELLER_DOCUMENT_ANALYZE_DESCRIPTION,
+    outputSchema: SELLER_DOCUMENT_ANALYZE_OUTPUT_SCHEMA,
+    model: acquisitionModel('seller_document.analyze', ACQUISITION_FLASH_TIER_MODEL),
+    allowedTools: [], maxCostCents: 15, maxOutputTokens: REASONING_TASK_MAX_OUTPUT_TOKENS,
+    timeoutMs: 120000, acceptsModelSubstitute: true, risk: 'low', humanGate: true, cacheable: true,
   },
 
   'icp.design': {

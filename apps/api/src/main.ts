@@ -36,15 +36,25 @@ const CSV_BODY_MAX_BYTES = 5 * 1024 * 1024;
 /** 浏览器直传：资料暂存内容经引擎中转（presign 主机是引擎侧 127.0.0.1，浏览器到不了）。 */
 const SELLER_DOCUMENT_CONTENT_ROUTE =
   /^\/api\/v1\/companies\/[0-9a-f-]{36}\/seller-documents\/[0-9a-f-]{36}\/content$/u;
+const SELLER_DOCUMENT_PART_ROUTE =
+  /^\/api\/v1\/companies\/[0-9a-f-]{36}\/seller-documents\/[0-9a-f-]{36}\/parts\/\d{1,3}$/u;
 const SELLER_DOCUMENT_CONTENT_MAX_BYTES = 51 * 1024 * 1024;
+const SELLER_DOCUMENT_PART_MAX_BYTES = 6 * 1024 * 1024;
 
 /**
- * 把资料上传路由的请求体读成 Buffer（raw 监听，不经 JSON 解析器）。
- * 与 CSV 读取同构：只碰这一条路由，超限立即 413，不缓冲到底。
+ * 把资料上传路由（整文件 PUT 与分片 PUT）的请求体读成 Buffer（raw 监听，不经 JSON 解析器）。
+ * 与 CSV 读取同构：只碰这两类路由，超限立即 413，不缓冲到底。
  */
 function installSellerDocumentContentBodyReader(app: { use: (handler: (req: IncomingMessage, res: ServerResponse, next: () => void) => void) => void }): void {
   app.use((req, res, next) => {
-    if (req.method !== 'PUT' || !SELLER_DOCUMENT_CONTENT_ROUTE.test(req.url?.split('?', 1)[0] ?? '')) {
+    const path = req.url?.split('?', 1)[0] ?? '';
+    const maxBytes =
+      req.method === 'PUT' && SELLER_DOCUMENT_PART_ROUTE.test(path)
+        ? SELLER_DOCUMENT_PART_MAX_BYTES
+        : req.method === 'PUT' && SELLER_DOCUMENT_CONTENT_ROUTE.test(path)
+          ? SELLER_DOCUMENT_CONTENT_MAX_BYTES
+          : 0;
+    if (maxBytes === 0) {
       next();
       return;
     }
@@ -54,13 +64,13 @@ function installSellerDocumentContentBodyReader(app: { use: (handler: (req: Inco
     req.on('data', (chunk: Buffer) => {
       if (settled) return;
       bytes += chunk.length;
-      if (bytes > SELLER_DOCUMENT_CONTENT_MAX_BYTES) {
+      if (bytes > maxBytes) {
         settled = true;
         res.statusCode = 413;
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
         res.end(
           JSON.stringify({
-            error: { code: 'PAYLOAD_TOO_LARGE', message: `document body must not exceed ${SELLER_DOCUMENT_CONTENT_MAX_BYTES} bytes` },
+            error: { code: 'PAYLOAD_TOO_LARGE', message: `document body must not exceed ${maxBytes} bytes` },
           }),
         );
         req.destroy();

@@ -707,6 +707,22 @@
       }
     },
     {
+      "taskId": "seller_document.analyze",
+      "callsitePath": "apps/api/src/seller-knowledge/seller-document-ai-analyzer.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "seller-document-analyze/v1",
+      "operationIdentity": "model:seller_document.analyze:<documentId>",
+      "privacyClass": "CONFIDENTIAL_TENANT",
+      "domainAck": {
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
+        "consumer": "SellerDocumentAiAnalyzer.analyze",
+        "domainAggregateType": "SellerDocument",
+        "identitySource": "document-id-and-parse-revision",
+        "subjectRefRequired": false,
+        "personalDataDsrCompatible": false
+      }
+    },
+    {
       "taskId": "icp.design",
       "callsitePath": "apps/api/src/icp/icp.service.ts",
       "resultStrategy": "typed_projection",

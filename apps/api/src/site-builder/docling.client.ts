@@ -16,11 +16,85 @@ export function resolveDoclingBackendMode(
 }
 
 const CONVERT_TIMEOUT_MS = 300_000; // 首次调用会下载布局模型，放宽
+const MAX_EXTRACTED_PAGE_IMAGES = 8;
+const MAX_RAW_PAGE_IMAGE_BYTES = 8 * 1024 * 1024;
+const PNG_DATA_URI_PREFIX = 'data:image/png;base64,';
+
+export interface DoclingConvertOptions {
+  /** 可选工作空间 ID，用于租户并发隔离信号量与 X-Workspace-Id 透传。 */
+  readonly workspaceId?: string;
+  /** 1-based 闭区间页码范围（如 [1, 15]），仅对分页文档生效。 */
+  readonly pageRange?: readonly [number, number];
+  /** 强制启用 OCR（扫描件 / 转曲印刷 PDF 兜底）。 */
+  readonly forceOcr?: boolean;
+  /** 返回页面渲染 PNG（供 L3 视觉模型解析扫描件/图文表）。 */
+  readonly includePageImages?: boolean;
+  /** 页面图像缩放比例（默认 1.0）。 */
+  readonly imagesScale?: number;
+  /** 同时请求 json 结构以读取实际解析页数。 */
+  readonly returnPageCount?: boolean;
+  /** 允许空 Markdown 返回（调用方决定是否走 OCR/视觉兜底，而不直接判失败）。 */
+  readonly allowEmptyMarkdown?: boolean;
+}
+
+export interface DoclingPageImage {
+  readonly pageNo: number;
+  readonly pngBytes: Buffer;
+}
+
+export interface DoclingConvertResult {
+  readonly markdown: string;
+  readonly pageCount?: number;
+  readonly pageImages?: readonly DoclingPageImage[];
+}
+
+interface DoclingPageEntry {
+  page_no?: unknown;
+  image?: { uri?: unknown };
+}
 
 interface DoclingResponse {
-  document?: { md_content?: string };
+  document?: {
+    md_content?: string;
+    json_content?: {
+      pages?: Record<string, DoclingPageEntry>;
+    };
+  };
   status?: string;
   errors?: unknown[];
+}
+
+function extractPagesInfo(jsonContent: unknown): {
+  pageCount?: number;
+  pageImages: DoclingPageImage[];
+} {
+  if (!isRecord(jsonContent) || !isRecord(jsonContent.pages)) {
+    return { pageImages: [] };
+  }
+  const entries = Object.entries(jsonContent.pages);
+  const pageCount = entries.length > 0 ? entries.length : undefined;
+  const pageImages: DoclingPageImage[] = [];
+  const sorted = entries
+    .map(([key, value]) => ({
+      pageNo: Number(isRecord(value) && typeof value.page_no === 'number' ? value.page_no : key),
+      value,
+    }))
+    .filter((entry) => Number.isSafeInteger(entry.pageNo) && entry.pageNo >= 1)
+    .sort((a, b) => a.pageNo - b.pageNo);
+
+  for (const entry of sorted) {
+    if (pageImages.length >= MAX_EXTRACTED_PAGE_IMAGES) break;
+    if (!isRecord(entry.value) || !isRecord(entry.value.image)) continue;
+    const uri = entry.value.image.uri;
+    if (typeof uri !== 'string' || !uri.startsWith(PNG_DATA_URI_PREFIX)) continue;
+    const b64 = uri.slice(PNG_DATA_URI_PREFIX.length);
+    if (!b64) continue;
+    const pngBytes = Buffer.from(b64, 'base64');
+    if (pngBytes.byteLength >= 8 && pngBytes.byteLength <= MAX_RAW_PAGE_IMAGE_BYTES) {
+      pageImages.push({ pageNo: entry.pageNo, pngBytes });
+    }
+  }
+  return { ...(pageCount !== undefined ? { pageCount } : {}), pageImages };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -79,9 +153,39 @@ export class DoclingClient {
     filename: string,
     data: Buffer,
     signal?: AbortSignal,
-    workspaceId?: string,
-  ): Promise<{ markdown: string }> {
-    const run = async (): Promise<{ markdown: string }> => {
+    workspaceIdOrOpts?: string | DoclingConvertOptions,
+    optsArg?: DoclingConvertOptions,
+  ): Promise<DoclingConvertResult> {
+    const workspaceId =
+      typeof workspaceIdOrOpts === 'string'
+        ? workspaceIdOrOpts
+        : workspaceIdOrOpts?.workspaceId;
+    const opts =
+      typeof workspaceIdOrOpts === 'string' ? optsArg : workspaceIdOrOpts;
+    const needJson = opts?.includePageImages === true || opts?.returnPageCount === true;
+    const options: Record<string, unknown> = {
+      to_formats: needJson ? ['md', 'json'] : ['md'],
+    };
+    if (opts?.pageRange) {
+      const [start, end] = opts.pageRange;
+      if (Number.isSafeInteger(start) && Number.isSafeInteger(end) && start >= 1 && end >= start) {
+        options.page_range = [start, end];
+      }
+    }
+    if (opts?.forceOcr === true) {
+      options.force_ocr = true;
+    }
+    if (opts?.includePageImages === true) {
+      options.include_images = true;
+      options.generate_page_images = true;
+      options.image_export_mode = 'embedded';
+      options.images_scale =
+        typeof opts.imagesScale === 'number' && Number.isFinite(opts.imagesScale) && opts.imagesScale > 0
+          ? Math.min(Math.max(opts.imagesScale, 0.5), 2.0)
+          : 1.0;
+    }
+
+    const run = async (): Promise<DoclingConvertResult> => {
       const headers: Record<string, string> = {
         'content-type': 'application/json',
         ...(this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {}),
@@ -96,7 +200,7 @@ export class DoclingClient {
           method: 'POST',
           headers,
           body: JSON.stringify({
-            options: { to_formats: ['md'] },
+            options,
             sources: [{ kind: 'file', base64_string: data.toString('base64'), filename }],
           }),
           signal: requestSignal(signal),
@@ -118,6 +222,8 @@ export class DoclingClient {
         } catch {
           structured = undefined;
         }
+        // 415/422 也可能是网关或 FastAPI 请求 schema/部署契约错误，状态码本身
+        // 不能给用户文档定罪；只认明确绑定 user_input/document 的格式损坏证据。
         const invalidInput = hasDocumentInputFailure(structured);
         throw new KbIngestError(
           invalidInput ? 'KB_DOCUMENT_INVALID' : 'KB_DOCLING_UNAVAILABLE',
@@ -147,8 +253,10 @@ export class DoclingClient {
         );
       }
       const json = parsed as DoclingResponse;
-      const markdown = json.document?.md_content;
-      if (typeof markdown !== 'string' || markdown.length === 0) {
+      const rawMarkdown = json.document?.md_content;
+      const markdown = typeof rawMarkdown === 'string' ? rawMarkdown : '';
+      const pagesInfo = needJson ? extractPagesInfo(json.document?.json_content) : { pageImages: [] };
+      if (markdown.length === 0 && opts?.allowEmptyMarkdown !== true) {
         const invalidInput = hasDocumentInputFailure(parsed);
         throw new KbIngestError(
           invalidInput ? 'KB_DOCUMENT_INVALID' : 'KB_DOCLING_UNAVAILABLE',
@@ -157,8 +265,13 @@ export class DoclingClient {
           `docling returned no markdown (status=${json.status ?? 'unknown'})`,
         );
       }
-      return { markdown };
+      return {
+        markdown,
+        ...(pagesInfo.pageCount !== undefined ? { pageCount: pagesInfo.pageCount } : {}),
+        ...(opts?.includePageImages === true ? { pageImages: pagesInfo.pageImages } : {}),
+      };
     };
+
     try {
       return await this.semaphore.withTenantSlot(workspaceId, run, signal);
     } catch (err) {

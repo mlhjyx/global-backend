@@ -1,5 +1,8 @@
 import {
+  AbortMultipartUploadCommand,
+  CompleteMultipartUploadCommand,
   CopyObjectCommand,
+  CreateMultipartUploadCommand,
   DeleteObjectCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
@@ -8,6 +11,7 @@ import {
   ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
+  UploadPartCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { createHash } from 'node:crypto';
@@ -22,6 +26,17 @@ import type { Readable } from 'node:stream';
 
 export const SELLER_DOCUMENTS_STAGING_TAG_KEY = 'global-lifecycle';
 export const SELLER_DOCUMENTS_STAGING_TAG_VALUE = 'seller-document-staging';
+/** S3/MinIO 协议要求 Multipart 非末片最小 5 MiB；统一作为前端默认切片步长。 */
+export const SELLER_DOCUMENT_MULTIPART_PART_SIZE = 5 * 1024 * 1024;
+
+function isLoopbackEndpoint(raw: string): boolean {
+  try {
+    const host = new URL(raw).hostname.toLowerCase();
+    return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
+  } catch {
+    return true;
+  }
+}
 
 export function isS3NotFoundError(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
@@ -36,6 +51,7 @@ export class SellerDocumentsStorage {
   readonly bucket: string;
   private readonly client: S3Client;
   private readonly presignClient: S3Client;
+  private readonly directUploadSupported: boolean;
 
   constructor(env: NodeJS.ProcessEnv = process.env) {
     this.bucket = env.SELLER_DOCUMENTS_S3_BUCKET?.trim() || 'global-seller-documents';
@@ -49,7 +65,12 @@ export class SellerDocumentsStorage {
       S3_SECRET_KEY,
     } = env;
     const internalEndpoint = S3_ENDPOINT?.trim() || 'http://localhost:9000';
-    const publicEndpoint = S3_PUBLIC_ENDPOINT?.trim() || internalEndpoint;
+    const configuredPublic = S3_PUBLIC_ENDPOINT?.trim() || '';
+    const publicEndpoint = configuredPublic || internalEndpoint;
+    this.directUploadSupported =
+      configuredPublic.length > 0 &&
+      configuredPublic !== internalEndpoint &&
+      !isLoopbackEndpoint(configuredPublic);
     const region = S3_REGION ?? 'us-east-1';
     const forcePathStyle = (S3_FORCE_PATH_STYLE ?? 'true') === 'true';
     const credentials = {
@@ -71,6 +92,11 @@ export class SellerDocumentsStorage {
             forcePathStyle,
             credentials,
           });
+  }
+
+  /** 是否已配置独立公网对象存储端点（支持浏览器直传 S3 presigned URL）。 */
+  isDirectUploadSupported(): boolean {
+    return this.directUploadSupported;
   }
 
   /** bucket 是否存在且可访问（fail-closed readiness / 上传前置）。 */
@@ -142,6 +168,75 @@ export class SellerDocumentsStorage {
         Body: body,
         ContentType: mime,
         Tagging: `${SELLER_DOCUMENTS_STAGING_TAG_KEY}=${SELLER_DOCUMENTS_STAGING_TAG_VALUE}`,
+      }),
+    );
+  }
+
+  /** 初始化 S3 Multipart 分片上传（staging 对象带生命周期 tag，中断未合并也会由对象存储自动清理）。 */
+  async createMultipartUpload(key: string, mime: string): Promise<{ uploadId: string }> {
+    const res = await this.client.send(
+      new CreateMultipartUploadCommand({
+        Bucket: this.bucket,
+        Key: key,
+        ContentType: mime,
+        Tagging: `${SELLER_DOCUMENTS_STAGING_TAG_KEY}=${SELLER_DOCUMENTS_STAGING_TAG_VALUE}`,
+      }),
+    );
+    const uploadId = res.UploadId?.trim();
+    if (!uploadId) throw new Error(`missing multipart uploadId for ${key}`);
+    return { uploadId };
+  }
+
+  /** 上传单个分片（非末片须 ≥5 MiB；返回 S3 ETag 供后续 complete 合并与断点续传）。 */
+  async uploadPart(
+    key: string,
+    uploadId: string,
+    partNumber: number,
+    body: Buffer,
+  ): Promise<{ partNumber: number; etag: string }> {
+    const res = await this.client.send(
+      new UploadPartCommand({
+        Bucket: this.bucket,
+        Key: key,
+        UploadId: uploadId,
+        PartNumber: partNumber,
+        Body: body,
+        ContentLength: body.byteLength,
+      }),
+    );
+    const etag = res.ETag?.trim();
+    if (!etag) throw new Error(`missing ETag for part ${partNumber} of ${key}`);
+    return { partNumber, etag };
+  }
+
+  /** 合并已上传分片为完整 staging 对象，随后沿用既有 commit 魔数/SHA-256 校验链路。 */
+  async completeMultipartUpload(
+    key: string,
+    uploadId: string,
+    parts: ReadonlyArray<{ partNumber: number; etag: string }>,
+  ): Promise<void> {
+    const sorted = [...parts]
+      .sort((a, b) => a.partNumber - b.partNumber)
+      .map((part) => ({
+        PartNumber: part.partNumber,
+        ETag: part.etag.startsWith('"') ? part.etag : `"${part.etag.replace(/^"+|"+$/g, '')}"`,
+      }));
+    await this.client.send(
+      new CompleteMultipartUploadCommand({
+        Bucket: this.bucket,
+        Key: key,
+        UploadId: uploadId,
+        MultipartUpload: { Parts: sorted },
+      }),
+    );
+  }
+
+  async abortMultipartUpload(key: string, uploadId: string): Promise<void> {
+    await this.client.send(
+      new AbortMultipartUploadCommand({
+        Bucket: this.bucket,
+        Key: key,
+        UploadId: uploadId,
       }),
     );
   }

@@ -1,11 +1,19 @@
 import { Readable } from 'node:stream';
 import {
+  AbortMultipartUploadCommand,
+  CompleteMultipartUploadCommand,
+  CreateMultipartUploadCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
   ListObjectsV2Command,
+  UploadPartCommand,
 } from '@aws-sdk/client-s3';
 import { describe, expect, it, vi } from 'vitest';
-import { SellerDocumentsStorage, isS3NotFoundError } from './seller-documents.storage';
+import {
+  SELLER_DOCUMENT_MULTIPART_PART_SIZE,
+  SellerDocumentsStorage,
+  isS3NotFoundError,
+} from './seller-documents.storage';
 
 describe('SellerDocumentsStorage（presign 公网端点与内网端点解耦）', () => {
   it('配置 S3_PUBLIC_ENDPOINT 时 presignPut / presignGet 使用外部可达域名签名', async () => {
@@ -93,5 +101,55 @@ describe('SellerDocumentsStorage（presign 公网端点与内网端点解耦）'
     expect(deleted).toBe(2);
     expect(send.mock.calls[0]?.[0]).toBeInstanceOf(ListObjectsV2Command);
     expect(send.mock.calls[1]?.[0]).toBeInstanceOf(DeleteObjectsCommand);
+  });
+
+  it('S3 Multipart 分片上传（init / uploadPart / complete / abort）与公网直传判定正确工作', async () => {
+    expect(SELLER_DOCUMENT_MULTIPART_PART_SIZE).toBe(5 * 1024 * 1024);
+    const localStorage = new SellerDocumentsStorage({
+      S3_ENDPOINT: 'http://127.0.0.1:9000',
+      S3_REGION: 'us-east-1',
+      S3_ACCESS_KEY: 'k',
+      S3_SECRET_KEY: 's',
+    });
+    expect(localStorage.isDirectUploadSupported()).toBe(false);
+
+    const publicStorage = new SellerDocumentsStorage({
+      S3_ENDPOINT: 'http://127.0.0.1:9000',
+      S3_PUBLIC_ENDPOINT: 'https://files.example.test',
+      S3_REGION: 'us-east-1',
+      S3_ACCESS_KEY: 'k',
+      S3_SECRET_KEY: 's',
+    });
+    expect(publicStorage.isDirectUploadSupported()).toBe(true);
+
+    const send = vi
+      .fn()
+      .mockResolvedValueOnce({ UploadId: 'up-123' })
+      .mockResolvedValueOnce({ ETag: '"etag-1"' })
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({});
+    (localStorage as unknown as { client: { send: typeof send } }).client = { send };
+
+    const init = await localStorage.createMultipartUpload('ws/w1/staging/d1', 'application/pdf');
+    expect(init).toEqual({ uploadId: 'up-123' });
+    expect(send.mock.calls[0]?.[0]).toBeInstanceOf(CreateMultipartUploadCommand);
+
+    const part = await localStorage.uploadPart('ws/w1/staging/d1', 'up-123', 1, Buffer.from('hello'));
+    expect(part).toEqual({ partNumber: 1, etag: '"etag-1"' });
+    expect(send.mock.calls[1]?.[0]).toBeInstanceOf(UploadPartCommand);
+
+    await localStorage.completeMultipartUpload('ws/w1/staging/d1', 'up-123', [
+      { partNumber: 2, etag: 'etag-2' },
+      { partNumber: 1, etag: '"etag-1"' },
+    ]);
+    const completeCmd = send.mock.calls[2]?.[0] as CompleteMultipartUploadCommand;
+    expect(completeCmd).toBeInstanceOf(CompleteMultipartUploadCommand);
+    expect(completeCmd.input.MultipartUpload?.Parts).toEqual([
+      { PartNumber: 1, ETag: '"etag-1"' },
+      { PartNumber: 2, ETag: '"etag-2"' },
+    ]);
+
+    await localStorage.abortMultipartUpload('ws/w1/staging/d1', 'up-123');
+    expect(send.mock.calls[3]?.[0]).toBeInstanceOf(AbortMultipartUploadCommand);
   });
 });

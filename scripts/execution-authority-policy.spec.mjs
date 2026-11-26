@@ -24,15 +24,16 @@ import {
 
 const repositoryRoot = fileURLToPath(new URL('../', import.meta.url));
 
-test('inventory is locked to 35 Tools and 16 product Model tasks', () => {
+test('inventory is locked to 35 Tools and 17 product Model tasks', () => {
   assert.equal(EXPECTED_TOOL_IDS.length, 35);
-  assert.equal(EXPECTED_MODEL_TASKS.length, 16);
+  assert.equal(EXPECTED_MODEL_TASKS.length, 17);
   assert.equal(new Set(EXPECTED_TOOL_IDS).size, 35);
-  assert.equal(new Set(EXPECTED_MODEL_TASKS.map((entry) => entry.taskId)).size, 16);
+  assert.equal(new Set(EXPECTED_MODEL_TASKS.map((entry) => entry.taskId)).size, 17);
   assert.equal(EXPECTED_GENERIC_MODEL_TASK_LOOKUPS.length, 4);
   assert.deepEqual(EXPECTED_MODEL_GATEWAY_BOUNDARIES, [
     'apps/api/src/model-runtime/site-builder-ai-task-bridge.ts#generateStructured#1',
     'apps/api/src/model-runtime/structured-task-runtime-bridge.ts#generateStructured#1',
+    'apps/api/src/model-runtime/structured-task-runtime-bridge.ts#reviewVision#1',
   ]);
   assert.deepEqual(EXPECTED_PROTECTED_WIRING_PATHS, [
     'apps/api/src/model-gateway/model-gateway.module.ts',
@@ -296,10 +297,10 @@ test('pure contracts preserve typed authority wiring under REVIEW_ONLY and the a
   assert.deepEqual(result.issues, []);
   // 获客 vNext W4 + contact-enrichment safety (含 Prospeo v2) + L0 实时搜索 4 工具 + Batch 1.7B-1 EU VIES (vies.check) + Batch 1.8A 社媒商业找人 2 工具 = 35 tools，按 policy 源真值锁定。
   assert.equal(result.toolCount, 35);
-  assert.equal(result.modelTaskCount, 16);
+  assert.equal(result.modelTaskCount, 17);
   assert.equal(result.physicalExecutionWiring, 'REVIEW_ONLY');
   assert.ok(result.physicalToolCallsiteCount >= EXPECTED_TOOL_CALLSITES.length);
-  assert.equal(result.modelGatewayBoundaryCount, 2);
+  assert.equal(result.modelGatewayBoundaryCount, 3);
 });
 
 test('a physical retry is allowed only after a definite failure before output, bounded per operation key (D13)', async () => {
@@ -370,7 +371,7 @@ test('artifact execution is bound per call: only a subject-bound call may reach 
 });
 
 
-test('new market-generation task retains its dedicated source, typed schema and no extra model gateway boundary',()=>{
+test('new market-generation task retains its dedicated source, typed schema and governed gateway boundaries',()=>{
  assert.deepEqual(EXPECTED_MODEL_TASKS.find(task=>task.taskId==='market.candidates.generate'),{path:'apps/api/src/market-candidate-generation/generation.service.ts',taskId:'market.candidates.generate',schema:'market-candidates-generation/v1'});
- assert.equal(EXPECTED_MODEL_GATEWAY_BOUNDARIES.length,2);
+ assert.equal(EXPECTED_MODEL_GATEWAY_BOUNDARIES.length,3);
 });

@@ -724,6 +724,8 @@ async function main(): Promise<void> {
         docling: new DoclingClient(),
         embeddings: new EmbeddingsClient(),
         claims: new SellerDocumentClaimsService(prisma),
+        gateway,
+        runtimeTelemetry: runtimeTelemetry.telemetry,
       }),
       ...createAssetCleanupActivities({
         prisma,

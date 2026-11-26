@@ -39,12 +39,25 @@ export interface IndustrySuggestion {
   matched: boolean;
 }
 
+export interface UnderstandingPreviewDocumentParsedMeta {
+  chunks?: number;
+  mode?: 'priority_pages' | 'full';
+  parsedPages?: number;
+  totalPages?: number;
+  fullParsePending?: boolean;
+  tailParsePartial?: boolean;
+  aiProductsCount?: number;
+  aiClaimsCount?: number;
+  visionUsed?: boolean;
+}
+
 export interface UnderstandingPreviewDocumentItem {
   id: string;
   filename: string;
   status: string;
   mime: string;
   chunkCount: number;
+  parsedMeta?: UnderstandingPreviewDocumentParsedMeta | null;
   createdAt: string;
 }
 
@@ -212,89 +225,113 @@ export class UnderstandingPreviewService {
     | null = null;
 
   async get(ctx: RequestContext, companyId: string): Promise<UnderstandingPreview> {
-    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-      const company = await tx.companyProfile.findUnique({ where: { id: companyId } });
-      if (!company || company.deletedAt) {
-        throw new NotFoundException({
-          error: { code: 'NOT_FOUND', message: 'company not found' },
-        });
-      }
+    return this.prisma.withWorkspace(
+      ctx.workspaceId,
+      async (tx) => {
+        const company = await tx.companyProfile.findUnique({ where: { id: companyId } });
+        if (!company || company.deletedAt) {
+          throw new NotFoundException({
+            error: { code: 'NOT_FOUND', message: 'company not found' },
+          });
+        }
 
-      const [pageRows, taxonomy, offerings, claims] = await Promise.all([
-        tx.knowledgeSource.findMany({
-          where: { companyId, type: 'website' },
-          select: { uri: true },
-          distinct: ['uri'],
-        }),
-        this.taxonomy(tx),
-        tx.offering.findMany({
-          where: { companyId },
-          select: { name: true, source: true, sourceUrl: true, evidence: true },
-          orderBy: { createdAt: 'asc' },
-          take: 12,
-        }),
-        tx.claim.findMany({
-          // S1a：理解预览只呈现官网同站溯源；文档来源 Claim 显式排除，不伪装官网事实。
-          where: { companyId, status: { not: 'REVOKED' }, documentClaimEvidence: { none: {} } },
-          select: {
-            type: true,
-            statement: true,
-            evidence: { select: { sourceUrl: true }, take: 1 },
-          },
-          orderBy: { createdAt: 'asc' },
-          take: 200,
-        }),
-      ]);
-      const { industryNodes, industryAliases } = taxonomy;
-      // 换官网重试时旧站点的理解结果仍在库里（run 的落库数据不按站点清理）：
-      // 只保留与当前官网同站的溯源，避免把 A 站的产品/市场混进 B 站的预览。
-      const host = siteHost(company.website);
+        const [pageRows, taxonomy, offerings, claims] = await Promise.all([
+          tx.knowledgeSource.findMany({
+            where: { companyId, type: 'website' },
+            select: { uri: true },
+            distinct: ['uri'],
+          }),
+          this.taxonomy(tx),
+          tx.offering.findMany({
+            where: { companyId },
+            select: { name: true, source: true, sourceUrl: true, evidence: true },
+            orderBy: { createdAt: 'asc' },
+            take: 24,
+          }),
+          tx.claim.findMany({
+            // S1a：理解预览只呈现官网同站溯源；文档来源 Claim 显式排除，不伪装官网事实。
+            where: { companyId, status: { not: 'REVOKED' }, documentClaimEvidence: { none: {} } },
+            select: {
+              type: true,
+              statement: true,
+              evidence: { select: { sourceUrl: true }, take: 1 },
+            },
+            orderBy: { createdAt: 'asc' },
+            take: 200,
+          }),
+        ]);
+        const { industryNodes, industryAliases } = taxonomy;
+        // 换官网重试时旧站点的理解结果仍在库里（run 的落库数据不按站点清理）：
+        // 只保留与当前官网同站的溯源，避免把 A 站的产品/市场混进 B 站的预览。
+        const host = siteHost(company.website);
 
-      // 重试会让同一页在不同 run 下各留一行（ingestKey=runId:url），按 URI 去重才是"已分析页数"。
-      const pagesAnalyzed = pageRows.filter(
-        (row) => Boolean(row.uri) && belongsToSite(row.uri, host),
-      ).length;
-      const options = industryNodes.map(toOption);
-      const suggested = this.suggestIndustry(
-        company.industry,
-        company.industryCode,
-        options,
-        industryAliases,
-      );
-      const products = offerings
-        .filter((row) => belongsToSite(row.sourceUrl, host))
-        .map((row) => ({
-          name: row.name,
-          source: row.source,
-          sourceUrl: row.sourceUrl,
-          evidence: row.evidence,
-        }));
-      const markets = this.suggestMarkets(
-        taxonomy.countryAliases,
-        taxonomy.countryNodes,
-        company.summary,
-        claims.filter((claim) => belongsToSite(claim.evidence[0]?.sourceUrl, host)),
-      );
+        // 重试会让同一页在不同 run 下各留一行（ingestKey=runId:url），按 URI 去重才是"已分析页数"。
+        const pagesAnalyzed = pageRows.filter(
+          (row) => Boolean(row.uri) && belongsToSite(row.uri, host),
+        ).length;
+        const options = industryNodes.map(toOption);
+        const suggested = this.suggestIndustry(
+          company.industry,
+          company.industryCode,
+          options,
+          industryAliases,
+        );
+        const products = offerings
+          .filter((row) => belongsToSite(row.sourceUrl, host))
+          .map((row) => ({
+            name: row.name,
+            source: row.source,
+            sourceUrl: row.sourceUrl,
+            evidence: row.evidence,
+          }));
+        const markets = this.suggestMarkets(
+          taxonomy.countryAliases,
+          taxonomy.countryNodes,
+          company.summary,
+          claims.filter((claim) => belongsToSite(claim.evidence[0]?.sourceUrl, host)),
+        );
 
-      const documents = await this.loadDocumentsSummary(tx, companyId);
+        const documents = await this.loadDocumentsSummary(tx, companyId);
 
-      return {
-        companyId: company.id,
-        name: company.name,
-        website: company.website,
-        websiteChannel: classifySellerWebsiteChannel(company.website),
-        summary: company.summary ?? null,
-        status: company.status,
-        state: stateOf(company),
-        failure: parseFailure(company.understandingLastError),
-        pagesAnalyzed,
-        industry: { raw: company.industry, suggested, options },
-        products,
-        markets,
-        documents,
-        updatedAt: company.updatedAt.toISOString(),
-      };
-    });
+        return {
+          companyId: company.id,
+          name: company.name,
+          website: company.website,
+          websiteChannel: classifySellerWebsiteChannel(company.website),
+          summary: company.summary ?? null,
+          status: company.status,
+          state: stateOf(company),
+          failure: parseFailure(company.understandingLastError),
+          pagesAnalyzed,
+          industry: { raw: company.industry, suggested, options },
+          products,
+          markets,
+          documents,
+          updatedAt: company.updatedAt.toISOString(),
+        };
+      },
+      { maxWait: 10_000, timeout: 15_000 },
+    );
+  }
+
+  private normalizeParsedMeta(raw: unknown): UnderstandingPreviewDocumentParsedMeta | null {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const obj = raw as Record<string, unknown>;
+    const meta: UnderstandingPreviewDocumentParsedMeta = {};
+    if (typeof obj.chunks === 'number' && Number.isFinite(obj.chunks)) meta.chunks = obj.chunks;
+    if (obj.mode === 'priority_pages' || obj.mode === 'full') meta.mode = obj.mode;
+    if (typeof obj.parsedPages === 'number' && Number.isFinite(obj.parsedPages)) meta.parsedPages = obj.parsedPages;
+    if (typeof obj.totalPages === 'number' && Number.isFinite(obj.totalPages)) meta.totalPages = obj.totalPages;
+    if (typeof obj.fullParsePending === 'boolean') meta.fullParsePending = obj.fullParsePending;
+    if (typeof obj.tailParsePartial === 'boolean') meta.tailParsePartial = obj.tailParsePartial;
+    if (typeof obj.aiProductsCount === 'number' && Number.isFinite(obj.aiProductsCount)) {
+      meta.aiProductsCount = obj.aiProductsCount;
+    }
+    if (typeof obj.aiClaimsCount === 'number' && Number.isFinite(obj.aiClaimsCount)) {
+      meta.aiClaimsCount = obj.aiClaimsCount;
+    }
+    if (typeof obj.visionUsed === 'boolean') meta.visionUsed = obj.visionUsed;
+    return Object.keys(meta).length > 0 ? meta : null;
   }
 
   /** S1a 溯源隔离：PDF 画册与文档派生 Claim 单独汇总，绝不冒充官网抽取结果。 */
@@ -310,6 +347,7 @@ export class UnderstandingPreviewService {
             filename: string;
             status: string;
             mime: string;
+            parsedMeta?: unknown;
             createdAt: Date;
             _count?: { chunks?: number };
           }>
@@ -320,12 +358,14 @@ export class UnderstandingPreviewService {
       return { total: 0, ready: 0, processing: 0, failed: 0, items: [], extractedClaims: [] };
     }
     const rows = await docClient.findMany({
-      where: { companyId, deletedAt: null },
+      // 过滤未提交的 pending_upload 半截记录，避免中途取消/断传的占位行在前端误显示为「已上传排队解析」。
+      where: { companyId, deletedAt: null, status: { not: 'pending_upload' } },
       select: {
         id: true,
         filename: true,
         status: true,
         mime: true,
+        parsedMeta: true,
         createdAt: true,
         _count: { select: { chunks: true } },
       },
@@ -362,6 +402,7 @@ export class UnderstandingPreviewService {
         status: r.status,
         mime: r.mime,
         chunkCount: r._count?.chunks ?? 0,
+        parsedMeta: this.normalizeParsedMeta(r.parsedMeta),
         createdAt: r.createdAt.toISOString(),
       })),
       extractedClaims: docClaims.map((claim) => {

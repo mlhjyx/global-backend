@@ -240,7 +240,7 @@ describe('DomainAckService', () => {
     const service = new DomainAckService(repository);
     const apply = vi.fn(async () => ({ status: 'verified' }));
 
-    expect(DOMAIN_ACK_PRODUCT_CONSUMER_BINDINGS).toHaveLength(48);
+    expect(DOMAIN_ACK_PRODUCT_CONSUMER_BINDINGS).toHaveLength(49);
     expect(getDomainAckProductConsumerBinding('social.search_serper')).toMatchObject({
       consumer: 'SocialPresenceContactAdapter',
       resultStrategy: 'typed_projection',

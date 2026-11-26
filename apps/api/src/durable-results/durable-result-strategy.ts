@@ -18,6 +18,7 @@ const typedProjectionSchemaValues = [
   "understanding-claims/v1",
   "understanding-profile/v1",
   "understanding-offerings/v1",
+  "seller-document-analyze/v1",
   "taxonomy-code/v1",
   "fit-judgment/v1",
   "quick-judgment/v1",

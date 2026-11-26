@@ -29,7 +29,10 @@ export const VERIFIED_GATEWAY_MODEL_TRANSPORTS: Readonly<Record<string, GatewayM
  */
 export const CANDIDATE_GATEWAY_VISION_TRANSPORTS: Readonly<Record<string, GatewayVisionTransport>> = Object.freeze({
   'gemini-3.5-flash': 'google-generate-content',
+  'gemini-3.8-flash': 'openai-chat-completions',
+  'gpt-6-luna': 'openai-chat-completions',
   'gpt-5.6-terra': 'openai-responses',
   'gpt-5.6-sol': 'openai-responses',
   'claude-sonnet-5': 'anthropic-messages',
+  'claude-sonnet-5-5': 'anthropic-messages',
 });
