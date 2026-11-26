@@ -419,7 +419,9 @@ export function normalizeFeedbackDomain(raw: string | null | undefined): string 
   } else {
     candidate = trimmed.split('/')[0] ?? '';
   }
-  const clean = candidate.replace(/^www\./iu, '').replace(/\.+$/u, '').toLowerCase();
+  let clean = candidate.toLowerCase();
+  if (clean.startsWith('www.')) clean = clean.slice(4);
+  while (clean.endsWith('.')) clean = clean.slice(0, -1);
   return STRICT_DOMAIN_RE.test(clean) ? clean : null;
 }
 

@@ -197,4 +197,28 @@ describe('FeedbackLearningService', () => {
       svc.recordFeedback(CTX, ICP_ID, { domain: 'x.de', outcome: 'rejected', rejectionReason: 'wrong_role_peer' }),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
+
+  it('normalizes trailing dots and rejects pathological dot strings in linear time (CodeQL ReDoS fix)', async () => {
+    const { prisma } = makePrisma({
+      id: ICP_ID,
+      name: 'Linear Domain Check',
+      version: 1,
+      exclusions: [],
+      companyAttributes: {},
+    });
+    const svc = new FeedbackLearningService(prisma);
+    const normalized = await svc.recordFeedback(CTX, ICP_ID, {
+      domain: 'WWW.Solar-Peer.DE...',
+      outcome: 'rejected',
+      rejectionReason: 'wrong_role_peer',
+    });
+    expect(normalized.appliedRules.addedExcludedDomain).toBe('solar-peer.de');
+
+    const pathological = await svc.recordFeedback(CTX, ICP_ID, {
+      domain: `${'.'.repeat(5000)}a`,
+      outcome: 'rejected',
+      rejectionReason: 'wrong_role_peer',
+    });
+    expect(pathological.appliedRules.addedExcludedDomain).toBeNull();
+  });
 });
