@@ -152,10 +152,7 @@ export async function startMockUpstreamsServer(): Promise<MockUpstreamsServer> {
         ? parsed.pathname.slice(prefix.length) || "/"
         : parsed.pathname;
 
-      const query: Record<string, string> = {};
-      for (const [k, v] of parsed.searchParams.entries()) {
-        query[k] = v;
-      }
+      const query = Object.fromEntries(parsed.searchParams);
 
       const recorded: RecordedUpstreamCall = {
         method: req.method ?? "GET",

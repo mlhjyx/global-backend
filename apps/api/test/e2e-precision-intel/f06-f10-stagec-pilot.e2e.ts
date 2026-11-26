@@ -646,7 +646,10 @@ describe("F06–F10 Wave 1 Stage C, Worker, Battle CSV & Pilot Cleanup (E2E Tier
         "accept",
         "synthetic qualification attempt",
         "GOOD_FIT",
-      )).rejects.toMatchObject({ status: 409, response: { error: { code: "LEAD_FIT_MISMATCH_BLOCKED" } } });
+      )).rejects.toMatchObject({
+        status: 409,
+        response: { error: { code: "INVALID_STATE", message: expect.stringContaining("failed fit evaluation") } },
+      });
       expect(updateMany).not.toHaveBeenCalled();
     });
 
