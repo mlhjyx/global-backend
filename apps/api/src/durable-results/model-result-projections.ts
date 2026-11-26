@@ -8,6 +8,7 @@ export const MODEL_RESULT_TASK_IDS = Object.freeze([
   "company_understanding.extract_claims",
   "company_understanding.extract_profile",
   "company_understanding.extract_offerings",
+  "seller_document.analyze",
   "icp.design",
   "discovery.query_plan",
   "taxonomy.normalize",
@@ -27,6 +28,7 @@ export const MODEL_RESULT_PROJECTION_SCHEMAS = Object.freeze({
   "company_understanding.extract_claims": "understanding-claims/v1",
   "company_understanding.extract_profile": "understanding-profile/v1",
   "company_understanding.extract_offerings": "understanding-offerings/v1",
+  "seller_document.analyze": "seller-document-analyze/v1",
   "icp.design": "icp-design/v1",
   "discovery.query_plan": "icp-query-plan/v1",
   "taxonomy.normalize": "taxonomy-code/v1",
@@ -1377,10 +1379,131 @@ const webSearchCandidatesDefinition: TypedProjectionDefinition<unknown, unknown>
     return restoreModelResult(result, { candidates: result.data.candidates });
   },
 };
+const sellerDocumentAnalyzeDefinition: TypedProjectionDefinition<unknown, unknown> = {
+  schema: "seller-document-analyze/v1",
+  jsonSchema: modelResultSchema(
+    objectSchema(
+      {
+        industry: stringSchema(200),
+        summary: stringSchema(2000),
+        transcribedMarkdown: stringSchema(20000),
+        products: arraySchema(40, offeringSchema),
+        claims: arraySchema(
+          40,
+          objectSchema(
+            {
+              chunkSeq: numberSchema(0, 10000),
+              type: stringSchema(80),
+              statement: stringSchema(4000),
+              quote: stringSchema(2000),
+              confidence: numberSchema(0, 1),
+            },
+            ["chunkSeq", "type", "statement", "quote", "confidence"],
+          ),
+        ),
+      },
+      ["products", "claims"],
+    ),
+  ),
+  project(raw) {
+    const result = readModelResult(
+      raw,
+      ["industry", "summary", "transcribedMarkdown", "products", "claims"],
+      ["products", "claims"],
+    );
+    return projectModelResultEnvelope(result, {
+      ...(hasField(result.data, "industry")
+        ? { industry: field(result.data, "industry") }
+        : {}),
+      ...(hasField(result.data, "summary")
+        ? { summary: field(result.data, "summary") }
+        : {}),
+      ...(hasField(result.data, "transcribedMarkdown")
+        ? { transcribedMarkdown: field(result.data, "transcribedMarkdown") }
+        : {}),
+      products: denseArray(field(result.data, "products")).map((product) => {
+        const source = ownDataRecord(
+          product,
+          ["name", "description", "attributes", "evidence", "confidence"],
+          ["name", "confidence"],
+        );
+        return {
+          name: field(source, "name"),
+          ...(hasField(source, "description")
+            ? { description: field(source, "description") }
+            : {}),
+          ...(hasField(source, "attributes")
+            ? {
+                factEntries: projectFactEntries(
+                  field(source, "attributes"),
+                  OFFERING_ATTRIBUTE_KEYS,
+                ),
+              }
+            : {}),
+          ...(hasField(source, "evidence")
+            ? { evidence: field(source, "evidence") }
+            : {}),
+          confidence: field(source, "confidence"),
+        };
+      }),
+      claims: denseArray(field(result.data, "claims")).map((claim) => {
+        const source = ownDataRecord(
+          claim,
+          ["chunkSeq", "type", "statement", "quote", "confidence"],
+          ["chunkSeq", "type", "statement", "quote", "confidence"],
+        );
+        return {
+          chunkSeq: field(source, "chunkSeq"),
+          type: field(source, "type"),
+          statement: field(source, "statement"),
+          quote: field(source, "quote"),
+          confidence: field(source, "confidence"),
+        };
+      }),
+    });
+  },
+  restore(projected) {
+    const result = projected as {
+      data: {
+        industry?: string;
+        summary?: string;
+        transcribedMarkdown?: string;
+        products: readonly UnknownRecord[];
+        claims: readonly UnknownRecord[];
+      };
+      provider: string;
+      model: string;
+    };
+    return restoreModelResult(result, {
+      ...(hasField(result.data, "industry") ? { industry: result.data.industry } : {}),
+      ...(hasField(result.data, "summary") ? { summary: result.data.summary } : {}),
+      ...(hasField(result.data, "transcribedMarkdown")
+        ? { transcribedMarkdown: result.data.transcribedMarkdown }
+        : {}),
+      products: result.data.products.map((product) => ({
+        name: product.name,
+        ...(hasField(product, "description") ? { description: product.description } : {}),
+        ...(hasField(product, "factEntries")
+          ? { attributes: restoreFactEntries(product.factEntries) }
+          : {}),
+        ...(hasField(product, "evidence") ? { evidence: product.evidence } : {}),
+        confidence: product.confidence,
+      })),
+      claims: result.data.claims.map((claim) => ({
+        chunkSeq: claim.chunkSeq,
+        type: claim.type,
+        statement: claim.statement,
+        quote: claim.quote,
+        confidence: claim.confidence,
+      })),
+    });
+  },
+};
 export const MODEL_RESULT_PROJECTION_DEFINITIONS = Object.freeze([
   claimsDefinition,
   profileDefinition,
   offeringsDefinition,
+  sellerDocumentAnalyzeDefinition,
   icpDesignDefinition,
   queryPlanDefinition,
   taxonomyDefinition,

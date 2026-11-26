@@ -149,6 +149,7 @@ describe('AI task registry model substitution opt-in (D14, 2026-10-11)', () => {
     'discovery.classify_trade_role',
     'contact.find_decision_makers',
     'discovery.web_search_candidates',
+    'seller_document.analyze',
   ];
 
   it('marks exactly the acquisition tasks as accepting a substitute', () => {

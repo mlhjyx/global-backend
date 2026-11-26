@@ -179,6 +179,7 @@ function assertVisionReviewInput(
     ![
       "site_builder.aesthetic_review",
       "site_builder.aesthetic_review.eval",
+      "seller_document.analyze",
     ].includes(input.task) ||
     !BOUNDED_TOKEN.test(input.task) ||
     !BOUNDED_TOKEN.test(input.model) ||

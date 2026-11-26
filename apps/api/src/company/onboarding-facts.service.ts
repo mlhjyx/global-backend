@@ -42,7 +42,9 @@ export class OnboardingFactsService {
         });
       }
     }
-    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+    return this.prisma.withWorkspace(
+      ctx.workspaceId,
+      async (tx) => {
       const company = await tx.companyProfile.findUnique({ where: { id: companyId } });
       if (!company || company.deletedAt) {
         throw new NotFoundException({
@@ -166,6 +168,8 @@ export class OnboardingFactsService {
         });
       }
       return updated;
-    });
+      },
+      { maxWait: 10_000, timeout: 15_000 },
+    );
   }
 }

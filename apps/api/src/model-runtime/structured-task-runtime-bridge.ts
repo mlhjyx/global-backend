@@ -7,6 +7,7 @@ import type {
   GenerateStructuredInput,
   ModelResolutionSource,
   ModelResult,
+  ReviewVisionInput,
 } from "../model-gateway/types";
 import { canonicalDigest, ContextEngine } from "./context-engine";
 import {
@@ -446,4 +447,13 @@ export async function executeStructuredTaskWithRuntime<Output>(
         : {}),
     },
   };
+}
+
+/** 受治理的多模态视觉任务桥接：统一复用 ModelGateway.reviewVision 边界，避免业务层直调网关。 */
+export async function executeVisionTaskWithRuntime<Output>(
+  gateway: ModelGateway,
+  input: ReviewVisionInput,
+  context: AiContext,
+): Promise<ModelResult<Output>> {
+  return gateway.reviewVision<Output>(input, context);
 }

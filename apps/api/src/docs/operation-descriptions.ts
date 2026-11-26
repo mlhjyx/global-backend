@@ -101,6 +101,12 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
     '为卖家资料上传签发短时 presigned PUT（15 分钟）。校验 MIME 白名单与单文件上限（PDF/Word/PPT/Excel ≤50MB，文本/Markdown ≤10MB）与配额（每空间 500 份/2 GiB、每公司 200 份，env 可调）；超限返回 409。返回 documentId 与 uploadUrl，上传对象带 1 天过期的 staging 生命周期标签。',
   'PUT /api/v1/companies/{companyId}/seller-documents/{documentId}/content':
     '浏览器直传中转：把文件原始字节经引擎写入 presign 时的暂存对象（浏览器访问不到对象存储内网地址时使用）。仅 pending_upload 可用；Content-Type 必须与 presign 申报一致，字节数必须等于申报大小；超限 413。写入后照常调 commit 校验并入队。',
+  'POST /api/v1/companies/{companyId}/seller-documents/{documentId}/multipart/init':
+    '初始化资料 S3 Multipart 分片上传（仅 pending_upload 可用），返回 uploadId 与推荐分片大小 partSizeBytes（默认 5 MiB，符合对象存储非末片最小体积要求）。',
+  'PUT /api/v1/companies/{companyId}/seller-documents/{documentId}/parts/{partNumber}':
+    '上传资料单个分片（query 必传 uploadId，单片上限 6 MiB，partNumber 范围 1–100）；返回 { partNumber, etag } 供后续合并与断点续传，超限立即返回 413。',
+  'POST /api/v1/companies/{companyId}/seller-documents/{documentId}/multipart/complete':
+    '按分片清单合并所有已上传分片为完整 staging 对象（仅 pending_upload 可用）；合并完成后客户端照常调用 commit 完成魔数/SHA-256 核验与入队解析。',
   'POST /api/v1/companies/{companyId}/seller-documents/{documentId}/commit':
     '确认上传完成：对 staging 对象做 HEAD、流式 sha256 与魔数校验（声明的 MIME 必须与实际内容相符），通过后转存 canonical 对象并将文档置为 queued、入队解析。上传未完成返回 409 并留在 pending_upload；内容不符置 rejected；同一公司已存在相同内容时返回 409 并清理已复制副本。',
   'GET /api/v1/companies/{companyId}/seller-documents':

@@ -278,4 +278,80 @@ describe('UnderstandingPreviewService', () => {
     const { service } = fixture(null);
     await expect(service.get(CTX, COMPANY_ID)).rejects.toBeInstanceOf(NotFoundException);
   });
+
+  it('画册汇总过滤未提交 pending_upload 噪声并透传 parsedMeta 与 15s 事务超时', async () => {
+    const docFindMany = vi.fn(async () => [
+      {
+        id: '40000000-0000-4000-8000-000000000004',
+        filename: 'catalog-48p.pdf',
+        status: 'ready',
+        mime: 'application/pdf',
+        parsedMeta: {
+          chunks: 18,
+          mode: 'priority_pages',
+          parsedPages: 15,
+          totalPages: 48,
+          fullParsePending: true,
+          aiProductsCount: 5,
+          visionUsed: false,
+        },
+        createdAt: new Date('2026-11-26T12:00:00Z'),
+        _count: { chunks: 18 },
+      },
+    ]);
+    const tx = {
+      companyProfile: {
+        findUnique: vi.fn(async () => ({
+          id: COMPANY_ID,
+          workspaceId: CTX.workspaceId,
+          name: '具安科技',
+          website: null,
+          status: 'DRAFT',
+          industry: null,
+          industryCode: null,
+          summary: null,
+          understandingFailedAt: null,
+          understandingLastError: null,
+          updatedAt: new Date('2026-11-26T12:00:00Z'),
+        })),
+      },
+      knowledgeSource: { findMany: vi.fn(async () => []) },
+      canonicalTaxonomy: { findMany: vi.fn(async () => []) },
+      termAlias: { findMany: vi.fn(async () => []) },
+      offering: {
+        findMany: vi.fn(async () => [
+          { name: 'G12-0BB 750W', source: 'seller_document', sourceUrl: null, evidence: '750W' },
+        ]),
+      },
+      claim: { findMany: vi.fn(async () => []) },
+      sellerDocument: { findMany: docFindMany },
+    };
+    const withWorkspace = vi.fn(async (_ws: string, fn: (t: typeof tx) => unknown) => fn(tx));
+    const service = new UnderstandingPreviewService({ withWorkspace } as unknown as PrismaService);
+
+    const preview = await service.get(CTX, COMPANY_ID);
+
+    expect(withWorkspace).toHaveBeenCalledWith(
+      CTX.workspaceId,
+      expect.any(Function),
+      { maxWait: 10_000, timeout: 15_000 },
+    );
+    expect(docFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ status: { not: 'pending_upload' } }),
+      }),
+    );
+    expect(preview.products).toEqual([
+      { name: 'G12-0BB 750W', source: 'seller_document', sourceUrl: null, evidence: '750W' },
+    ]);
+    expect(preview.documents.items[0]?.parsedMeta).toEqual({
+      chunks: 18,
+      mode: 'priority_pages',
+      parsedPages: 15,
+      totalPages: 48,
+      fullParsePending: true,
+      aiProductsCount: 5,
+      visionUsed: false,
+    });
+  });
 });

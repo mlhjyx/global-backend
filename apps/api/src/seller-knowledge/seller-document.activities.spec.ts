@@ -107,7 +107,7 @@ describe('createSellerDocumentActivities（Phase 2b ingest）', () => {
   it('PDF 资料：传带扩展名的文件名给 Docling，而非裸 UUID', async () => {
     const { activities, docling } = fixture({
       claimRows: [{ filename: '光伏组件规格书.pdf', object_key: 'ws/k.pdf', mime: 'application/pdf', processing_attempt: 1 }],
-      markdown: '# 光伏组件\n\nHJT 720W 规格参数说明。',
+      markdown: '# 光伏组件\n\n' + 'HJT 720W 规格参数说明与效率数据。'.repeat(25),
     });
     const result = await activities.processSellerDocument(INPUT);
     expect(result.outcome).toBe('ready');
@@ -116,6 +116,159 @@ describe('createSellerDocumentActivities（Phase 2b ingest）', () => {
       expect.any(Buffer),
       undefined,
       INPUT.workspaceId,
+      expect.objectContaining({ allowEmptyMarkdown: true }),
+    );
+  });
+
+  it('大页数 PDF（>15 页）：首阶段只解析前 15 页立即置 ready，并标记 tailPagesPending 供后台补全', async () => {
+    const largePdf = Buffer.from('%PDF-1.7\n1 0 obj << /Type /Pages /Count 42 >> endobj\n', 'latin1');
+    const { activities, docling } = fixture({
+      claimRows: [{ filename: 'catalog-42p.pdf', object_key: 'ws/42p.pdf', mime: 'application/pdf', processing_attempt: 1 }],
+      content: largePdf,
+      markdown: '# 光伏组件产品手册\n\n' + 'G12-0BB 750W 转换效率 24.5%，通过 IEC 61215 认证。'.repeat(60),
+    });
+
+    const result = await activities.processSellerDocument(INPUT);
+
+    expect(result).toEqual({
+      documentId: INPUT.documentId,
+      outcome: 'ready',
+      tailPagesPending: true,
+      nextStartPage: 16,
+      totalPages: 42,
+    });
+    expect(docling.convertToMarkdown).toHaveBeenCalledWith(
+      'catalog-42p.pdf',
+      largePdf,
+      undefined,
+      INPUT.workspaceId,
+      expect.objectContaining({ pageRange: [1, 15], returnPageCount: true }),
+    );
+  });
+
+  it('稀疏扫描 PDF：首轮文字不足自动走 force_ocr + L3 视觉模型兜底转写并提取产品', async () => {
+    const validPng = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01]);
+    const scanPdf = Buffer.from('%PDF-1.7\n1 0 obj << /Type /Pages /Count 4 >> endobj\n', 'latin1');
+    const docling = {
+      convertToMarkdown: vi
+        .fn()
+        .mockResolvedValueOnce({ markdown: '封面' })
+        .mockResolvedValueOnce({
+          markdown: '封面',
+          pageCount: 4,
+          pageImages: [{ pageNo: 1, pngBytes: validPng }],
+        }),
+    };
+    const gateway = {
+      reviewVision: vi.fn(async () => ({
+        data: {
+          transcribedMarkdown: '### 户用 10kWh 储能系统\n采用磷酸铁锂电芯，通过 IEC 62619 与 CE 认证，交期 15 天。',
+          products: [{ name: '户用 10kWh 储能系统', description: '壁挂式光储一体机', confidence: 0.9 }],
+          claims: [],
+        },
+        provider: 'gateway',
+        model: 'gemini-3.8-flash',
+      })),
+      generateStructured: vi.fn(async () => ({
+        data: { products: [], claims: [] },
+        provider: 'gateway',
+        model: 'gpt-6-luna',
+      })),
+    };
+    const tx = {
+      $queryRaw: vi.fn(async (arg: unknown) => {
+        const sql = typeof (arg as { sql?: unknown })?.sql === 'string' ? (arg as { sql: string }).sql : '';
+        if (sql.includes('RETURNING "parse_revision"')) return [{ parse_revision: 1 }];
+        return [{ filename: 'scan.pdf', object_key: 'ws/scan.pdf', mime: 'application/pdf', processing_attempt: 1, uploaded_by: null }];
+      }),
+      $executeRaw: vi.fn(async () => 1),
+      sellerDocument: { findFirst: vi.fn(async () => ({ status: 'queued', deletedAt: null })) },
+      sellerDocumentChunk: { deleteMany: vi.fn(async () => ({ count: 0 })) },
+      offering: {
+        findMany: vi.fn(async () => []),
+        upsert: vi.fn(async (arg: unknown) => arg),
+      },
+      companyProfile: {
+        findUnique: vi.fn(async () => ({ industry: null, summary: null })),
+        update: vi.fn(async (arg: unknown) => arg),
+      },
+    };
+    const activities = createSellerDocumentActivities({
+      prisma: { withWorkspace: vi.fn(async (_ws: string, fn: (t: typeof tx) => unknown) => fn(tx)) } as unknown as PrismaService,
+      storage: { getBufferBounded: vi.fn(async () => scanPdf) } as unknown as SellerDocumentsStorage,
+      docling: docling as never,
+      embeddings: { model: 'bge-m3', version: 'test', embed: vi.fn(async (t: string[]) => t.map(() => [0.1, 0.2])) } as never,
+      gateway: gateway as never,
+      resizeVisionPng: async (buf) => buf,
+    });
+
+    const result = await activities.processSellerDocument(INPUT);
+    expect(result.outcome).toBe('ready');
+    expect(docling.convertToMarkdown).toHaveBeenCalledTimes(2);
+    expect(gateway.reviewVision).toHaveBeenCalledTimes(1);
+    expect(tx.offering.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ name: '户用 10kWh 储能系统', source: 'seller_document' }),
+      }),
+    );
+  });
+
+  it('阶段二 processSellerDocumentTailPages 按 15 页批次补全尾页并追加分块', async () => {
+    const docling = {
+      convertToMarkdown: vi
+        .fn()
+        .mockResolvedValueOnce({ markdown: '## 第16-30页\n\n工业储能柜 215kWh 参数说明。', pageCount: 15 })
+        .mockResolvedValueOnce({ markdown: '## 第31-35页\n\n质保 10 年与安装指南。', pageCount: 5 }),
+    };
+    const executeRaw = vi.fn(async () => 1);
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ parse_revision: 2 }]),
+      $executeRaw: executeRaw,
+      sellerDocument: {
+        findFirst: vi.fn(async () => ({
+          filename: 'catalog-35p.pdf',
+          objectKey: 'ws/35p.pdf',
+          mime: 'application/pdf',
+          uploadedBy: '20000000-0000-4000-8000-000000000002',
+          chunkCount: 10,
+          parsedMeta: { chunks: 10, mode: 'priority_pages', parsedPages: 15, totalPages: 35, fullParsePending: true },
+        })),
+      },
+      sellerDocumentChunk: {
+        aggregate: vi.fn(async () => ({ _max: { seq: 9 }, _count: { _all: 10 } })),
+      },
+    };
+    const activities = createSellerDocumentActivities({
+      prisma: { withWorkspace: vi.fn(async (_ws: string, fn: (t: typeof tx) => unknown) => fn(tx)) } as unknown as PrismaService,
+      storage: { getBufferBounded: vi.fn(async () => Buffer.from('%PDF-1.7')) } as unknown as SellerDocumentsStorage,
+      docling: docling as never,
+      embeddings: { model: 'bge-m3', version: 'test', embed: vi.fn(async (t: string[]) => t.map(() => [0.2, 0.3])) } as never,
+    });
+
+    const out = await activities.processSellerDocumentTailPages({
+      ...INPUT,
+      startPage: 16,
+      totalPages: 35,
+    });
+
+    expect(out.partial).toBe(false);
+    expect(out.appendedChunks).toBeGreaterThan(0);
+    expect(out.parsedPages).toBe(35);
+    expect(docling.convertToMarkdown).toHaveBeenNthCalledWith(
+      1,
+      'catalog-35p.pdf',
+      expect.any(Buffer),
+      undefined,
+      INPUT.workspaceId,
+      expect.objectContaining({ pageRange: [16, 30] }),
+    );
+    expect(docling.convertToMarkdown).toHaveBeenNthCalledWith(
+      2,
+      'catalog-35p.pdf',
+      expect.any(Buffer),
+      undefined,
+      INPUT.workspaceId,
+      expect.objectContaining({ pageRange: [31, 35] }),
     );
   });
 

@@ -50,6 +50,32 @@ describe('sellerDocumentIngestWorkflow（Phase 2b）', () => {
     expect(out.outcome).toBe('queued');
   });
 
+  it('首阶段返回 tailPagesPending 时，工作流自动调度阶段二后台补全尾页', async () => {
+    acts.processSellerDocument.mockResolvedValue({
+      documentId: INPUT.documentId,
+      outcome: 'ready',
+      tailPagesPending: true,
+      nextStartPage: 16,
+      totalPages: 48,
+    });
+    acts.processSellerDocumentTailPages.mockResolvedValue({
+      documentId: INPUT.documentId,
+      appendedChunks: 12,
+      parsedPages: 48,
+      partial: false,
+    });
+
+    const out = await sellerDocumentIngestWorkflow(INPUT);
+
+    expect(out.outcome).toBe('ready');
+    expect(acts.processSellerDocumentTailPages).toHaveBeenCalledTimes(1);
+    expect(acts.processSellerDocumentTailPages).toHaveBeenCalledWith({
+      ...INPUT,
+      startPage: 16,
+      totalPages: 48,
+    });
+  });
+
   it('activity 失败原样上抛（Temporal retry 拥有重试权，状态机保持 queued/retryAt）', async () => {
     acts.processSellerDocument.mockRejectedValue(new Error('docling down'));
     await expect(sellerDocumentIngestWorkflow(INPUT)).rejects.toThrow('docling down');

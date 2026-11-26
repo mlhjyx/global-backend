@@ -419,4 +419,59 @@ describe('formatContentDisposition & SellerDocumentsService.openContentStream', 
     }));
     await expect(s3Down.service.openContentStream(CTX, DOC_ID)).rejects.toBeInstanceOf(ServiceUnavailableException);
   });
+
+  it('S3 Multipart 分片上传（init / uploadPart / complete）严格校验状态、分片编号与大小', async () => {
+    const pendingRow = {
+      ...READY_DOC,
+      status: 'pending_upload',
+      objectKey: `ws/${CTX.workspaceId}/seller-documents/staging/${DOC_ID}`,
+    };
+    const prisma = {
+      withWorkspace: vi.fn(async (_ws: string, fn: (tx: unknown) => unknown) =>
+        fn({ sellerDocument: { findFirst: vi.fn(async () => pendingRow) } }),
+      ),
+    };
+    const storage = {
+      createMultipartUpload: vi.fn(async () => ({ uploadId: 'up-abc' })),
+      uploadPart: vi.fn(async (_k: string, _u: string, partNumber: number) => ({
+        partNumber,
+        etag: `"etag-${partNumber}"`,
+      })),
+      completeMultipartUpload: vi.fn(async () => undefined),
+    };
+    const service = new SellerDocumentsService(
+      prisma as unknown as PrismaService,
+      storage as unknown as SellerDocumentsStorage,
+      {} as never,
+      {} as never,
+    );
+
+    const init = await service.initMultipartUpload(CTX, COMPANY_ID, DOC_ID);
+    expect(init).toEqual({
+      documentId: DOC_ID,
+      uploadId: 'up-abc',
+      partSizeBytes: 5 * 1024 * 1024,
+    });
+
+    const p1 = await service.uploadMultipartPart(CTX, COMPANY_ID, DOC_ID, 'up-abc', 1, Buffer.from('chunk-1'));
+    expect(p1).toEqual({ partNumber: 1, etag: '"etag-1"' });
+
+    await expect(
+      service.uploadMultipartPart(CTX, COMPANY_ID, DOC_ID, 'up-abc', 0, Buffer.from('bad')),
+    ).rejects.toThrow();
+    await expect(
+      service.uploadMultipartPart(CTX, COMPANY_ID, DOC_ID, 'up-abc', 1, Buffer.alloc(0)),
+    ).rejects.toThrow();
+
+    const completed = await service.completeMultipartUpload(CTX, COMPANY_ID, DOC_ID, {
+      uploadId: 'up-abc',
+      parts: [{ partNumber: 1, etag: '"etag-1"' }],
+    });
+    expect(completed.id).toBe(DOC_ID);
+    expect(storage.completeMultipartUpload).toHaveBeenCalledWith(
+      pendingRow.objectKey,
+      'up-abc',
+      [{ partNumber: 1, etag: '"etag-1"' }],
+    );
+  });
 });
