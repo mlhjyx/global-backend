@@ -1,4 +1,30 @@
 import { createHash } from "node:crypto";
+import {
+  NEW_API_REQUEST_BOUND_RESOLVER_ID,
+  NEW_API_SETTLEMENT_READBACK_CAPABILITY_SCHEMA,
+  NEW_API_SETTLEMENT_READBACK_CONTRACT,
+  type NewApiRequestBoundSettlement,
+  type NewApiRequestBoundSettlementInput,
+  type NewApiRequestBoundSettlementResolverPort,
+  type NewApiRequestBoundSettlementResolverSettings,
+  type NewApiRequestBoundSettlementUnknownReason as UnknownReason,
+  type NewApiSettlementReadbackCapability,
+  type NewApiSettlementReadbackProbe,
+  type NewApiSettlementReadbackProbePhase,
+} from "./settlement-readback-contract";
+
+export {
+  NEW_API_REQUEST_BOUND_RESOLVER_ID,
+  NEW_API_SETTLEMENT_READBACK_CAPABILITY_SCHEMA,
+  NEW_API_SETTLEMENT_READBACK_CONTRACT,
+  type NewApiRequestBoundSettlement,
+  type NewApiRequestBoundSettlementInput,
+  type NewApiRequestBoundSettlementResolverPort,
+  type NewApiRequestBoundSettlementResolverSettings,
+  type NewApiSettlementReadbackCapability,
+  type NewApiSettlementReadbackProbe,
+  type NewApiSettlementReadbackProbePhase,
+};
 
 const OPAQUE_256 = /^[A-Za-z0-9_-]{43}$/u;
 const MODEL_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}$/u;
@@ -15,11 +41,6 @@ const PROTOCOLS = new Set([
   "anthropic-messages",
 ]);
 
-export const NEW_API_SETTLEMENT_READBACK_CONTRACT =
-  "new-api-settlement-readback/v1" as const;
-export const NEW_API_SETTLEMENT_READBACK_CAPABILITY_SCHEMA =
-  "new-api-settlement-readback-capability/v1" as const;
-
 interface ResolverDependencies {
   fetch?: typeof fetch;
   wait?: (milliseconds: number) => Promise<void>;
@@ -27,95 +48,6 @@ interface ResolverDependencies {
 }
 
 const CAPTURED_FETCH = fetch;
-
-/** One exact identity is shared by provider observations and reconciliation. */
-export const NEW_API_REQUEST_BOUND_RESOLVER_ID =
-  "new-api-request-bound-reconciliation-v1";
-
-export interface NewApiRequestBoundSettlementResolverSettings {
-  gatewayOrigin: string;
-  readerCredential: string;
-  resolverId: typeof NEW_API_REQUEST_BOUND_RESOLVER_ID;
-  maximumProbeDurationMs: number;
-}
-
-export interface NewApiRequestBoundSettlementInput {
-  requestId: string | null;
-  nonce: string | null;
-  alias: string;
-  protocol: string;
-  expectedChannelId: number;
-  usage?: { inputTokens?: number; outputTokens?: number };
-  maxOutputTokens: number;
-  maximumQuotaPoints: number;
-  maximumProbeCount: 1 | 2;
-  probeAuthority: {
-    claim(sequence: 1 | 2): Promise<string | null>;
-    record(input: {
-      probeId: string;
-      probe: NewApiSettlementReadbackProbe;
-      observedAt: Date;
-    }): Promise<void>;
-  };
-  signal?: AbortSignal;
-}
-
-export type NewApiSettlementReadbackProbePhase =
-  | "gateway_log_observed"
-  | "gateway_log_pending"
-  | "gateway_log_missing"
-  | "gateway_log_unavailable"
-  | "gateway_log_invalid"
-  | "gateway_log_ambiguous";
-
-export interface NewApiSettlementReadbackProbe {
-  sequence: 1 | 2;
-  phase: NewApiSettlementReadbackProbePhase;
-  httpStatusClass: 2 | 4 | 5 | null;
-}
-
-type UnknownReason =
-  | "request_id_missing"
-  | "nonce_missing"
-  | "gateway_log_missing"
-  | "gateway_log_unavailable"
-  | "log_ambiguous"
-  | "log_invalid"
-  | "model_mismatch"
-  | "channel_mismatch";
-
-interface SettlementBase {
-  requestId: string | null;
-  resolverId: typeof NEW_API_REQUEST_BOUND_RESOLVER_ID;
-  physicalCallCount: 0;
-  readbackProbes: readonly NewApiSettlementReadbackProbe[];
-}
-
-export type NewApiRequestBoundSettlement =
-  | (SettlementBase & {
-      status: "settled";
-      requestId: string;
-      alias: string;
-      protocol: string;
-      channelId: number;
-      quota: number;
-      inputTokens: number;
-      outputTokens: number;
-      upstreamIdState: "observed" | "absent";
-      receiptDigest: string;
-    })
-  | (SettlementBase & { status: "unknown"; reason: UnknownReason });
-
-export type NewApiSettlementReadbackCapability =
-  | {
-      ready: true;
-      resolverId: typeof NEW_API_REQUEST_BOUND_RESOLVER_ID;
-    }
-  | {
-      ready: false;
-      resolverId: typeof NEW_API_REQUEST_BOUND_RESOLVER_ID;
-      reason: "gateway_unavailable" | "contract_invalid";
-    };
 
 interface ReadbackReceipt {
   request_id: unknown;

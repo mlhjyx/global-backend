@@ -483,50 +483,47 @@ async function main(): Promise<void> {
   // M2 步 9b：agent 注册表解析器（fail-closed，30s 缓存）与决策轨迹（append-only、幂等）。
   const agentResolver = createDbAgentResolver(new PrismaAgentRegistryStore(prisma));
   const agentTraces = new PrismaAgentDecisionTraceStore(prisma);
-  const costReconciliationCatalog =
-    createSiteBuildCostReconciliationCatalogFromEnv();
-  const activeSettlementRoutes = (() => {
-    try {
-      return SITE_BUILDER_GENERATIVE_TASK_IDS.flatMap((taskId) => {
-        const route = resolveTaskRoute(taskId, process.env);
-        return [route.primary, ...route.fallbacks].map((alias) =>
-          Object.freeze({
-            taskId,
-            alias,
-            maxOutputTokens: route.maxTokens,
-          }),
-        );
-      });
-    } catch {
-      return undefined;
-    }
-  })();
-  if (
-    settlementReadbackConfigured(process.env) &&
-    (!activeSettlementRoutes ||
+  let costReconciliationCatalog: ReturnType<typeof createSiteBuildCostReconciliationCatalogFromEnv> | undefined;
+  let settlementReadbackRuntime: ReturnType<typeof createSiteBuildSettlementReadbackRuntimeFromEnv> | undefined;
+  let costReconciliationResolver: NonNullable<typeof settlementReadbackRuntime>["reconciliationResolver"] | undefined;
+  if (settlementReadbackConfigured(process.env)) {
+    costReconciliationCatalog =
+      createSiteBuildCostReconciliationCatalogFromEnv();
+    const activeSettlementRoutes = (() => {
+      try {
+        return SITE_BUILDER_GENERATIVE_TASK_IDS.flatMap((taskId) => {
+          const route = resolveTaskRoute(taskId, process.env);
+          return [route.primary, ...route.fallbacks].map((alias) =>
+            Object.freeze({ taskId, alias, maxOutputTokens: route.maxTokens }),
+          );
+        });
+      } catch {
+        return undefined;
+      }
+    })();
+    if (
+      !activeSettlementRoutes ||
       !costReconciliationCatalogCoversRoutes(
         costReconciliationCatalog,
         activeSettlementRoutes,
-      ))
-  ) {
-    await holdPlatformNotReady(
-      "SITE_BUILD_COST_RECONCILIATION_CATALOG_UNAVAILABLE",
-    );
+      )
+    ) {
+      await holdPlatformNotReady(
+        "SITE_BUILD_COST_RECONCILIATION_CATALOG_UNAVAILABLE",
+      );
+    }
+    settlementReadbackRuntime =
+      createSiteBuildSettlementReadbackRuntimeFromEnv(costLedger);
+    if (!settlementReadbackRuntime) {
+      return await holdPlatformNotReady(
+        "SITE_BUILD_MODEL_SETTLEMENT_READBACK_UNAVAILABLE",
+      );
+    }
+    costReconciliationResolver = settlementReadbackRuntime.reconciliationResolver;
   }
   gateway.costReconciliationCatalog = costReconciliationCatalog;
-  const settlementReadbackRuntime =
-    createSiteBuildSettlementReadbackRuntimeFromEnv(costLedger);
-  // Opt-in capability: only a configured-but-unusable runtime holds the worker;
-  // an unconfigured deployment simply has no paid settlement readback.
-  if (!settlementReadbackRuntime && settlementReadbackConfigured(process.env)) {
-    await holdPlatformNotReady(
-      "SITE_BUILD_MODEL_SETTLEMENT_READBACK_UNAVAILABLE",
-    );
-  }
   gateway.settlementDerivationKeyring = settlementReadbackRuntime?.keyring;
   gateway.settlementReadbackResolver = settlementReadbackRuntime?.resolver;
-  const costReconciliationResolver =
-    settlementReadbackRuntime?.reconciliationResolver;
 
   // 收口②：**唯一执行闸门**——全部原始出网（搜索/抓取/结构化 API/SMTP）经同一个 ToolBroker
   // （allowedTools 白名单 + source_policy fail-closed + 预算 reserve-settle + 限流 + Trace）。

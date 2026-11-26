@@ -543,6 +543,9 @@
     "platform_egress_schedule_fence": [],
     "platform_fence_ack_delivery": [],
     "platform_revocation_receipt": [],
+    "platform_schedule_config": [
+      "SELECT"
+    ],
     "policy_decision_log": [
       "INSERT",
       "SELECT"

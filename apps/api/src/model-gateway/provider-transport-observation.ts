@@ -1,7 +1,7 @@
 import type {
   NewApiSettlementReadbackProbe,
   NewApiSettlementReadbackProbePhase,
-} from "./new-api-request-bound-settlement";
+} from "./settlement-readback-contract";
 
 export const PROVIDER_TRANSPORT_FINAL_PHASES = [
   "gateway_unavailable",

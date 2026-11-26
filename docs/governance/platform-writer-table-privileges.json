@@ -10,6 +10,7 @@
     "patent_inventor_cache": ["DELETE", "INSERT", "SELECT", "UPDATE"],
     "patent_inventor_tombstone": ["SELECT"],
     "patent_lookup_request": ["SELECT", "UPDATE"],
+    "platform_schedule_config": ["INSERT", "SELECT", "UPDATE"],
     "sanctions_entity": ["INSERT", "SELECT", "UPDATE"],
     "sanctions_source": ["SELECT", "UPDATE"],
     "signal_ingest": ["INSERT", "SELECT", "UPDATE"],

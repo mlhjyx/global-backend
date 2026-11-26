@@ -1,10 +1,13 @@
 import { createHash } from "node:crypto";
 import {
   NEW_API_REQUEST_BOUND_RESOLVER_ID,
-  NewApiRequestBoundSettlementResolver,
   type NewApiRequestBoundSettlementInput,
   type NewApiRequestBoundSettlement,
-} from "../model-gateway/new-api-request-bound-settlement";
+  type NewApiRequestBoundSettlementResolverPort,
+  type NewApiRequestBoundSettlementResolverSettings,
+  type NewApiSettlementReadbackProbe,
+} from "../model-gateway/settlement-readback-contract";
+import { settlementReadbackConfigured } from "../runtime/settlement-readback-config";
 import {
   loadSettlementDerivationKeyring,
   settlementWireNonce,
@@ -61,7 +64,7 @@ type ProviderWireAuthority = {
   recordModelReadbackProbe(input: {
     workspaceId: string;
     probeId: string;
-    probe: import("../model-gateway/new-api-request-bound-settlement").NewApiSettlementReadbackProbe;
+    probe: NewApiSettlementReadbackProbe;
     observedAt: Date;
   }): Promise<void>;
   recordModelPhysicalWireReceipt(input: {
@@ -588,16 +591,45 @@ export class NewApiSiteBuildCostReconciliationResolver implements SiteBuildCostR
   }
 }
 
+const READER_CREDENTIAL_PATTERN =
+  /^srb1\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{43}$/u;
+
+function createLazyNewApiRequestBoundSettlementResolver(
+  settings: NewApiRequestBoundSettlementResolverSettings,
+): NewApiRequestBoundSettlementResolverPort {
+  let instancePromise:
+    | Promise<NewApiRequestBoundSettlementResolverPort>
+    | undefined;
+  const load = () => {
+    if (!instancePromise) {
+      instancePromise = import("../model-gateway/new-api-request-bound-settlement").then(
+        ({ NewApiRequestBoundSettlementResolver }) =>
+          new NewApiRequestBoundSettlementResolver(settings),
+      );
+    }
+    return instancePromise;
+  };
+  return Object.freeze({
+    checkCapability: async (input?: { signal?: AbortSignal }) =>
+      (await load()).checkCapability(input),
+    resolve: async (input: NewApiRequestBoundSettlementInput) =>
+      (await load()).resolve(input),
+  });
+}
+
 export function createSiteBuildSettlementReadbackRuntimeFromEnv(
   authority: ProviderWireAuthority,
   env: NodeJS.ProcessEnv = process.env,
 ):
   | {
       keyring: SettlementDerivationKeyring;
-      resolver: NewApiRequestBoundSettlementResolver;
+      resolver: NewApiRequestBoundSettlementResolverPort;
       reconciliationResolver: SiteBuildCostReconciliationResolver;
     }
   | undefined {
+  // Decoupled opt-in capability: do not load `new-api-request-bound-settlement`
+  // or read keyring files when settlement readback is disabled or unconfigured.
+  if (!settlementReadbackConfigured(env)) return undefined;
   const gatewayUrl = env.MODEL_GATEWAY_URL;
   const readerCredential = canonicalGatewayCredential(
     env.MODEL_GATEWAY_SETTLEMENT_READBACK_CREDENTIAL,
@@ -610,6 +642,7 @@ export function createSiteBuildSettlementReadbackRuntimeFromEnv(
   if (
     !gatewayUrl ||
     !readerCredential ||
+    !READER_CREDENTIAL_PATTERN.test(readerCredential) ||
     !keyringPath ||
     (env.MODEL_GATEWAY_KEY !== undefined && !dispatchCredential) ||
     (dispatchCredential !== undefined &&
@@ -617,13 +650,23 @@ export function createSiteBuildSettlementReadbackRuntimeFromEnv(
   )
     return undefined;
   try {
-    const origin = new URL(gatewayUrl).origin;
+    const parsedUrl = new URL(gatewayUrl);
+    if (
+      parsedUrl.protocol !== "https:" &&
+      !(
+        parsedUrl.protocol === "http:" &&
+        ["127.0.0.1", "localhost", "[::1]", "::1"].includes(parsedUrl.hostname)
+      )
+    ) {
+      return undefined;
+    }
+    const origin = parsedUrl.origin;
     const rawPoll = Number(env.SITE_BUILD_COST_RECONCILIATION_POLL_MS ?? 5_000);
     const maximumProbeDurationMs = Number.isSafeInteger(rawPoll)
       ? Math.max(1, Math.min(30_000, rawPoll))
       : 5_000;
     const keyring = loadSettlementDerivationKeyring(keyringPath);
-    const resolver = new NewApiRequestBoundSettlementResolver({
+    const resolver = createLazyNewApiRequestBoundSettlementResolver({
       gatewayOrigin: origin,
       readerCredential,
       resolverId: NEW_API_REQUEST_BOUND_RESOLVER_ID,

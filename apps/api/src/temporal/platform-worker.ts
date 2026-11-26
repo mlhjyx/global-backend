@@ -1,7 +1,7 @@
 import "reflect-metadata";
 import "dotenv/config";
 import { resolve } from "node:path";
-import { Runtime, Worker } from "@temporalio/worker";
+import { NativeConnection, Runtime, Worker } from "@temporalio/worker";
 import { DETERMINISTIC_LEDGER_FAILURE_INTERCEPTORS } from "./deterministic-ledger-failure.interceptor";
 import { PrismaService } from "../prisma/prisma.service";
 import { createExecutionBudgetPlatformWriterClient } from "../execution-budget/execution-budget-platform-writer.database";
@@ -74,6 +74,15 @@ import {
   connectNativeMachine,
 } from "./native-machine-connection";
 import { workerComposition, workerIdentity } from "./worker-composition";
+import { resolveCustomerTemporalConfig } from "./temporal-config";
+import { isInternalDbPlatformAuthorityMode } from "../platform-authority/platform-authority-mode";
+import { PlatformScheduleConfigService } from "../platform-authority/platform-schedule-config.service";
+import {
+  createInternalDbPlatformBudgetStore,
+  inspectInternalDbPlatformAuthorityReadiness,
+  InternalDbPlatformEgressFencePort,
+  InternalDbPlatformScheduleAdmission,
+} from "../platform-authority/internal-db-platform-authority";
 
 /** Fixed platform composition: no customer renderer, model gateway, or provider-wire principal. */
 async function main(): Promise<void> {
@@ -155,16 +164,24 @@ async function main(): Promise<void> {
     onBlocked: blocked,
   });
   const registry = new RuntimeReadinessContributorRegistry();
-  capability = startCapabilityRuntime({
-    registry,
-    identity,
-    admitted: () => inspectRuntimeAdmission(settings, process.env, identity, "PLATFORM_WORKER").admitted,
+  const internalDbAuthority = isInternalDbPlatformAuthorityMode(process.env);
+  const scheduleConfigService = new PlatformScheduleConfigService({
+    reader: prisma,
+    writer,
   });
-  const quote = new PlatformTechnicalQuoteAuthenticationReadinessContributor(
-    new JwksPlatformTechnicalQuoteServiceAuthenticationVerifier(),
-    registry,
-  );
-  quote.onModuleInit();
+  let quote: PlatformTechnicalQuoteAuthenticationReadinessContributor | undefined;
+  if (!internalDbAuthority) {
+    capability = startCapabilityRuntime({
+      registry,
+      identity,
+      admitted: () => inspectRuntimeAdmission(settings, process.env, identity, "PLATFORM_WORKER").admitted,
+    });
+    quote = new PlatformTechnicalQuoteAuthenticationReadinessContributor(
+      new JwksPlatformTechnicalQuoteServiceAuthenticationVerifier(),
+      registry,
+    );
+    quote.onModuleInit();
+  }
   const repository = new ExecutionBudgetAuthorityRepository(prisma, writer);
   const check = async () => {
     const queueIdentity = await leases.inspectWorkerQueue(
@@ -199,48 +216,67 @@ async function main(): Promise<void> {
       } as const;
     }
     return checkPlatformAuthorityReady(() =>
-      inspectPlatformBudgetAuthorityReadiness(repository, registry),
+      internalDbAuthority
+        ? inspectInternalDbPlatformAuthorityReadiness(scheduleConfigService)
+        : inspectPlatformBudgetAuthorityReadiness(repository, registry),
     );
   };
   await waitForWorkerDependencyAdmission({ check, onBlocked: blocked });
-  const budgetStore = new PostgresBudgetStore(prisma, writer);
+  const budgetStore = internalDbAuthority
+    ? createInternalDbPlatformBudgetStore(scheduleConfigService)
+    : new PostgresBudgetStore(prisma, writer);
   const broker = buildToolBroker({
     sourcePolicyReader: sourcePolicyReaderFrom(prisma),
     budgetStore,
     prisma,
   });
   const platformEgressFence = new PlatformEgressFence(
-    new PrismaPlatformEgressFencePort(writer),
+    internalDbAuthority
+      ? new InternalDbPlatformEgressFencePort(scheduleConfigService)
+      : new PrismaPlatformEgressFencePort(writer),
   );
   const sanctionsScreening = new SanctionsScreeningService(prisma);
   await sanctionsScreening.rebuildIndex();
-  // 平台运行准入 v2：quote → 权威（gain-saas）签发 Grant → 验签并 ingest+admit。
-  // v1 准入已对平台写入者 REVOKE EXECUTE，这里不再回退到它。
-  const quoteService = new PlatformExecutionTechnicalQuoteService({
-    policyAsset: loadVerifiedPlatformAuthorityPolicyAsset(),
-    technicalContract: PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1,
-  });
-  const platformAdmission = new PlatformGrantAdmission({
-    quoteService,
-    ingestion: new PlatformExecutionBudgetAuthorityIngestionService(
-      new ExecutionBudgetGrantVerifier(process.env),
-      repository,
-    ),
-    client: new PlatformGrantClient(process.env),
-  });
-  const machine = await createRuntimeMachineTokenClient(
-    composition.profile,
-    identity.artifact_digest.replace(/^sha256:/, ""),
-  );
-  const connection = await connectNativeMachine(machine.client);
+  // 平台运行准入：默认 r4 走 quote → 权威（gain-saas）签发 Grant → 验签并 ingest+admit；
+  // PLATFORM_AUTHORITY_MODE=internal_db 改走 platform_schedule_config 数据库 Kill Switch，免除 7 天 binding 与 5 套 RSA 密钥。
+  const platformAdmission = internalDbAuthority
+    ? new InternalDbPlatformScheduleAdmission(scheduleConfigService)
+    : new PlatformGrantAdmission({
+        quoteService: new PlatformExecutionTechnicalQuoteService({
+          policyAsset: loadVerifiedPlatformAuthorityPolicyAsset(),
+          technicalContract: PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1,
+        }),
+        ingestion: new PlatformExecutionBudgetAuthorityIngestionService(
+          new ExecutionBudgetGrantVerifier(process.env),
+          repository,
+        ),
+        client: new PlatformGrantClient(process.env),
+      });
+  const useInternalTemporalDirect =
+    internalDbAuthority && !(process.env.MACHINE_BOOTSTRAP_ENDPOINT ?? "").trim();
+  const machine = useInternalTemporalDirect
+    ? undefined
+    : await createRuntimeMachineTokenClient(
+        composition.profile,
+        identity.artifact_digest.replace(/^sha256:/, ""),
+      );
+  const connection = machine
+    ? await connectNativeMachine(machine.client)
+    : await NativeConnection.connect({
+        address: resolveCustomerTemporalConfig(process.env).address,
+      });
+  const workerNamespace = useInternalTemporalDirect
+    ? (process.env.TEMPORAL_PLATFORM_NAMESPACE?.trim() ||
+        resolveCustomerTemporalConfig(process.env).namespace)
+    : composition.namespace;
   const worker = await Worker.create({
     connection,
     // B2（F5）：确定性账本错误在活动边界标 nonRetryable。
     interceptors: DETERMINISTIC_LEDGER_FAILURE_INTERCEPTORS,
-    namespace: composition.namespace,
+    namespace: workerNamespace,
     taskQueue: composition.taskQueue,
     identity: workerIdentity(
-      machine.subject,
+      machine?.subject ?? "platform-worker-internal-db",
       leases.instanceId("PLATFORM_WORKER"),
     ),
     workflowsPath: require.resolve("./platform-workflows"),
@@ -319,11 +355,13 @@ async function main(): Promise<void> {
     worker: shutdown,
     taskQueue: composition.taskQueue,
   });
-  const unbind = bindNativeMachineCredential(
-    machine.client,
-    connection,
-    credentialFailure.fail,
-  );
+  const unbind = machine
+    ? bindNativeMachineCredential(
+        machine.client,
+        connection,
+        credentialFailure.fail,
+      )
+    : () => undefined;
   const dependencies = await startWorkerDependencyHeartbeat({
     role: "PLATFORM_WORKER",
     leases,
@@ -344,7 +382,7 @@ async function main(): Promise<void> {
       throw new Error("PLATFORM_WORKER_DEPENDENCY_UNAVAILABLE");
     if (!credentialFailure.available())
       throw new Error("WORKER_MACHINE_CREDENTIAL_UNAVAILABLE");
-    machine.client.currentToken();
+    machine?.client.currentToken();
     const running = worker.run();
     shutdown.markRunning();
     await running;
@@ -355,10 +393,10 @@ async function main(): Promise<void> {
     const exitDeadline = armWorkerExitDeadline();
     capability?.stop();
     unbind();
-    machine.client.close();
+    machine?.client.close();
     heartbeat.stop();
     dependencies.stop();
-    quote.onModuleDestroy();
+    quote?.onModuleDestroy();
     await signals.stop();
     await leases
       .heartbeat("PLATFORM_WORKER", "STOPPED", composition.taskQueue)

@@ -10,6 +10,7 @@ import {
   startCapabilityRuntime,
   type CapabilityRuntime,
 } from "./platform-capability-runtime";
+import { isInternalDbPlatformAuthorityMode } from "./platform-authority-mode";
 
 @Injectable()
 export class PlatformCapabilityContributor
@@ -22,7 +23,7 @@ export class PlatformCapabilityContributor
     private readonly admission: RuntimeAdmissionService,
   ) {}
   onModuleInit(): void {
-    if (this.runtime) return;
+    if (this.runtime || isInternalDbPlatformAuthorityMode(process.env)) return;
     const identity = this.release.current();
     this.runtime = startCapabilityRuntime({
       registry: this.registry,

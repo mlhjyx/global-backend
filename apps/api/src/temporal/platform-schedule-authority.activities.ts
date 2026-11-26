@@ -4,6 +4,7 @@ import {
   Context as ActivityContext,
 } from "@temporalio/activity";
 import { ExecutionBudgetGrantError } from "../execution-budget/execution-budget-authority.types";
+import { ExecutionControlError } from "../execution-budget/execution-control-error";
 import {
   BudgetStoreUnavailableError,
   type BudgetStore,
@@ -35,6 +36,9 @@ function nonRetryable(code: string): ApplicationFailure {
 
 function safeAuthorityFailure(error: unknown): ApplicationFailure {
   if (error instanceof ExecutionBudgetGrantError) {
+    return nonRetryable(error.code);
+  }
+  if (error instanceof ExecutionControlError) {
     return nonRetryable(error.code);
   }
   if (error instanceof BudgetStoreUnavailableError) {

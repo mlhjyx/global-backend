@@ -47,6 +47,7 @@ import { RuntimeClockModule } from './runtime/runtime-clock.module';
 import { RuntimeWorkAdmissionGuard } from './runtime/runtime-work-admission.guard';
 import { ExecutionBudgetModule } from './execution-budget/execution-budget.module';
 import { PlatformAuthorityModule } from './platform-authority/platform-authority.module';
+import { PlatformScheduleConfigModule } from './platform-authority/platform-schedule-config.module';
 import { PlatformTargetLookupModule } from './platform-authority/platform-target-lookup.module';
 import { PlatformRevocationHttpModule } from './platform-authority/platform-revocation-http.module';
 import { CampaignPlanModule } from './campaign-plan/campaign-plan.module';
@@ -70,6 +71,7 @@ import { DataExportsModule } from './data-exports/data-exports.module';
     ModelGatewayModule,
     ExecutionBudgetModule,
     PlatformAuthorityModule,
+    PlatformScheduleConfigModule,
     PlatformTargetLookupModule,
     PlatformRevocationHttpModule,
     CampaignPlanModule,

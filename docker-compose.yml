@@ -59,8 +59,10 @@ services:
   # new-api OpenAI video task adaptor submits to /v1/videos. Keep new-api in
   # charge of async task persistence/polling and rewrite only that exact create
   # path. This service is Compose-internal, stores no credentials and has no
-  # host port or access log.
+  # host port or access log. Opt-in via `--profile video-compat` (not started
+  # by default in core B2B acquisition deployments).
   openox-video-compat:
+    profiles: ["video-compat"]
     build:
       context: ./infra/new-api
       dockerfile: Dockerfile.openox-video-compat

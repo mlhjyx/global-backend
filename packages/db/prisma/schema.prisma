@@ -5021,3 +5021,15 @@ model WorkspacePurgeTxFence {
   @@map("workspace_purge_tx_fence")
 }
 
+/// 平台定时调度 Kill Switch 配置表（M10-PR3，平台级无 RLS）：
+/// PLATFORM_AUTHORITY_MODE=internal_db 模式下通过本表控制 4 个平台调度启停，
+/// 替代 7 天 deployment-binding.json 与 5 套 RSA 密钥。app_user 仅只读，platform_writer 负责写。
+model PlatformScheduleConfig {
+  scheduleId String   @id(map: "platform_schedule_config_pkey") @map("schedule_id")
+  enabled    Boolean  @default(false)
+  updatedBy  String   @default("migration") @map("updated_by")
+  updatedAt  DateTime @default(now()) @map("updated_at") @db.Timestamptz(3)
+
+  @@map("platform_schedule_config")
+}
+

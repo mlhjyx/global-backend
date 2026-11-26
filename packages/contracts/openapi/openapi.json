@@ -4851,6 +4851,98 @@
         }
       }
     },
+    "/api/v1/internal/platform-schedules": {
+      "get": {
+        "operationId": "listInternalPlatformScheduleConfigs_v1",
+        "parameters": [
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "description": "内部服务令牌（env PLATFORM_SCHEDULE_CONFIG_INTERNAL_SERVICE_TOKEN）",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "返回当前模式及 4 个平台调度配置"
+          },
+          "401": {
+            "description": "缺少或无效的内部服务令牌"
+          },
+          "503": {
+            "description": "服务令牌未配置或数据库不可用"
+          }
+        },
+        "summary": "只读查询当前平台权威模式与 4 个平台调度的数据库 Kill Switch 配置",
+        "tags": [
+          "PlatformAuthority"
+        ],
+        "description": "内部服务鉴权（x-service-token）只读查询当前 PLATFORM_AUTHORITY_MODE（r4 / internal_db）与 4 个平台定时调度（acq-sweep / raw-source-retention / sanctions-refresh / tool-budget-reconciliation）在 public.platform_schedule_config 中的实时启停配置。"
+      }
+    },
+    "/api/v1/internal/platform-schedules/{scheduleId}": {
+      "patch": {
+        "operationId": "updateInternalPlatformScheduleConfig_v1",
+        "parameters": [
+          {
+            "name": "scheduleId",
+            "required": true,
+            "in": "path",
+            "description": "4 个平台标准调度 ID 之一",
+            "schema": {
+              "enum": [
+                "acq-sweep",
+                "patents-cache-refresh",
+                "intent-sweep",
+                "sanctions-refresh"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "description": "内部服务令牌（env PLATFORM_SCHEDULE_CONFIG_INTERNAL_SERVICE_TOKEN）",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePlatformScheduleConfigDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "更新成功并返回配置与审计回执"
+          },
+          "400": {
+            "description": "scheduleId 或请求体参数非法"
+          },
+          "401": {
+            "description": "缺少或无效的内部服务令牌"
+          },
+          "503": {
+            "description": "服务令牌未配置、platform_writer 未连接或数据库不可用"
+          }
+        },
+        "summary": "受内部服务鉴权保护的平台调度 Kill Switch 启停切换（含操作审计）",
+        "tags": [
+          "PlatformAuthority"
+        ],
+        "description": "内部服务鉴权（x-service-token）切换单个平台定时调度的数据库 Kill Switch（enabled 置 false 后入场、活动鉴权与中途出网围栏三层立即 fail-closed），强制校验 updatedBy 并输出结构化操作审计日志。"
+      }
+    },
     "/api/v1/platform-authority/target-lookup": {
       "post": {
         "description": "Service-only read. Never creates authority or fences a schedule. Returns the observation root without a data wrapper; all responses are no-store.",
@@ -31092,6 +31184,29 @@
           "chargedMicrousd",
           "reservedMicrousd",
           "byPurpose"
+        ]
+      },
+      "UpdatePlatformScheduleConfigDto": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "是否启用该平台定时调度（false 表示立即触发 Kill Switch 停用）"
+          },
+          "updatedBy": {
+            "type": "string",
+            "description": "操作者身份标识（写入数据库与审计日志）",
+            "example": "ops-admin@example.com"
+          },
+          "reason": {
+            "type": "string",
+            "description": "本次启停原因说明（写入操作审计日志）",
+            "example": "enable daily sanctions refresh after smoke verification"
+          }
+        },
+        "required": [
+          "enabled",
+          "updatedBy"
         ]
       },
       "CheckOutreachDncDto": {

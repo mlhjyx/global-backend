@@ -21,6 +21,7 @@ const MIGRATION_PATHS = [
   'packages/db/prisma/migrations/20261031140000_platform_writer_business_grants/migration.sql',
   'packages/db/prisma/migrations/20261126010000_runtime_scoped_principals/migration.sql',
   'packages/db/prisma/migrations/20261126020000_revoke_app_user_platform_table_writes/migration.sql',
+  'packages/db/prisma/migrations/20261126150000_platform_schedule_config/migration.sql',
 ];
 const migrations = MIGRATION_PATHS.map((relPath) =>
   readFileSync(path.join(ROOT, relPath), 'utf8'),

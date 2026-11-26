@@ -214,43 +214,47 @@ export async function runDevFastLaneWorker(
   // M2 步 9b：agent 解析器与决策轨迹（同 managed worker；目录由 managed worker/relay seed）。
   const agentResolver = createDbAgentResolver(new PrismaAgentRegistryStore(prisma));
   const agentTraces = new PrismaAgentDecisionTraceStore(prisma);
-  const costReconciliationCatalog =
-    createSiteBuildCostReconciliationCatalogFromEnv();
-  const activeSettlementRoutes = (() => {
-    try {
-      return SITE_BUILDER_GENERATIVE_TASK_IDS.flatMap((taskId) => {
-        const route = resolveTaskRoute(taskId, process.env);
-        return [route.primary, ...route.fallbacks].map((alias) =>
-          Object.freeze({
-            taskId,
-            alias,
-            maxOutputTokens: route.maxTokens,
-          }),
-        );
-      });
-    } catch {
-      return undefined;
-    }
-  })();
-  if (
-    settlementReadbackConfigured(process.env) &&
-    (!activeSettlementRoutes ||
+  let costReconciliationCatalog:
+    | ReturnType<typeof createSiteBuildCostReconciliationCatalogFromEnv>
+    | undefined;
+  let settlementReadbackRuntime:
+    | ReturnType<typeof createSiteBuildSettlementReadbackRuntimeFromEnv>
+    | undefined;
+  if (settlementReadbackConfigured(process.env)) {
+    costReconciliationCatalog =
+      createSiteBuildCostReconciliationCatalogFromEnv();
+    const activeSettlementRoutes = (() => {
+      try {
+        return SITE_BUILDER_GENERATIVE_TASK_IDS.flatMap((taskId) => {
+          const route = resolveTaskRoute(taskId, process.env);
+          return [route.primary, ...route.fallbacks].map((alias) =>
+            Object.freeze({ taskId, alias, maxOutputTokens: route.maxTokens }),
+          );
+        });
+      } catch {
+        return undefined;
+      }
+    })();
+    if (
+      !activeSettlementRoutes ||
       !costReconciliationCatalogCoversRoutes(
         costReconciliationCatalog,
         activeSettlementRoutes,
-      ))
-  ) {
-    await holdLaneNotReady(
-      "SITE_BUILD_COST_RECONCILIATION_CATALOG_UNAVAILABLE",
-    );
+      )
+    ) {
+      await holdLaneNotReady(
+        "SITE_BUILD_COST_RECONCILIATION_CATALOG_UNAVAILABLE",
+      );
+    }
+    settlementReadbackRuntime =
+      createSiteBuildSettlementReadbackRuntimeFromEnv(costLedger);
+    if (!settlementReadbackRuntime) {
+      return await holdLaneNotReady(
+        "SITE_BUILD_MODEL_SETTLEMENT_READBACK_UNAVAILABLE",
+      );
+    }
   }
   gateway.costReconciliationCatalog = costReconciliationCatalog;
-  const settlementReadbackRuntime =
-    createSiteBuildSettlementReadbackRuntimeFromEnv(costLedger);
-  // Opt-in capability: an unconfigured deployment has no paid settlement readback.
-  if (!settlementReadbackRuntime && settlementReadbackConfigured(process.env)) {
-    await holdLaneNotReady("SITE_BUILD_MODEL_SETTLEMENT_READBACK_UNAVAILABLE");
-  }
   gateway.settlementDerivationKeyring = settlementReadbackRuntime?.keyring;
   gateway.settlementReadbackResolver = settlementReadbackRuntime?.resolver;
 

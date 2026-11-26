@@ -49,8 +49,8 @@ import {
 import type { SiteBuildCostReconciliationCatalog } from "../site-builder/site-build-cost-reconciliation-resolver";
 import {
   NEW_API_REQUEST_BOUND_RESOLVER_ID,
-  type NewApiRequestBoundSettlementResolver,
-} from "./new-api-request-bound-settlement";
+  type NewApiRequestBoundSettlementResolverPort,
+} from "./settlement-readback-contract";
 import {
   restoreSettlementWireIdentity,
   settlementWireIdentities,
@@ -269,7 +269,7 @@ export class RouterModelGateway extends ModelGateway {
   costReconciliationCatalog?: SiteBuildCostReconciliationCatalog;
   /** Strict startup snapshots required by every new paid physical wire. */
   settlementDerivationKeyring?: SettlementDerivationKeyring;
-  settlementReadbackResolver?: NewApiRequestBoundSettlementResolver;
+  settlementReadbackResolver?: NewApiRequestBoundSettlementResolverPort;
   legacyBudgetMode?: LegacyExecutionBudgetMode;
   maxBypassModelCallsPerAccount?: number;
   dailyCostBreaker?: TenantDailyCostBreaker;
@@ -1156,7 +1156,7 @@ export class RouterModelGateway extends ModelGateway {
     gatewayIdState: ProviderGatewayIdState;
     payloadState: ProviderPayloadState;
     readbackProbes?: Extract<
-      Awaited<ReturnType<NewApiRequestBoundSettlementResolver["resolve"]>>,
+      Awaited<ReturnType<NewApiRequestBoundSettlementResolverPort["resolve"]>>,
       { status: "unknown" }
     >["readbackProbes"];
   }): GatewaySettlementObservation {
