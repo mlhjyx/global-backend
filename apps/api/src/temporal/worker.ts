@@ -64,6 +64,7 @@ import {
 import { createPersonalArtifactCleanupRuntime } from "../durable-results/artifact/personal-artifact-cleanup.runtime";
 import { createSiteBuilderActivities } from "./site-builder.activities";
 import { createSellerDocumentActivities } from "../seller-knowledge/seller-document.activities";
+import { SellerDocumentClaimsService } from "../seller-knowledge/seller-document-claims.service";
 import { SellerDocumentsStorage } from "../seller-knowledge/seller-documents.storage";
 import {
   costReconciliationCatalogCoversRoutes,
@@ -726,6 +727,7 @@ async function main(): Promise<void> {
         storage: new SellerDocumentsStorage(),
         docling: new DoclingClient(),
         embeddings: new EmbeddingsClient(),
+        claims: new SellerDocumentClaimsService(prisma),
       }),
       ...createAssetCleanupActivities({
         prisma,

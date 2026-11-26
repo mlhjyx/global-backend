@@ -1,4 +1,4 @@
-import { proxyActivities } from '@temporalio/workflow';
+import { patched, proxyActivities, sleep } from '@temporalio/workflow';
 import type { createSellerDocumentActivities, SellerDocumentIngestInput } from './seller-document.activities';
 
 type SellerDocumentActivities = ReturnType<typeof createSellerDocumentActivities>;
@@ -9,14 +9,35 @@ const activities = proxyActivities<SellerDocumentActivities>({
   retry: { maximumAttempts: 3 },
 });
 
+const QUEUED_RETRY_PATCH_ID = 'seller-document-queued-retry-v1';
+const MAX_QUEUED_RETRIES = 3;
+const MIN_RETRY_SLEEP_SECONDS = 5;
+const MAX_RETRY_SLEEP_SECONDS = 300;
+const RETRY_CLOCK_BUFFER_SECONDS = 2;
+
 export type { SellerDocumentIngestInput };
 
 /**
  * 资料摄入：单文档 activity，持久 lease/retry 真值在 seller_document 状态机；
- * Temporal 只重试 activity 级失败，typed 失败会回 queued+retry_at 由重试端点/后续扫描捡起。
+ * Temporal 负责 activity 级重试，typed 瞬态失败回 queued+retry_at 后在工作流内按退避窗口自动重跑（最多 3 次），
+ * 避免临时抖动把文档永久滞留在 queued。
  */
 export async function sellerDocumentIngestWorkflow(
   input: SellerDocumentIngestInput,
 ): Promise<Awaited<ReturnType<SellerDocumentActivities['processSellerDocument']>>> {
-  return activities.processSellerDocument(input);
+  const first = await activities.processSellerDocument(input);
+  if (!patched(QUEUED_RETRY_PATCH_ID) || first.outcome !== 'queued') {
+    return first;
+  }
+  let current = first;
+  for (let retry = 0; retry < MAX_QUEUED_RETRIES && current.outcome === 'queued'; retry += 1) {
+    const rawWait = current.retryAfterSeconds ?? 60;
+    const waitSeconds = Math.min(
+      Math.max(rawWait, MIN_RETRY_SLEEP_SECONDS),
+      MAX_RETRY_SLEEP_SECONDS,
+    );
+    await sleep((waitSeconds + RETRY_CLOCK_BUFFER_SECONDS) * 1000);
+    current = await activities.processSellerDocument(input);
+  }
+  return current;
 }
