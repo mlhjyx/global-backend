@@ -1,4 +1,4 @@
-import { encryptPii } from '../../compliance/pii-crypto';
+import { PII_PURPOSE, encryptPii } from '../../compliance/pii-crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseReverifyArgs } from '../../../scripts/reverify-contact-points.mts';
 import { buildVerificationRequestHash } from '../../discovery/contact-point-verification-event';
@@ -31,16 +31,20 @@ interface FakePointOverrides {
 }
 
 function fakePoint(overrides: FakePointOverrides = {}) {
+  const workspaceId = '00000000-0000-4000-8000-0000000000bb';
   return {
     id: '00000000-0000-4000-8000-0000000000aa',
-    workspaceId: '00000000-0000-4000-8000-0000000000bb',
-    value: encryptPii('max.mustermann@acme.example'),
+    workspaceId,
+    value: encryptPii('max.mustermann@acme.example', { workspaceId, purpose: PII_PURPOSE.CONTACT_POINT_VALUE }),
     verificationState: overrides.verificationState ?? 'UNKNOWN',
     validSince: null,
     nextReverifyAt: new Date('2026-11-09T00:00:00.000Z'),
     legalBasis: overrides.legalBasis === undefined ? 'legitimate_interest' : overrides.legalBasis,
     contact: {
-      fullName: overrides.fullName ?? 'Max Mustermann',
+      fullName: encryptPii(overrides.fullName ?? 'Max Mustermann', {
+        workspaceId,
+        purpose: PII_PURPOSE.CANONICAL_CONTACT_FULL_NAME,
+      }),
       company: {
         name: 'Acme Pumpen GmbH',
         domain: 'acme.example',

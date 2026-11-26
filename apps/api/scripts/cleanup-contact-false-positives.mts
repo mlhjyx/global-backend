@@ -150,8 +150,8 @@ const rows: TargetRow[] = await (async () => {
   } catch (error) {
     if (error instanceof Error && /authenticate/i.test(error.message)) {
       fail(
-        'PII 解密失败：进程里的 PII_ENCRYPTION_KEY 与写库时用的运行时密钥不一致。' +
-          '先导出运行中 API 容器的密钥再跑：export PII_ENCRYPTION_KEY=$(docker exec global-api printenv PII_ENCRYPTION_KEY)',
+        'PII 解密失败：进程里的 PII_KEYRING_JSON（或遗留 PII_ENCRYPTION_KEY）与写库时用的运行时密钥不一致。' +
+          '先导出运行中 API 容器的密钥再跑：export PII_KEYRING_JSON=$(docker exec global-api printenv PII_KEYRING_JSON)',
       );
     }
     throw error;

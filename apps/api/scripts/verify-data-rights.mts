@@ -8,7 +8,7 @@ import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { DataRightsService } from '../src/compliance/data-rights.service';
-import { isEncryptedPii } from '../src/compliance/pii-crypto';
+import { assertPiiKeyConfigured, isEncryptedPii } from '../src/compliance/pii-crypto';
 import type { LawfulBasis } from '../src/discovery/provider-contract';
 
 const WS = '00000000-0000-0000-0000-0000000000d6';
@@ -20,7 +20,7 @@ function check(name: string, cond: boolean): void {
 }
 
 async function main(): Promise<void> {
-  if (!process.env.PII_ENCRYPTION_KEY) throw new Error('PII_ENCRYPTION_KEY 未配置');
+  assertPiiKeyConfigured();
   const prisma = new PrismaService();
   const owner = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
 

@@ -29,7 +29,7 @@ import { buildGatewayProvider } from '../src/model-gateway/model-providers.confi
 import { AiTraceSink } from '../src/model-gateway/ai-trace.sink';
 import { buildToolBroker, sourcePolicyReaderFrom } from '../src/tools/tool-broker.factory';
 import { contactIdentity } from '../src/discovery/identity';
-import { blindContactKey } from '../src/compliance/pii-crypto';
+import { PII_PURPOSE, blindContactKey } from '../src/compliance/pii-crypto';
 
 for (const line of readFileSync(new URL('../.env', import.meta.url), 'utf8').split('\n')) {
   const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
@@ -86,7 +86,10 @@ async function seed(): Promise<{ companyId: string; contactId: string }> {
       create: { workspaceId: WS, icpId: ICP, canonicalCompanyId: company.id, fitVerdict: 'match' },
     });
     // 缺邮箱具名决策人（补全对象）
-    const cdk = blindContactKey(contactIdentity({ fullName: PERSON }, company.dedupeKey));
+    const cdk = blindContactKey(contactIdentity({ fullName: PERSON }, company.dedupeKey), {
+      workspaceId: WS,
+      purpose: PII_PURPOSE.CONTACT_DEDUPE_KEY,
+    });
     const contact = await tx.canonicalContact.upsert({
       where: { workspaceId_dedupeKey: { workspaceId: WS, dedupeKey: cdk } },
       update: { title: 'Geschäftsführer' },

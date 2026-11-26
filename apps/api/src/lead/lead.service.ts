@@ -33,7 +33,7 @@ import { SanctionsScreeningService, reconcileReviewState, matchesFromJson, store
 } from '../sanctions/sanctions-screening.service';
 import { lockWorkspaceSuppressionPolicy } from '../discovery/suppression-policy-lock';
 import { contactSuppressionKeys } from '../discovery/identity';
-import { blindContactKey } from '../compliance/pii-crypto';
+import { blindContactKeyCandidates, PII_PURPOSE } from '../compliance/pii-crypto';
 import { isSyntheticDiscoveryProvenance } from '../discovery/evidence-license';
 import { collectProductReadPage } from '../discovery/product-read-pagination';
 import { isLeadScored, leadQueueBasis, summarizeLeadQueues, withQueueBasis } from './lead-queue-basis';
@@ -639,9 +639,14 @@ export class LeadService {
         const suppressedContactIds = new Set(
           company.contacts
             .filter((contact) => {
-              const personKeys = contactSuppressionKeys(contact.fullName, company.dedupeKey).map((value) =>
-                blindContactKey(value).toLowerCase(),
-              );
+              const personKeys = contactSuppressionKeys(contact.fullName, company.dedupeKey)
+                .flatMap((value) =>
+                  blindContactKeyCandidates(value, {
+                    workspaceId: ctx.workspaceId,
+                    purpose: PII_PURPOSE.CONTACT_DEDUPE_KEY,
+                  }),
+                )
+                .map((value) => value.toLowerCase());
               if (personKeys.some((value) => suppressedContactKeys.has(value))) return true;
               return contact.contactPoints.some((point) => {
                 if (point.type !== 'email') return false;

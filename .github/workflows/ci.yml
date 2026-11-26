@@ -830,6 +830,8 @@ jobs:
             pnpm --filter @global/api seed:platform-catalogs
             SCOPED_RUNTIME_PRINCIPALS_TEST=1 \
               pnpm --filter @global/api exec vitest run src/prisma/scoped-runtime-principals.postgres.spec.ts
+            PII_CRYPTO_V2_TEST=1 \
+              pnpm --filter @global/api exec vitest run src/compliance/pii-crypto-v2.postgres.spec.ts
           )
           EXECUTION_BUDGET_PLATFORM_WRITER_DISPOSABLE_TEST=1 \
             bash infra/postgres/verify-execution-budget-platform-writer-provision-safety-disposable.sh

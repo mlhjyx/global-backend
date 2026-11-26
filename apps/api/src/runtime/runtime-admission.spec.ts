@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { inspectRuntimeAdmission } from "./runtime-admission";
 
+const VALID_PII_KEYRING = JSON.stringify({
+  activeKeyId: "k1",
+  keys: { k1: "a".repeat(64) },
+});
+const VALID_DNC_PEPPER = "1".repeat(64);
+
 const attestedBuild = {
   attested: true as const,
   schema_version: "global-runtime-release-identity/v1" as const,
@@ -54,7 +60,8 @@ describe("inspectRuntimeAdmission", () => {
         ...SETTLEMENT_ENV,
         NODE_ENV: "production",
         DATA_PROCESSOR_JURISDICTION: "EU",
-        PII_ENCRYPTION_KEY: "a".repeat(64),
+        PII_KEYRING_JSON: VALID_PII_KEYRING,
+        OUTREACH_DNC_HMAC_PEPPER: VALID_DNC_PEPPER,
         APP_DATABASE_URL:
           "postgresql://app_user:secret@127.0.0.1:5432/global_dev",
         OUTBOX_RELAY_DATABASE_URL:
@@ -82,7 +89,8 @@ describe("inspectRuntimeAdmission", () => {
       ...PROVIDER_WIRE_ENV,
       NODE_ENV: "production",
       DATA_PROCESSOR_JURISDICTION: "EU",
-      PII_ENCRYPTION_KEY: "a".repeat(64),
+      PII_KEYRING_JSON: VALID_PII_KEYRING,
+      OUTREACH_DNC_HMAC_PEPPER: VALID_DNC_PEPPER,
       APP_DATABASE_URL:
         "postgresql://app_user:secret@127.0.0.1:5432/global_dev",
       AUTH_JWKS_URI: "http://127.0.0.1:3100/.well-known/jwks.json",
@@ -122,7 +130,8 @@ describe("inspectRuntimeAdmission", () => {
     const env = {
       NODE_ENV: "production",
       DATA_PROCESSOR_JURISDICTION: "EU",
-      PII_ENCRYPTION_KEY: "a".repeat(64),
+      PII_KEYRING_JSON: VALID_PII_KEYRING,
+      OUTREACH_DNC_HMAC_PEPPER: VALID_DNC_PEPPER,
       APP_DATABASE_URL:
         "postgresql://app_user:secret@127.0.0.1:5432/global_dev",
       AUTH_JWKS_URI: "http://127.0.0.1:3100/.well-known/jwks.json",
@@ -162,7 +171,8 @@ describe("inspectRuntimeAdmission", () => {
         "postgresql://site_build_provider_wire_writer:secret@127.0.0.1:5432/other_db",
       NODE_ENV: "production",
       DATA_PROCESSOR_JURISDICTION: "EU",
-      PII_ENCRYPTION_KEY: "a".repeat(64),
+      PII_KEYRING_JSON: VALID_PII_KEYRING,
+      OUTREACH_DNC_HMAC_PEPPER: VALID_DNC_PEPPER,
       APP_DATABASE_URL:
         "postgresql://app_user:secret@127.0.0.1:5432/global_dev",
       AUTH_JWKS_URI: "http://127.0.0.1:3100/.well-known/jwks.json",
@@ -194,7 +204,8 @@ describe("inspectRuntimeAdmission", () => {
         ...PROVIDER_WIRE_ENV,
         NODE_ENV: "production",
         DATA_PROCESSOR_JURISDICTION: "EU",
-        PII_ENCRYPTION_KEY: "a".repeat(64),
+        PII_KEYRING_JSON: VALID_PII_KEYRING,
+        OUTREACH_DNC_HMAC_PEPPER: VALID_DNC_PEPPER,
         APP_DATABASE_URL:
           "postgresql://app_user:secret@127.0.0.1:5432/global_dev",
         OUTBOX_RELAY_DATABASE_URL:
@@ -225,7 +236,8 @@ describe("inspectRuntimeAdmission", () => {
         ...PROVIDER_WIRE_ENV,
         NODE_ENV: "production",
         DATA_PROCESSOR_JURISDICTION: "EU",
-        PII_ENCRYPTION_KEY: "a".repeat(64),
+        PII_KEYRING_JSON: VALID_PII_KEYRING,
+        OUTREACH_DNC_HMAC_PEPPER: VALID_DNC_PEPPER,
         APP_DATABASE_URL:
           "postgresql://app_user:secret@127.0.0.1:5432/global_dev",
         OUTBOX_RELAY_DATABASE_URL:
@@ -252,7 +264,8 @@ describe("inspectRuntimeAdmission", () => {
         ...PROVIDER_WIRE_ENV,
         NODE_ENV: "production",
         DATA_PROCESSOR_JURISDICTION: "EU",
-        PII_ENCRYPTION_KEY: "a".repeat(64),
+        PII_KEYRING_JSON: VALID_PII_KEYRING,
+        OUTREACH_DNC_HMAC_PEPPER: VALID_DNC_PEPPER,
         APP_DATABASE_URL:
           "postgresql://app_user:secret@127.0.0.1:5432/global_dev",
         OUTBOX_RELAY_DATABASE_URL:
@@ -282,7 +295,8 @@ describe("inspectRuntimeAdmission", () => {
         ...PROVIDER_WIRE_ENV,
         NODE_ENV: "production",
         DATA_PROCESSOR_JURISDICTION: "EU",
-        PII_ENCRYPTION_KEY: "a".repeat(64),
+        PII_KEYRING_JSON: VALID_PII_KEYRING,
+        OUTREACH_DNC_HMAC_PEPPER: VALID_DNC_PEPPER,
         APP_DATABASE_URL:
           "postgresql://app_user:secret@127.0.0.1:5432/global_dev",
         OUTBOX_RELAY_DATABASE_URL:
@@ -311,7 +325,8 @@ describe("inspectRuntimeAdmission", () => {
         ...PROVIDER_WIRE_ENV,
         NODE_ENV: "production",
         DATA_PROCESSOR_JURISDICTION: "EU",
-        PII_ENCRYPTION_KEY: "a".repeat(64),
+        PII_KEYRING_JSON: VALID_PII_KEYRING,
+        OUTREACH_DNC_HMAC_PEPPER: VALID_DNC_PEPPER,
         APP_DATABASE_URL:
           "postgresql://app_user:secret@127.0.0.1:5432/global_dev",
         OUTBOX_RELAY_DATABASE_URL:
@@ -339,7 +354,8 @@ describe("inspectRuntimeAdmission", () => {
         ...SETTLEMENT_ENV,
         NODE_ENV: "production",
         DATA_PROCESSOR_JURISDICTION: "EU",
-        PII_ENCRYPTION_KEY: "a".repeat(64),
+        PII_KEYRING_JSON: VALID_PII_KEYRING,
+        OUTREACH_DNC_HMAC_PEPPER: VALID_DNC_PEPPER,
         APP_DATABASE_URL:
           "postgresql://app_user:secret@127.0.0.1:5432/global_dev",
         OUTBOX_RELAY_DATABASE_URL:
@@ -376,7 +392,8 @@ describe("inspectRuntimeAdmission", () => {
       MODEL_GATEWAY_URL: "http://127.0.0.1:3001/v1",
       MODEL_GATEWAY_KEY: "secret",
       DATA_PROCESSOR_JURISDICTION: "EU",
-      PII_ENCRYPTION_KEY: "a".repeat(64),
+      PII_KEYRING_JSON: VALID_PII_KEYRING,
+      OUTREACH_DNC_HMAC_PEPPER: VALID_DNC_PEPPER,
     };
     const settings = {
       mode: "pilot" as const,
@@ -422,7 +439,7 @@ describe("inspectRuntimeAdmission", () => {
     });
   });
 
-  it("keeps managed admission closed when the PII key is missing or does not decode to AES-256 key material", () => {
+  it("keeps managed admission closed when PII keyring/DNC pepper is missing or invalid", () => {
     const settings = {
       mode: "development" as const,
       bindHost: "127.0.0.1",
@@ -439,10 +456,15 @@ describe("inspectRuntimeAdmission", () => {
       MODEL_GATEWAY_URL: "http://127.0.0.1:3001/v1",
       MODEL_GATEWAY_KEY: "secret",
     };
-    for (const value of [undefined, "not-a-32-byte-key"]) {
+    for (const extra of [
+      {},
+      { PII_KEYRING_JSON: "not-json" },
+      { PII_KEYRING_JSON: VALID_PII_KEYRING, PII_ENCRYPTION_KEY: "not-a-32-byte-key" },
+      { PII_KEYRING_JSON: VALID_PII_KEYRING, PII_ALLOW_LEGACY_PLAINTEXT_READ: "sometimes" },
+    ]) {
       const result = inspectRuntimeAdmission(
         settings,
-        value === undefined ? base : { ...base, PII_ENCRYPTION_KEY: value },
+        { ...base, OUTREACH_DNC_HMAC_PEPPER: VALID_DNC_PEPPER, ...extra },
         attestedBuild,
       );
       expect(result.admitted).toBe(false);
@@ -450,7 +472,35 @@ describe("inspectRuntimeAdmission", () => {
         pii: { status: "failed", code: "PII_ENCRYPTION_KEY_INVALID" },
       });
       expect(JSON.stringify(result)).not.toContain("not-a-32-byte-key");
+      expect(JSON.stringify(result)).not.toContain("not-json");
     }
+
+    for (const pepper of [undefined, "short-pepper"]) {
+      const apiRes = inspectRuntimeAdmission(
+        settings,
+        pepper === undefined
+          ? { ...base, PII_KEYRING_JSON: VALID_PII_KEYRING }
+          : { ...base, PII_KEYRING_JSON: VALID_PII_KEYRING, OUTREACH_DNC_HMAC_PEPPER: pepper },
+        attestedBuild,
+        "API",
+      );
+      expect(apiRes.admitted).toBe(false);
+      expect(apiRes.checks.pii).toEqual({ status: "failed", code: "OUTREACH_DNC_PEPPER_INVALID" });
+      expect(JSON.stringify(apiRes)).not.toContain("short-pepper");
+    }
+
+    const workerRes = inspectRuntimeAdmission(
+      settings,
+      {
+        ...base,
+        ...SETTLEMENT_ENV,
+        ...PROVIDER_WIRE_ENV,
+        PII_KEYRING_JSON: VALID_PII_KEYRING,
+      },
+      attestedBuild,
+      "WORKER",
+    );
+    expect(workerRes.checks.pii).toEqual({ status: "ok" });
   });
 
   it("requires the tenant app role URL and never admits an owner-role fallback", () => {

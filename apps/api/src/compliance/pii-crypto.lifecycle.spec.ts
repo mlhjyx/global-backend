@@ -1,7 +1,9 @@
 import { Prisma } from '@prisma/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { piiExtension } from './pii-crypto.extension';
-import { encryptPii } from './pii-crypto';
+import { PII_PURPOSE, encryptPii } from './pii-crypto';
+
+const WS_A = '00000000-0000-4000-8000-0000000000aa';
 
 // Exercise the extension registered with Prisma without opening a database connection.
 interface Extension {
@@ -60,20 +62,41 @@ describe('PII extension readiness and workspace lifecycle', () => {
     const transaction = vi.fn(async (callback: (value: typeof tx) => Promise<unknown>) => callback(tx));
     vi.spyOn(Prisma, 'getExtensionContext').mockReturnValue({ $transaction: transaction } as never);
     const options = { maxWait: 10, timeout: 20 };
-    expect(await extension.client.withWorkspace('workspace-a', async (value) => { expect(value).toBe(tx); order.push('work'); return 'result'; }, options)).toBe('result');
+    expect(await extension.client.withWorkspace(WS_A, async (value) => { expect(value).toBe(tx); order.push('work'); return 'result'; }, options)).toBe('result');
     expect(order).toEqual(['scope', 'work']);
-    expect(tx.$executeRaw.mock.calls[0]).toContain('workspace-a');
+    expect(tx.$executeRaw.mock.calls[0]).toContain(WS_A);
     expect(transaction).toHaveBeenCalledWith(expect.any(Function), options);
   });
   it('decrypts included contacts and contact points for unrelated parent models', async () => {
-    vi.stubEnv('PII_ENCRYPTION_KEY', 'b'.repeat(64));
-    const rows = [{ contacts: [{ fullName: encryptPii('Synthetic Person'), contactPoints: [{ value: encryptPii('synthetic@example.test') }] }], contact: null }];
+    vi.stubEnv('PII_KEYRING_JSON', JSON.stringify({ activeKeyId: 'k2', keys: { k2: 'b'.repeat(64) } }));
+    const rows = [{
+      workspaceId: WS_A,
+      contacts: [{ fullName: encryptPii('Synthetic Person', { workspaceId: WS_A, purpose: PII_PURPOSE.CANONICAL_CONTACT_FULL_NAME }), contactPoints: [{ type: 'email', value: encryptPii('synthetic@example.test', { workspaceId: WS_A, purpose: PII_PURPOSE.CONTACT_POINT_VALUE }) }, { type: 'external_id', value: 'ext:99' }] }],
+      contact: null,
+    }];
     const result = await extension.query.$allModels.$allOperations({ model: 'CanonicalCompany', operation: 'findMany', args: {}, query: async () => rows });
-    expect(result).toEqual([{ contacts: [{ fullName: 'Synthetic Person', contactPoints: [{ value: 'synthetic@example.test' }] }], contact: null }]);
+    expect(result).toEqual([{
+      workspaceId: WS_A,
+      contacts: [{ fullName: 'Synthetic Person', contactPoints: [{ type: 'email', value: 'synthetic@example.test' }, { type: 'external_id', value: 'ext:99' }] }],
+      contact: null,
+    }]);
+  });
+  it('does not falsely reject unrelated non-PII models with type/value columns, while refusing plaintext nested contacts', async () => {
+    vi.stubEnv('PII_KEYRING_JSON', JSON.stringify({ activeKeyId: 'k2', keys: { k2: 'b'.repeat(64) } }));
+    const suppressionRows = [{ workspaceId: WS_A, type: 'email', value: 'blocked@example.test' }];
+    await expect(
+      extension.query.$allModels.$allOperations({ model: 'SuppressionRecord', operation: 'findMany', args: {}, query: async () => suppressionRows }),
+    ).resolves.toEqual(suppressionRows);
+
+    const plaintextNested = [{ workspaceId: WS_A, contacts: [{ fullName: 'Unencrypted Leak' }] }];
+    await expect(
+      extension.query.$allModels.$allOperations({ model: 'CanonicalCompany', operation: 'findMany', args: {}, query: async () => plaintextNested }),
+    ).rejects.toThrow(/PII_PLAINTEXT_FALLBACK_FORBIDDEN/);
   });
   it('encrypts model writes before querying and decrypts the returned model', async () => {
-    vi.stubEnv('PII_ENCRYPTION_KEY', 'b'.repeat(64));
-    const query = vi.fn(async (args: object) => { expect(args).toEqual({ data: { fullName: encryptPii('Synthetic Person') } }); return { fullName: encryptPii('Synthetic Person') }; });
-    expect(await extension.query.$allModels.$allOperations({ model: 'CanonicalContact', operation: 'create', args: { data: { fullName: 'Synthetic Person' } }, query })).toEqual({ fullName: 'Synthetic Person' });
+    vi.stubEnv('PII_KEYRING_JSON', JSON.stringify({ activeKeyId: 'k2', keys: { k2: 'b'.repeat(64) } }));
+    const enc = encryptPii('Synthetic Person', { workspaceId: WS_A, purpose: PII_PURPOSE.CANONICAL_CONTACT_FULL_NAME });
+    const query = vi.fn(async (args: object) => { expect(args).toEqual({ data: { workspaceId: WS_A, fullName: enc } }); return { workspaceId: WS_A, fullName: enc }; });
+    expect(await extension.query.$allModels.$allOperations({ model: 'CanonicalContact', operation: 'create', args: { data: { workspaceId: WS_A, fullName: 'Synthetic Person' } }, query })).toEqual({ workspaceId: WS_A, fullName: 'Synthetic Person' });
   });
 });

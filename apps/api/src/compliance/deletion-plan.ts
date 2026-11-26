@@ -1,12 +1,17 @@
 import { DeletionSubjectType, SuppressionEntry } from './deletion.types';
 import { contactSuppressionKeys } from '../discovery/identity';
-import { blindContactKey } from './pii-crypto';
+import {
+  blindContactKey,
+  blindContactKeyCandidates,
+  PII_PURPOSE,
+} from './pii-crypto';
 
 /**
  * 冻结阶段禁联项构造（收口⑥ PR-B，纯）。删除前先写这些 suppression_record，删除后**保留**=
  * 法定最小禁联（Art.17 擦除 / Art.21 反对后不得再入库/再触达该主体）。全部小写、去重。
  */
 export function buildSuppressionEntries(args: {
+  workspaceId: string;
   subjectType: DeletionSubjectType;
   emails: string[];
   domain?: string | null;
@@ -38,7 +43,13 @@ export function buildSuppressionEntries(args: {
   //（{@link contactSuppressionKeys}，与创建闸/对账**同构**），🔴 盲化后落库=禁联表不存人名明文；push 去重多变体重叠。
   if (args.subjectType === 'contact' && args.contactName && args.companyKey) {
     for (const rawKey of contactSuppressionKeys(args.contactName, args.companyKey)) {
-      push('contact_key', blindContactKey(rawKey));
+      push(
+        'contact_key',
+        blindContactKey(rawKey, {
+          workspaceId: args.workspaceId,
+          purpose: PII_PURPOSE.CONTACT_DEDUPE_KEY,
+        }),
+      );
     }
   }
   return entries;
@@ -56,19 +67,28 @@ export function buildSuppressionEntries(args: {
  * 只触碰 **DSR 受理后新建**的行；先于 DSR 就存在的**同名另一真人**（`createdAt < since`）绝不入选——
  * 杜绝数据丢失。窗口内被选的同名新行 = 创建闸在顺序情形下本就会拒建者，净数据态一致。
  *
+ * @param workspaceId 租户 UUID（用于盲化密钥派生）
  * @param erasedName 被擦除人的明文全名（读路径解密后）——内部经 {@link contactSuppressionKeys} 算变体集
  * @param companyKey 属主公司 dedupeKey（与冻结所用一致）
  * @param since 只有 createdAt >= 此刻的候选才入选（含边界）
  * @param candidates 属主公司下的候选（fullName 须为读路径解密后的明文）
  */
 export function selectReconcileStragglerIds(args: {
+  workspaceId: string;
   erasedName: string;
   companyKey: string;
   since: Date;
   candidates: { id: string; fullName: string; createdAt: Date }[];
 }): string[] {
   const targets = new Set(
-    contactSuppressionKeys(args.erasedName, args.companyKey).map((k) => blindContactKey(k).toLowerCase()),
+    contactSuppressionKeys(args.erasedName, args.companyKey)
+      .flatMap((k) =>
+        blindContactKeyCandidates(k, {
+          workspaceId: args.workspaceId,
+          purpose: PII_PURPOSE.CONTACT_DEDUPE_KEY,
+        }),
+      )
+      .map((k) => k.toLowerCase()),
   );
   if (targets.size === 0) return [];
   const sinceMs = args.since.getTime();
@@ -76,7 +96,10 @@ export function selectReconcileStragglerIds(args: {
     .filter((c) => {
       if (c.createdAt.getTime() < sinceMs) return false;
       return contactSuppressionKeys(c.fullName, args.companyKey).some((k) =>
-        targets.has(blindContactKey(k).toLowerCase()),
+        blindContactKeyCandidates(k, {
+          workspaceId: args.workspaceId,
+          purpose: PII_PURPOSE.CONTACT_DEDUPE_KEY,
+        }).some((candidateKey) => targets.has(candidateKey.toLowerCase())),
       );
     })
     .map((c) => c.id);

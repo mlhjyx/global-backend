@@ -44,6 +44,7 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
     const userA = randomUUID();
     const userB = randomUUID();
     const origPiiKey = process.env.PII_ENCRYPTION_KEY;
+    const origPiiKeyring = process.env.PII_KEYRING_JSON;
 
     function appPrismaService(): PrismaService {
       return {
@@ -52,13 +53,7 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
           fn: (tx: Prisma.TransactionClient) => Promise<T>,
           options?: { timeout?: number },
         ) =>
-          (app as unknown as PrismaClient).$transaction(
-            async (tx) => {
-              await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${workspaceId}, true)`;
-              return fn(tx);
-            },
-            { timeout: options?.timeout ?? 30_000 },
-          ),
+          (app as unknown as PrismaService).withWorkspace(workspaceId, fn, options),
       } as unknown as PrismaService;
     }
 
@@ -72,7 +67,10 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
     }
 
     beforeAll(async () => {
-      process.env.PII_ENCRYPTION_KEY = 'ab'.repeat(32);
+      process.env.PII_KEYRING_JSON = JSON.stringify({
+        activeKeyId: 'k1',
+        keys: { k1: 'ab'.repeat(32) },
+      });
       owner = new PrismaClient({ datasources: { db: { url: ownerUrl } } });
       appRaw = new PrismaClient({ datasources: { db: { url: appUrl } } });
       app = appRaw.$extends(piiExtension);
@@ -81,6 +79,8 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
     afterAll(async () => {
       if (origPiiKey === undefined) delete process.env.PII_ENCRYPTION_KEY;
       else process.env.PII_ENCRYPTION_KEY = origPiiKey;
+      if (origPiiKeyring === undefined) delete process.env.PII_KEYRING_JSON;
+      else process.env.PII_KEYRING_JSON = origPiiKeyring;
 
       if (owner) {
         await owner.$executeRaw`DELETE FROM data_export_job WHERE workspace_id IN (${wsA}::uuid, ${wsB}::uuid)`;
@@ -250,11 +250,11 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
         });
       });
 
-      // Confirm PII is encrypted in raw DB column
+      // Confirm PII is encrypted in raw DB column with v2 per-workspace ciphertext
       const [rawContact] = await owner.$queryRaw<Array<{ full_name: string }>>`
         SELECT full_name FROM canonical_contact WHERE id = ${contactA}::uuid
       `;
-      expect(rawContact?.full_name.startsWith('enc:v1:')).toBe(true);
+      expect(rawContact?.full_name.startsWith('enc:v2:k1:')).toBe(true);
 
       const storedObjects = new Map<string, { body: Buffer; contentType: string }>();
       const mockStorage = {
@@ -311,6 +311,7 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
       expect(csvText).toContain('Alice Mueller');
       expect(csvText).toContain('alice@alpha-buyer.de');
       expect(csvText).not.toContain('enc:v1:');
+      expect(csvText).not.toContain('enc:v2:');
       expect(csvText).not.toContain('Bob Secret');
       expect(csvText).not.toContain('bob@beta-secret.com');
 

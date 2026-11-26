@@ -268,5 +268,58 @@ export async function linkLastVerificationEvent(
   });
 }
 
+/**
+ * MT-P2 密钥轮换受控写出口：只更新密文 `value` 与/或 `domainBlindKey`，
+ * 绝不触碰四态验证列或事件账（守住 P1-02 单一写入器不变式）。
+ */
+export async function rekeyContactPointPii(
+  tx: Prisma.TransactionClient,
+  input: { pointId: string; value?: string; domainBlindKey?: string },
+): Promise<void> {
+  if (input.value === undefined && input.domainBlindKey === undefined) return;
+  await tx.contactPoint.update({
+    where: { id: input.pointId },
+    data: {
+      ...(input.value !== undefined ? { value: input.value } : {}),
+      ...(input.domainBlindKey !== undefined ? { domainBlindKey: input.domainBlindKey } : {}),
+    },
+  });
+}
+
+/**
+ * MT-P2 密钥轮换去重/归并受控写出口：重加密导致重复 contact_point 碰撞时，
+ * 按需将更强的验证状态提升到保留行后删除重复行，或将点迁移到保留联系人下。
+ */
+export async function mergeOrReparentContactPoint(
+  tx: Prisma.TransactionClient,
+  input:
+    | {
+        kind: 'deduplicate';
+        survivorPointId: string;
+        duplicatePointId: string;
+        promotedVerification?: { status: string; verifiedAt: Date | null } | null;
+      }
+    | {
+        kind: 'reparent';
+        pointId: string;
+        targetContactId: string;
+      },
+): Promise<void> {
+  if (input.kind === 'reparent') {
+    await tx.contactPoint.update({
+      where: { id: input.pointId },
+      data: { contactId: input.targetContactId },
+    });
+    return;
+  }
+  if (input.promotedVerification) {
+    await tx.contactPoint.update({
+      where: { id: input.survivorPointId },
+      data: input.promotedVerification,
+    });
+  }
+  await tx.contactPoint.delete({ where: { id: input.duplicatePointId } });
+}
+
 /** 投影便捷导出：写入器是 legacy status 的唯一产地（守卫 spec 校验调用方不再自算 VALID/RISKY）。 */
 export { projectLegacyStatus };

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ChannelService } from './channel.service';
+import { encryptPlatformPii, PII_PURPOSE } from '../compliance/pii-crypto';
 
 const WORKSPACE_ID = '11111111-1111-4111-8111-111111111111';
 const USER_ID = '22222222-2222-4222-8222-222222222222';
@@ -177,5 +178,72 @@ describe('CH-7 观察名单抽检', () => {
 
     const invalid = makeService();
     await expect(invalid.service.listChannelRecords(CTX, CHANNEL_ID, undefined, 'BOGUS')).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('list 解密 enc:v2 联系人 PII；默认拒绝明文回退，仅迁移窗口开启 PII_ALLOW_LEGACY_PLAINTEXT_READ=true 时兼容遗留明文行', async () => {
+    const encName = encryptPlatformPii('Erika Mustermann', {
+      scope: 'source_channel_record',
+      purpose: PII_PURPOSE.SOURCE_CHANNEL_CONTACT_NAME,
+      deterministic: false,
+    });
+    const encEmail = encryptPlatformPii('erika@acme.example', {
+      scope: 'source_channel_record',
+      purpose: PII_PURPOSE.SOURCE_CHANNEL_EMAIL,
+      deterministic: false,
+    });
+    const encryptedOnly = makeService({
+      found: [
+        recordRow(RECORD_A, {
+          contactName: encName,
+          contactTitle: null,
+          email: encEmail,
+          phone: null,
+        }),
+      ],
+    });
+    const encryptedResult = await encryptedOnly.service.listChannelRecords(CTX, CHANNEL_ID);
+    expect(encryptedResult.records[0]).toMatchObject({
+      contactName: 'Erika Mustermann',
+      email: 'erika@acme.example',
+    });
+
+    const mixed = makeService({
+      found: [
+        recordRow(RECORD_A, {
+          contactName: encName,
+          contactTitle: null,
+          email: encEmail,
+          phone: null,
+        }),
+        recordRow(RECORD_B, {
+          contactName: 'Legacy Plain Name',
+          contactTitle: 'Buyer',
+          email: 'legacy@acme.example',
+          phone: '+49 30 1234',
+        }),
+      ],
+    });
+    await expect(mixed.service.listChannelRecords(CTX, CHANNEL_ID)).rejects.toThrow(
+      /PII_PLAINTEXT_FALLBACK_FORBIDDEN/,
+    );
+
+    const prevAllow = process.env.PII_ALLOW_LEGACY_PLAINTEXT_READ;
+    try {
+      process.env.PII_ALLOW_LEGACY_PLAINTEXT_READ = 'true';
+      const result = await mixed.service.listChannelRecords(CTX, CHANNEL_ID);
+      expect(result.records[0]).toMatchObject({
+        contactName: 'Erika Mustermann',
+        email: 'erika@acme.example',
+      });
+      expect(result.records[1]).toMatchObject({
+        contactName: 'Legacy Plain Name',
+        contactTitle: 'Buyer',
+        email: 'legacy@acme.example',
+        phone: '+49 30 1234',
+      });
+    } finally {
+      if (prevAllow === undefined) delete process.env.PII_ALLOW_LEGACY_PLAINTEXT_READ;
+      else process.env.PII_ALLOW_LEGACY_PLAINTEXT_READ = prevAllow;
+    }
   });
 });

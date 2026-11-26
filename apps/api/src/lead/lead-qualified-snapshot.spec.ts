@@ -11,7 +11,7 @@ import { buildLeadPackage } from './lead-package';
 import * as leadPackageModule from './lead-package';
 import { LeadService } from './lead.service';
 import { contactSuppressionKeys } from '../discovery/identity';
-import { blindContactKey } from '../compliance/pii-crypto';
+import { blindContactKey, PII_PURPOSE } from '../compliance/pii-crypto';
 
 /**
  * 收口③ LeadQualified 快照 v1：decide(accept) 的 outbox payload 从「三字段摘要」升级为
@@ -748,7 +748,10 @@ describe('LeadService.decide(accept) — 同事务取数、payload=快照（对�
         contactPoints: [{ status: 'VALID', type: 'phone', value: '+49 123' }],
       }],
     });
-    const key = blindContactKey(contactSuppressionKeys('Max Mustermann', 'd:acme-pumpen.de')[0]);
+    const key = blindContactKey(contactSuppressionKeys('Max Mustermann', 'd:acme-pumpen.de')[0], {
+      workspaceId: WS,
+      purpose: PII_PURPOSE.CONTACT_DEDUPE_KEY,
+    });
     const tx = makeDecideTx(makeLead(), company, outboxCreate, decisionCreate);
     tx.suppressionRecord.findMany = vi.fn(async () => [{ type: 'contact_key', value: key }]);
 

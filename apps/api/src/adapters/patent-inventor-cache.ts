@@ -28,7 +28,14 @@ import {
 } from './bigquery-patents';
 import { normForMatch } from '../discovery/name-match';
 import { foldedPersonNameKey, legacyFoldedPersonNameKey, personNameKeyVariants } from '../discovery/person-name';
-import { encryptPii, decryptPii, blindContactKey, piiKeyConfigured } from '../compliance/pii-crypto';
+import {
+  encryptPlatformPii,
+  decryptPlatformPii,
+  blindPlatformKey,
+  blindPlatformKeyCandidates,
+  piiKeyConfigured,
+  PII_PURPOSE,
+} from '../compliance/pii-crypto';
 import {
   ExecutionControlError,
   isExecutionControlError,
@@ -77,20 +84,31 @@ function countriesConflict(a: string, b: string): boolean {
  */
 function piiPreflightOk(): boolean {
   try {
-    return piiKeyConfigured() && !!blindContactKey('__patent_cache_preflight__');
+    return (
+      piiKeyConfigured() &&
+      !!blindPlatformKey('__patent_cache_preflight__', {
+        scope: 'patent_inventor_cache',
+        purpose: PII_PURPOSE.PATENT_INVENTOR_KEY,
+      })
+    );
   } catch {
     return false;
   }
 }
 
 /**
- * 🔴 发明人姓名**不可逆盲索引**（Art.17 擦除键）——`blindContactKey(foldedPersonNameKey(rawName))`。
+ * 🔴 发明人姓名**不可逆盲索引**（Art.17 擦除键）——`blindPlatformKey(foldedPersonNameKey(rawName))`。
  * 存**最大折叠**形（umlautFold）：归一名解析不出（罕见）→ 返 ''（该行不可按人名擦除，靠 TTL 清理；空键永不被 {@link inventorErasureKeys} 命中）。
  * 🔴 与 {@link inventorErasureKeys} 的**不变式**：foldedPersonNameKey 形恒 ∈ personNameKeyVariants → 擦除必命中（跨 umlaut 拼写收敛）。
  */
 export function inventorBlindKey(rawInventorName: string): string {
   const folded = foldedPersonNameKey(rawInventorName);
-  return folded ? blindContactKey(folded) : '';
+  return folded
+    ? blindPlatformKey(folded, {
+        scope: 'patent_inventor_cache',
+        purpose: PII_PURPOSE.PATENT_INVENTOR_KEY,
+      })
+    : '';
 }
 
 /**
@@ -99,18 +117,29 @@ export function inventorBlindKey(rawInventorName: string): string {
  */
 export function legacyInventorBlindKey(rawInventorName: string): string {
   const folded = legacyFoldedPersonNameKey(rawInventorName);
-  return folded ? blindContactKey(folded) : '';
+  return folded
+    ? blindPlatformKey(folded, {
+        scope: 'patent_inventor_cache',
+        purpose: PII_PURPOSE.PATENT_INVENTOR_KEY,
+      })
+    : '';
 }
 
 /**
  * Art.17 擦除：给定被擦除人姓名 → 匹配缓存 `inventorNameKey` 的**盲键集**（over-suppress 变体，方向偏过禁）。
  * personNameKeyVariants 含 identityVariant 形（= {@link inventorBlindKey} 存的 normalizePersonName 形）→ 必命中
- * 存储行；多变体（变音丢弃/umlaut 折叠）额外覆盖跨拼写。空/纯称谓 → []（不误删）。
+ * 存储行；多变体（变音丢弃/umlaut 折叠）额外覆盖跨拼写与 Keyring 轮换/v1 兼容键。空/纯称谓 → []（不误删）。
  */
 export function inventorErasureKeys(subjectName: string): string[] {
   const keys = new Set<string>();
   for (const v of personNameKeyVariants(subjectName)) {
-    if (v) keys.add(blindContactKey(v));
+    if (!v) continue;
+    for (const candidate of blindPlatformKeyCandidates(v, {
+      scope: 'patent_inventor_cache',
+      purpose: PII_PURPOSE.PATENT_INVENTOR_KEY,
+    })) {
+      keys.add(candidate);
+    }
   }
   return [...keys];
 }
@@ -149,7 +178,10 @@ export function buildSyntheticRecords(rows: CacheInventorRow[]): PatentRecord[] 
       groups.set(key, g);
     }
     if (r.assigneeNameRaw) g.rawNames.add(r.assigneeNameRaw);
-    const name = decryptPii(r.inventorName).trim(); // 🔴 只在此解密
+    const name = decryptPlatformPii(r.inventorName, {
+      scope: 'patent_inventor_cache',
+      purpose: PII_PURPOSE.PATENT_INVENTOR_NAME,
+    }).trim(); // 🔴 只在此解密
     if (name && !g.seen.has(name)) {
       g.seen.add(name);
       g.inventors.push(name);
@@ -388,9 +420,9 @@ export async function refreshPatentCache(deps: PatentRefreshDeps): Promise<Paten
   //     拦下（否则扫了才在派生处炸，浪费一次扫描）。派生失败 → FAILED，绝不扫。写阶段 try/catch 仍是后备兜底。
   if (!piiPreflightOk()) {
     await db.patentCacheRefreshAudit.create({
-      data: { startedAt: nowDate, finishedAt: new Date(), anchorCount: anchors.length, rowCount: 0, status: 'FAILED', detail: 'PII_ENCRYPTION_KEY 缺失或形态非法——拒绝扫描（无法加密落盘）' },
+      data: { startedAt: nowDate, finishedAt: new Date(), anchorCount: anchors.length, rowCount: 0, status: 'FAILED', detail: 'PII_KEYRING_JSON 缺失或形态非法——拒绝扫描（无法加密落盘）' },
     });
-    return { status: 'FAILED', anchorCount: anchors.length, rowCount: 0, bytesScanned: null, purged, cached: 0, empty: 0, detail: 'PII_ENCRYPTION_KEY 缺失或形态非法' };
+    return { status: 'FAILED', anchorCount: anchors.length, rowCount: 0, bytesScanned: null, purged, cached: 0, empty: 0, detail: 'PII_KEYRING_JSON 缺失或形态非法' };
   }
 
   // 5) audit RUNNING。
@@ -447,18 +479,34 @@ export async function refreshPatentCache(deps: PatentRefreshDeps): Promise<Paten
         return !!qCountries && qCountries.some((qc) => !countriesConflict(qc, e.country));
       });
     // 盲键只对 scoped 子集算（HMAC 有成本）；供墓碑去重 + upsert 复用。
-    // legacyNameKey 只为命中**旧规则**写下的墓碑（学位串未剥的形），新行永不写该形。
-    const enriched = scoped.map((e) => ({
-      ...e,
-      nameKey: inventorBlindKey(e.r.inventorName),
-      legacyNameKey: legacyInventorBlindKey(e.r.inventorName),
-    }));
+    // legacyNameKey 只为命中**旧规则**写下的墓碑（学位串未剥的形），新行永不写该形；同时覆盖 Keyring 轮换与 bi:v1: 候选键。
+    const enriched = scoped.map((e) => {
+      const folded = foldedPersonNameKey(e.r.inventorName);
+      const legacyFolded = legacyFoldedPersonNameKey(e.r.inventorName);
+      const matchKeys = [
+        ...(folded
+          ? blindPlatformKeyCandidates(folded, {
+              scope: 'patent_inventor_cache',
+              purpose: PII_PURPOSE.PATENT_INVENTOR_KEY,
+            })
+          : []),
+        ...(legacyFolded
+          ? blindPlatformKeyCandidates(legacyFolded, {
+              scope: 'patent_inventor_cache',
+              purpose: PII_PURPOSE.PATENT_INVENTOR_KEY,
+            })
+          : []),
+      ];
+      return {
+        ...e,
+        nameKey: inventorBlindKey(e.r.inventorName),
+        matchKeys,
+      };
+    });
 
     // P2-5：按盲键查墓碑，被擦除人绝不重物化（over-suppress 侧：宁跳过也不重建被擦除 PII）。
-    // 新旧两形都查：变体面只增不减（见 person-name.personNameKeyVariants 的兼容说明）。
-    const candidateKeys = [
-      ...new Set(enriched.flatMap((e) => [e.nameKey, e.legacyNameKey]).filter(Boolean)),
-    ];
+    // 新旧两形与全密钥候选都查：变体面只增不减（见 person-name.personNameKeyVariants 的兼容说明）。
+    const candidateKeys = [...new Set(enriched.flatMap((e) => e.matchKeys).filter(Boolean))];
     const tombstoned = candidateKeys.length
       ? new Set(
           (
@@ -470,7 +518,7 @@ export async function refreshPatentCache(deps: PatentRefreshDeps): Promise<Paten
         )
       : new Set<string>();
     const notErased = enriched.filter(
-      (e) => !(e.nameKey && tombstoned.has(e.nameKey)) && !(e.legacyNameKey && tombstoned.has(e.legacyNameKey)),
+      (e) => !e.matchKeys.some((key) => tombstoned.has(key)),
     );
 
     // P2-6：确定性排序 → 每 (assigneeNorm,country) cap 到 MAX_INVENTORS_PER_ASSIGNEE（幂等：同批每次落同一 25 位）。
@@ -487,10 +535,13 @@ export async function refreshPatentCache(deps: PatentRefreshDeps): Promise<Paten
       toUpsert.push(e);
     }
 
-    // upsert（🔴encryptPii + 盲键）+ 记录每组保留密文集（供 over-cap/陈旧行清除）。
+    // upsert（🔴encryptPlatformPii + 盲键）+ 记录每组保留密文集（供 over-cap/陈旧行清除）。
     const keptByGroup = new Map<string, { norm: string; country: string; enc: string[] }>();
     for (const e of toUpsert) {
-      const encInventor = encryptPii(e.r.inventorName); // 🔴 确定性加密落盘
+      const encInventor = encryptPlatformPii(e.r.inventorName, {
+        scope: 'patent_inventor_cache',
+        purpose: PII_PURPOSE.PATENT_INVENTOR_NAME,
+      }); // 🔴 确定性加密落盘
       await db.patentInventorCache.upsert({
         where: { assigneeNorm_assigneeCountry_inventorName: { assigneeNorm: e.norm, assigneeCountry: e.country, inventorName: encInventor } },
         update: { assigneeNameRaw: e.r.assigneeName, inventorNameKey: e.nameKey, windowFromYear: fromYear, windowToYear: toYear, license: GOOGLE_PATENTS_LICENSE, refreshedAt: nowDate, expiresAt },

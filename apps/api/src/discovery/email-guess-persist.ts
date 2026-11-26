@@ -1,7 +1,11 @@
 import { Prisma } from '@prisma/client';
 import { GuessResult } from './email-guesser';
 import { LawfulBasis } from './provider-contract';
-import { blindContactKey, encryptPii } from '../compliance/pii-crypto';
+import {
+  blindContactKeyCandidates,
+  encryptPii,
+  PII_PURPOSE,
+} from '../compliance/pii-crypto';
 import { companyMatchesSuppression, canonicalizeSuppressionValue, canonicalizeSuppressionValues,
 } from './suppression-value';
 import { lockWorkspaceSuppressionPolicy } from './suppression-policy-lock';
@@ -159,9 +163,14 @@ export async function persistGuessedEmail(
   const suppressedContactKeys = new Set(
     currentSuppressions.filter((row) => row.type === 'contact_key').map((row) => row.value.toLowerCase()),
   );
-  const contactKeys = contactSuppressionKeys(contact.fullName, contact.company.dedupeKey).map((value) =>
-    blindContactKey(value).toLowerCase(),
-  );
+  const contactKeys = contactSuppressionKeys(contact.fullName, contact.company.dedupeKey)
+    .flatMap((value) =>
+      blindContactKeyCandidates(value, {
+        workspaceId: args.workspaceId,
+        purpose: PII_PURPOSE.CONTACT_DEDUPE_KEY,
+      }),
+    )
+    .map((value) => value.toLowerCase());
   const suppressedDomains = canonicalizeSuppressionValues(
     'domain',
     currentSuppressions.filter((row) => row.type === 'domain').map((row) => row.value),
@@ -255,7 +264,10 @@ export async function persistGuessedEmail(
       field: 'email.guess',
       value: {
         // 收口⑥：证据里的人名邮箱=第二份 PII → 加密落库（确定性，与 contact_point 密文一致）。
-        email: encryptPii(email),
+        email: encryptPii(email, {
+          workspaceId: args.workspaceId,
+          purpose: PII_PURPOSE.FIELD_EVIDENCE_VALUE,
+        }),
         pattern: plan.pattern,
         confidence: plan.confidence,
         status: plan.pointStatus,

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import { describe, expect, it, vi } from 'vitest';
-import { encryptPii } from '../compliance/pii-crypto';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { PII_PURPOSE, encryptPii } from '../compliance/pii-crypto';
 import { ContactEligibilityService } from './contact-eligibility.service';
 
 /**
@@ -36,11 +36,15 @@ function rowFor(email: string, state: string, confidence: number | null, id?: st
   rowSeq += 1;
   return {
     id: id ?? `11111111-1111-4111-8111-${String(rowSeq).padStart(12, '0')}`,
-    value: encryptPii(email),
+    value: encryptPii(email, { workspaceId: WORKSPACE, purpose: PII_PURPOSE.CONTACT_POINT_VALUE }),
     verification_state: state,
     confidence,
   };
 }
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 function errorCode(error: unknown): string {
   return (error as { response?: { error?: { code?: string } } }).response?.error?.code ?? '';
@@ -193,5 +197,26 @@ describe('ContactEligibilityService.check', () => {
         complianceTag: 'US:CAN_SPAM_FOOTER',
       },
     });
+  });
+
+  it('密钥轮换期间用当前与历史候选密文列表查询并命中旧密钥行', async () => {
+    vi.stubEnv('PII_KEYRING_JSON', JSON.stringify({ activeKeyId: 'k1', keys: { k1: '0'.repeat(64) } }));
+    const oldCipher = encryptPii('rotated@acme.example', { workspaceId: WORKSPACE, purpose: PII_PURPOSE.CONTACT_POINT_VALUE });
+    vi.stubEnv(
+      'PII_KEYRING_JSON',
+      JSON.stringify({ activeKeyId: 'k2', keys: { k1: '0'.repeat(64), k2: '2'.repeat(64) } }),
+    );
+    const { prisma, queryRaw } = fakePrisma([
+      {
+        id: '11111111-1111-4111-8111-000000000099',
+        value: oldCipher,
+        verification_state: 'VALID',
+        confidence: 92,
+      },
+    ]);
+    const service = new ContactEligibilityService(prisma as never);
+    const [result] = await service.check(WORKSPACE, ['rotated@acme.example']);
+    expect(result).toMatchObject({ found: true, state: 'VALID', contactPointId: '11111111-1111-4111-8111-000000000099' });
+    expect(queryRaw).toHaveBeenCalledTimes(1);
   });
 });

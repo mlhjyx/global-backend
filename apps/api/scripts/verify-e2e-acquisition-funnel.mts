@@ -37,7 +37,7 @@ import { buildGatewayProvider } from '../src/model-gateway/model-providers.confi
 import { AiTraceSink } from '../src/model-gateway/ai-trace.sink';
 import { buildToolBroker, sourcePolicyReaderFrom } from '../src/tools/tool-broker.factory';
 import { companyIdentity, contactIdentity } from '../src/discovery/identity';
-import { blindContactKey } from '../src/compliance/pii-crypto';
+import { PII_PURPOSE, blindContactKey } from '../src/compliance/pii-crypto';
 import { buildLeadQualifiedSnapshot, LeadQualifiedSnapshotInput } from '../src/lead/lead-qualified-snapshot';
 import { DataRightsService } from '../src/compliance/data-rights.service';
 import { storageRightsContextForLead } from '../src/compliance/data-rights.context';
@@ -162,7 +162,10 @@ async function seed(): Promise<{ icpId: string; companyId: string; contactId: st
       create: { workspaceId: WS, icpId: icp.id, canonicalCompanyId: company.id, fitVerdict: 'match' },
     });
     // 缺邮箱具名决策人（补全对象）
-    const cdk = blindContactKey(contactIdentity({ fullName: PERSON.fullName }, company.dedupeKey));
+    const cdk = blindContactKey(contactIdentity({ fullName: PERSON.fullName }, company.dedupeKey), {
+      workspaceId: WS,
+      purpose: PII_PURPOSE.CONTACT_DEDUPE_KEY,
+    });
     const contact = await tx.canonicalContact.upsert({
       where: { workspaceId_dedupeKey: { workspaceId: WS, dedupeKey: cdk } },
       update: { title: PERSON.title },

@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { canonicalizeSuppressionValue } from '../discovery/suppression-value';
 import { classifyContactEmail } from '../discovery/contact-classifier';
-import { encryptPii } from '../compliance/pii-crypto';
+import { encryptPiiCandidates, PII_PURPOSE } from '../compliance/pii-crypto';
 import type { EmailVerificationState } from '../discovery/contact-point-verification-state';
 import {
   DEFAULT_CATCH_ALL_SEND_POLICY,
@@ -128,7 +128,12 @@ export class ContactEligibilityService {
     // 数组不会被加密（会拿明文数组比对密文列，永远 0 命中）；原始 SELECT 由 RLS 兜底租户隔离。
     const ciphertextToEmail = new Map<string, string>();
     for (const email of canonical) {
-      ciphertextToEmail.set(encryptPii(email), email);
+      for (const ciphertext of encryptPiiCandidates(email, {
+        workspaceId,
+        purpose: PII_PURPOSE.CONTACT_POINT_VALUE,
+      })) {
+        ciphertextToEmail.set(ciphertext, email);
+      }
     }
     const ciphertexts = [...ciphertextToEmail.keys()];
     const rows = await this.prisma.withWorkspace(workspaceId, (tx) =>

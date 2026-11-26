@@ -1,6 +1,9 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaClient, Prisma } from '@prisma/client';
-import { piiExtension } from '../compliance/pii-crypto.extension';
+import {
+  piiExtension,
+  runWithWorkspacePiiContext,
+} from '../compliance/pii-crypto.extension';
 import { assertCandidateTenantAccess } from '../runtime/development-candidate';
 
 export type DatabaseReadiness =
@@ -94,7 +97,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
     assertCandidateTenantAccess(workspaceId);
     return this.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${workspaceId}, true)`;
-      return fn(tx);
+      return runWithWorkspacePiiContext(workspaceId, () => fn(tx));
     }, options);
   }
 }

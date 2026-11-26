@@ -253,6 +253,10 @@
     },
     {
       "from": "channels",
+      "to": "compliance"
+    },
+    {
+      "from": "channels",
       "to": "discovery"
     },
     {

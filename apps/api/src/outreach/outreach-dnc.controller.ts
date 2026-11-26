@@ -36,7 +36,7 @@ class CheckOutreachDncDto {
 
 class SuppressOutreachDncDto {
   @ApiProperty({
-    description: '需要平台级抑制的收件邮箱（服务端只落 SHA-256，不存明文）',
+    description: '需要平台级抑制的收件邮箱（服务端只落带 pepper HMAC-SHA256，不存明文）',
     maxLength: 320,
   })
   @IsString()
@@ -89,7 +89,7 @@ export class OutreachDncController {
   @ApiOperation({
     summary: '写入平台级外联抑制（退订/投诉/退信）',
     description:
-      '规范化邮箱后只存 SHA-256；同一邮箱重复写入幂等。调用方必须已确认退订/投诉事实。',
+      '规范化邮箱后只存带 pepper HMAC-SHA256；同一邮箱重复写入幂等。调用方必须已确认退订/投诉事实。',
   })
   @ApiEnvelope({
     type: 'object',

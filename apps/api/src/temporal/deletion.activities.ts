@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { ApplicationFailure } from '@temporalio/activity';
 import { PrismaService } from '../prisma/prisma.service';
-import { decryptPii } from '../compliance/pii-crypto';
+import { decryptPii, isEncryptedPii, PII_PURPOSE } from '../compliance/pii-crypto';
 import { inventorErasureKeys } from '../adapters/patent-inventor-cache';
 import { buildSuppressionEntries, selectReconcileStragglerIds } from '../compliance/deletion-plan';
 import {
@@ -211,13 +211,25 @@ export function createDeletionActivities(deps: {
         // suppression（冻结后才挂上、快照未见的邮箱），级联删前先固化禁联——防发现/猜测路径日后重建或再触达。
         // upsert 幂等，与冻结所写取并集。
         const lateEmails = eraseContacts.flatMap((c) =>
-          c.contactPoints.filter((p) => p.type === 'email').map((p) => decryptPii(p.value)),
+          c.contactPoints
+            .filter((p) => p.type === 'email')
+            .map((p) =>
+              isEncryptedPii(p.value)
+                ? decryptPii(p.value, {
+                    workspaceId: input.workspaceId,
+                    purpose: PII_PURPOSE.CONTACT_POINT_VALUE,
+                  })
+                : p.value,
+            ),
         );
         if (lateEmails.length) {
           await upsertSuppressionEntries(
             tx,
             input.workspaceId,
-            buildSuppressionEntries({ subjectType: 'contact', emails: lateEmails,
+            buildSuppressionEntries({
+              workspaceId: input.workspaceId,
+              subjectType: 'contact',
+              emails: lateEmails,
             }),
           );
         }
@@ -865,6 +877,7 @@ async function reconcileContactSubjectEraseIds(
   });
   // 被擦除人明文名 → contactSuppressionKeys 变体集（与冻结/创建闸同构），与候选变体集有交集且 createdAt>=受理即入选。
   const stragglers = selectReconcileStragglerIds({
+    workspaceId: input.workspaceId,
     erasedName: original.fullName,
     companyKey,
     since: req.createdAt,
@@ -920,8 +933,17 @@ async function locateInTransaction(
       },
     });
     if (!contact) return { located: base, suppressionEntries: [] };
-    // contactPoints.value 经 PII 扩展在读路径解密；decryptPii 对已明文值幂等（防嵌套解密漏层）。
-    const emails = contact.contactPoints.filter((p) => p.type === 'email').map((p) => decryptPii(p.value));
+    // contactPoints.value 已由 piiExtension 在读路径解密；仅当绕过扩展残留密文时二次解密。
+    const emails = contact.contactPoints
+      .filter((p) => p.type === 'email')
+      .map((p) =>
+        isEncryptedPii(p.value)
+          ? decryptPii(p.value, {
+              workspaceId: input.workspaceId,
+              purpose: PII_PURPOSE.CONTACT_POINT_VALUE,
+            })
+          : p.value,
+      );
     const fieldEvidenceCount = await tx.fieldEvidence.count({
       where: { entityType: 'contact', entityId: input.subjectId },
     });
@@ -937,6 +959,7 @@ async function locateInTransaction(
       // contactName + companyKey → 写 person-level 禁联键（Codex P1「Add a person-level suppression」）：
       // 擦除后该具名人即便换邮箱/无邮箱再被发现，也命中禁联而不重建。fullName 经 PII 扩展读路径解密为明文。
       suppressionEntries: buildSuppressionEntries({
+        workspaceId: input.workspaceId,
         subjectType: 'contact',
         emails,
         contactName: contact.fullName,
@@ -953,7 +976,16 @@ async function locateInTransaction(
   const contactIds = company.contacts.map((c) => c.id);
   const contactPointsCount = company.contacts.reduce((n, c) => n + c.contactPoints.length, 0);
   const emails = company.contacts.flatMap((c) =>
-    c.contactPoints.filter((p) => p.type === 'email').map((p) => decryptPii(p.value)),
+    c.contactPoints
+      .filter((p) => p.type === 'email')
+      .map((p) =>
+        isEncryptedPii(p.value)
+          ? decryptPii(p.value, {
+              workspaceId: input.workspaceId,
+              purpose: PII_PURPOSE.CONTACT_POINT_VALUE,
+            })
+          : p.value,
+      ),
   );
   const fieldEvidenceCount = contactIds.length
     ? await tx.fieldEvidence.count({
@@ -971,6 +1003,7 @@ async function locateInTransaction(
       affectedIcpIds,
     },
     suppressionEntries: buildSuppressionEntries({
+      workspaceId: input.workspaceId,
       subjectType: 'company',
       emails,
       domain: company.domain,

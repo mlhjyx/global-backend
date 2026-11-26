@@ -32,7 +32,7 @@ import {
   type PatentRefreshScanner,
 } from '../src/adapters/patent-inventor-cache';
 import { MAX_INVENTORS_PER_ASSIGNEE, type RefreshScanResult } from '../src/adapters/bigquery-patents';
-import { decryptPii } from '../src/compliance/pii-crypto';
+import { PII_PURPOSE, decryptPlatformPii } from '../src/compliance/pii-crypto';
 
 for (const line of readFileSync(new URL('../.env', import.meta.url), 'utf8').split('\n')) {
   const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
@@ -152,7 +152,9 @@ async function main() {
   const rB = await refreshPatentCache({ db, bq: scanB });
   ok(rB.status === 'OK' && rB.rowCount === 1, `B：status=OK rowCount=1（实得 ${rB.status}/${rB.rowCount}）`);
   const bRows = await ownerDb.patentInventorCache.findMany({ where: { assigneeNorm: 'codextomb' } });
-  const bNames = bRows.map((r) => decryptPii(r.inventorName)).sort();
+  const bNames = bRows
+    .map((r) => decryptPlatformPii(r.inventorName, { scope: 'patent_inventor_cache', purpose: PII_PURPOSE.PATENT_INVENTOR_NAME }))
+    .sort();
   ok(bNames.length === 1 && bNames[0] === 'SCHMIDT, HANS', `B：只 SCHMIDT 落库，被擦除人（跨拼写 ${ERASED_VARIANT}）不重物化（实得 ${JSON.stringify(bNames)}）`);
   ok(!bRows.some((r) => r.inventorNameKey === inventorBlindKey(ERASED_VARIANT)), 'B：无被擦除盲键落库（跨格式命中墓碑）');
 

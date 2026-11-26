@@ -23,7 +23,11 @@
  * 日志纪律：只打印点 id 与统计，绝不打印邮箱/域明文。
  */
 import type { PrismaClient } from '@prisma/client';
-import { blindContactKey, decryptPii } from '../../compliance/pii-crypto';
+import {
+  blindContactKeyCandidates,
+  decryptPii,
+  PII_PURPOSE,
+} from '../../compliance/pii-crypto';
 import { cleanEmail } from '../../acquisition/clean';
 import {
   emailDomainOfAddress,
@@ -271,8 +275,16 @@ export async function runReverifySweep(input: {
       }));
 
     let email: string;
+    let contactFullName: string;
     try {
-      email = decryptPii(point.value);
+      email = decryptPii(point.value, {
+        workspaceId: point.workspaceId,
+        purpose: PII_PURPOSE.CONTACT_POINT_VALUE,
+      });
+      contactFullName = decryptPii(point.contact.fullName, {
+        workspaceId: point.workspaceId,
+        purpose: PII_PURPOSE.CANONICAL_CONTACT_FULL_NAME,
+      });
     } catch {
       console.warn(`跳过无法解密的点 ${point.id}（密钥/密文不匹配）`);
       summary.errors += 1;
@@ -292,8 +304,14 @@ export async function runReverifySweep(input: {
     ): boolean => {
       const companySuppressed =
         company.status === 'SUPPRESSED' || companyMatchesSuppression(rows, company);
-      const personSuppressed = contactSuppressionKeys(point.contact.fullName, company.dedupeKey)
-        .map((key) => blindContactKey(key).toLowerCase())
+      const personSuppressed = contactSuppressionKeys(contactFullName, company.dedupeKey)
+        .flatMap((key) =>
+          blindContactKeyCandidates(key, {
+            workspaceId: point.workspaceId,
+            purpose: PII_PURPOSE.CONTACT_DEDUPE_KEY,
+          }),
+        )
+        .map((key) => key.toLowerCase())
         .some((key) => sets.contactKeys.has(key));
       return (
         !canonicalEmail ||

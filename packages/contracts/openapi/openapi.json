@@ -5459,7 +5459,7 @@
     },
     "/api/v1/outreach/dnc/suppress": {
       "post": {
-        "description": "规范化邮箱后只存 SHA-256；同一邮箱重复写入幂等。调用方必须已确认退订/投诉事实。",
+        "description": "规范化邮箱后只存带 pepper HMAC-SHA256；同一邮箱重复写入幂等。调用方必须已确认退订/投诉事实。",
         "operationId": "OutreachDncController_suppress_v1",
         "parameters": [],
         "requestBody": {
@@ -16469,7 +16469,7 @@
             "bearer": []
           }
         ],
-        "summary": "查看渠道最近物化的抓取记录（含观察名单状态与计数；PII 按 OWNER-DECISION-2026-11-05 明文存储）",
+        "summary": "查看渠道最近物化的抓取记录（含观察名单状态与计数；联系人 PII 经平台密钥加密存储并在读路径解密）",
         "tags": [
           "Channels"
         ],
@@ -30657,7 +30657,7 @@
         "properties": {
           "email": {
             "type": "string",
-            "description": "需要平台级抑制的收件邮箱（服务端只落 SHA-256，不存明文）",
+            "description": "需要平台级抑制的收件邮箱（服务端只落带 pepper HMAC-SHA256，不存明文）",
             "maxLength": 320
           },
           "reason": {
