@@ -382,48 +382,19 @@ test("heavy Temporal and OCI gates are path-scoped and fail closed", async () =>
   );
 });
 
-test("the Copy recovery rebuild gate rederives both fixed-source artifacts", async () => {
+test("the retired Copy fixed-source impact gate is absent from required CI while trusted checkout stays intact", async () => {
   const ciWorkflow = await readRepositoryFile(".github/workflows/ci.yml");
   const buildJob = jobBlock(ciWorkflow, "build-test-core");
-  const impactStep = namedStepBlock(
-    buildJob,
-    "Evaluate Copy fixed-source impact",
-  );
-  const rebuildStep = namedStepBlock(
-    buildJob,
-    "Copy Sonnet recovery fixed-source rebuild（顺序隔离）",
-  );
 
   assert.match(
     buildJob,
     /- uses: actions\/checkout@[0-9a-f]{40} # v7\n        with:\n          fetch-depth: 0\n          persist-credentials: false/,
-    "the fixed-source ancestry check requires a complete trusted checkout",
+    "build-test-core must keep a complete trusted checkout",
   );
-  assert.match(
-    impactStep,
-    /^      - name: Evaluate Copy fixed-source impact$/m,
-  );
-  assert.match(impactStep, /^        id: copy-impact$/m);
-  assert.match(
-    impactStep,
-    /^        run: node scripts\/copy-fixed-source-impact\.mjs --github-output "\$GITHUB_OUTPUT"$/m,
-  );
-  assert.match(
-    rebuildStep,
-    /^        if: steps\.copy-impact\.outputs\.status == 'CURRENT' && needs\.renderer-visual-scope\.outputs\.run_code != 'false'$/m,
-  );
-  assert.match(
-    rebuildStep,
-    /^          COPY_SONNET_RECOVERY_MANIFEST_REBUILD_TEST=1$/m,
-  );
-  assert.match(rebuildStep, /^          COPY_SONNET_RECOVERY_REBUILD_TEST=1$/m);
-  assert.match(
-    rebuildStep,
-    /^          src\/site-builder\/eval\/copy-sonnet-recovery-manifest-prep\.spec\.ts$/m,
-  );
-  assert.match(
-    rebuildStep,
-    /^          src\/site-builder\/eval\/copy-sonnet-recovery-runtime-binding-prep\.spec\.ts$/m,
+  assert.doesNotMatch(
+    buildJob,
+    /copy-fixed-source-impact\.mjs|Evaluate Copy fixed-source impact|Copy Sonnet recovery fixed-source rebuild/,
+    "retired Copy fixed-source impact and rebuild steps must not run in required CI",
   );
 });
 
@@ -517,7 +488,7 @@ test("the topology suite uses the established governance entry without changing 
   assert.equal(
     repositoryPackage.scripts["governance:test"],
     "node --test scripts/governance-contracts.spec.mjs scripts/governance-path-contracts.spec.mjs",
-    "the Copy fixed-source-bound root package command must remain unchanged",
+    "the root governance:test command must remain unchanged",
   );
   assert.match(
     governanceContractsTest,
@@ -526,25 +497,27 @@ test("the topology suite uses the established governance entry without changing 
   );
 });
 
-test("the Copy impact verifier and receipt remain code-owner controlled", async () => {
+test("retired Copy fixed-source gate rules are removed from CODEOWNERS and required-contexts", async () => {
   const [codeowners, requiredContextsText] = await Promise.all([
     readRepositoryFile(".github/CODEOWNERS"),
     readRepositoryFile(".github/required-contexts.json"),
   ]);
   const requiredContexts = JSON.parse(requiredContextsText);
-  const protectedPatterns = [
+  const retiredPatterns = [
     "/scripts/copy-fixed-source-impact*.mjs",
     "/docs/evidence/site-builder/copy-runtime-eligibility.json",
     "/docs/implementation-records/copy-fixed-source-impact-governance.md",
   ];
-  for (const pattern of protectedPatterns) {
-    const rule = `${pattern} @mlhjyx`;
-    assert.ok(codeowners.split(/\r?\n/u).includes(rule), `missing ${rule}`);
+  for (const pattern of retiredPatterns) {
     assert.ok(
-      requiredContexts.codeowner_requirements.terminal_patterns.includes(
+      !codeowners.split(/\r?\n/u).some((line) => line.startsWith(`${pattern} `)),
+      `retired pattern should be removed from CODEOWNERS: ${pattern}`,
+    );
+    assert.ok(
+      !requiredContexts.codeowner_requirements.terminal_patterns.includes(
         pattern,
       ),
-      `machine CODEOWNERS policy is missing ${pattern}`,
+      `retired pattern should be removed from required-contexts.json: ${pattern}`,
     );
   }
 });
@@ -552,9 +525,9 @@ test("the Copy impact verifier and receipt remain code-owner controlled", async 
 test("the required build emits an exact-SHA runtime attestation after the final API rebuild", async () => {
   const ciWorkflow = await readRepositoryFile(".github/workflows/ci.yml");
   const buildJob = jobBlock(ciWorkflow, "build-test-core");
-  const copyStep = namedStepBlock(
+  const apiBuildStep = namedStepBlock(
     buildJob,
-    "Copy Sonnet recovery fixed-source rebuild（顺序隔离）",
+    "Build（nest build = tsc 全量类型检查）",
   );
   const attestationStep = namedStepBlock(
     buildJob,
@@ -562,8 +535,8 @@ test("the required build emits an exact-SHA runtime attestation after the final 
   );
 
   assert.ok(
-    buildJob.indexOf(attestationStep) > buildJob.indexOf(copyStep),
-    "attestation must bind the final API dist bytes after the Copy rebuild",
+    buildJob.indexOf(attestationStep) > buildJob.indexOf(apiBuildStep),
+    "attestation must bind the final API dist bytes after the API build",
   );
   assert.match(attestationStep, /BUILD_SHA: \$\{\{ github\.sha \}\}/);
   assert.match(attestationStep, /BUILT_AT="\$\(date -u/);
