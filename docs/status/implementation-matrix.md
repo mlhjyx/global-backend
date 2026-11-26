@@ -9,7 +9,7 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | 01 账户与工作空间 | 注册/登录/会话 | APPROVED | gain-saas as-built | 部分 | 运行 | 限流已落库（2026-11-02）；CSRF/cookie Secure 待核 |
 | 01 | 工作空间与成员 | APPROVED | SaaS 一企一空间与受邀成员接入 | 见 SaaS 测试 | 见 SaaS 状态 | [SaaS 账户与工作空间状态](https://github.com/mlhjyx/gain-saas/blob/main/docs/status/current.md) |
-| 01 | 注册引导 | APPROVED | BFF 已放宽部分引导路由，Web 守卫仍会引导未完成的用户 | 见 SaaS 测试 | 见 SaaS 状态 | 历史引导模式见下方 M2 记录 |
+| 01 | 注册引导 | APPROVED | 注册与工作台引导由 SaaS 实现 | 见 SaaS 测试 | [SaaS 现行状态](https://github.com/mlhjyx/gain-saas/blob/main/docs/status/current.md) | 历史引导模式见下方 M2 记录 |
 | 02 卖家知识中心 | 公司档案/Offering/Claim | APPROVED | 引擎 as-built | 中 | 运行 | `targetMarkets`/`businessEmail`/`Offering.source` 已落（#743，2026-11-02 迁移） |
 | 02 | 资料库（上传/解析/检索） | APPROVED | 完整上传与 S3 分片续传、PDF 优先解析与后台补齐 | 模块与 BFF 测试 | 核对两仓部署 | [资料库技术方案](../modules/seller-knowledge/technical.md) |
 | 02 | 文档事实抽取/审批 | APPROVED | as-built（抽取→Claim/Evidence→审批） | 中 | 运行 | 资料消费扩展（Phase 3）本轮冻结 |
