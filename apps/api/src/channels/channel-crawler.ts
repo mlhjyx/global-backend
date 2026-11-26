@@ -6,7 +6,8 @@
  * - 单域限速（默认 1 req/2s）、每轮页数上限、逐页失败计数；失败率由调用方落 source_channel_run 并驱动自动停用。
  */
 import { crawlPageUrls, type ChannelCrawlConfig } from './channel-config';
-import { selectAll, selectInNode, selectText, nodeText } from './html-select';
+import { hostAllowed } from './connector/channel-manifest';
+import { selectAll, selectAllInNode, selectInNode, selectText, nodeText, type HtmlNode } from './html-select';
 
 export interface CrawledPage {
   url: string;
@@ -24,6 +25,8 @@ export interface CrawlRunOptions {
   maxItemsPerPage?: number;
   /** 每页最多打开的详情页数（默认 20）。 */
   sleep?: (ms: number) => Promise<void>;
+  /** Stored manifest hosts. Legacy channel configs have no manifest host list. */
+  allowedHosts?: readonly string[];
 }
 
 export interface CrawledRecord {
@@ -54,6 +57,13 @@ export interface CrawlRunResult {
 }
 
 const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+function manifestAllowsUrl(raw: string, allowedHosts: readonly string[] | undefined): boolean {
+  if (!allowedHosts) return true;
+  const url = URL.parse(raw);
+  return Boolean(url && url.protocol === 'https:' && !url.port && !url.username && !url.password &&
+    hostAllowed(url.hostname, allowedHosts));
+}
 
 function absolutize(href: string | null, base: string): string | null {
   if (!href) return null;
@@ -96,6 +106,46 @@ function listValues(html: string, selector: string): string[] | undefined {
   return values.length > 0 ? values : undefined;
 }
 
+function listValuesInNode(item: HtmlNode, selector: string): string[] | undefined {
+  const values = selectAllInNode(item, selector)
+    .map((node) => nodeText(node))
+    .filter((text) => text.length > 0)
+    .slice(0, 20);
+  return values.length > 0 ? values : undefined;
+}
+
+function extractCardFields(
+  item: HtmlNode,
+  detailHtml: string | null,
+  fields: Record<string, string>,
+  recordUrl: string,
+): CrawledRecord | null {
+  const readText = (selector?: string): string | null => {
+    if (!selector) return null;
+    return detailHtml !== null ? selectText(detailHtml, selector) : selectInNode(item, selector);
+  };
+  const readList = (selector?: string): string[] | undefined => {
+    if (!selector) return undefined;
+    return detailHtml !== null ? listValues(detailHtml, selector) : listValuesInNode(item, selector);
+  };
+  const name = readText(fields.name) ?? (detailHtml !== null ? null : nodeText(item));
+  if (!name || name.length < 2) return null;
+  const website = normalizeWebsite(readText(fields.website));
+  const country = readText(fields.country);
+  const industry = readText(fields.industry);
+  const products = readList(fields.products);
+  const keywords = readList(fields.keywords);
+  return {
+    name: name.slice(0, 300),
+    sourceUrl: recordUrl,
+    ...(website ? { website } : {}),
+    ...(country ? { country: country.slice(0, 100) } : {}),
+    ...(industry ? { industry: industry.slice(0, 200) } : {}),
+    ...(products ? { products } : {}),
+    ...(keywords ? { keywords } : {}),
+  };
+}
+
 export async function crawlChannel(
   config: ChannelCrawlConfig,
   fetchPage: CrawlPageFetcher,
@@ -111,11 +161,13 @@ export async function crawlChannel(
   let pageFailures = 0;
   let firstFetch = true;
   const fetchOnce = async (url: string): Promise<CrawledPage | null> => {
+    if (!manifestAllowsUrl(url, options.allowedHosts)) return null;
     if (!firstFetch && delayMs > 0) await sleep(delayMs);
     firstFetch = false;
     pagesFetched += 1;
     try {
-      return await fetchPage(url);
+      const page = await fetchPage(url);
+      return page && manifestAllowsUrl(page.url, options.allowedHosts) ? page : null;
     } catch {
       pageFailures += 1;
       return null;
@@ -131,41 +183,25 @@ export async function crawlChannel(
 
     for (const [index, item] of items.entries()) {
       // 详情页打开前检查页数预算：达到上限立即停止本轮（列表页已计入）。
+      const listEvidenceUrl = options.allowedHosts ? page.url : listUrl;
       const itemHref = config.list.itemUrlSelector
-        ? absolutize(selectInNode(item, config.list.itemUrlSelector), listUrl)
+        ? absolutize(selectInNode(item, config.list.itemUrlSelector), listEvidenceUrl)
         : null;
       let detailHtml: string | null = null;
-      let recordUrl = listUrl;
+      let recordUrl = listEvidenceUrl;
       void index;
-      if (config.detail.enabled && itemHref && pagesFetched < options.pageCap) {
+      if (config.detail.enabled && itemHref && manifestAllowsUrl(itemHref, options.allowedHosts) && pagesFetched < options.pageCap) {
         const detail = await fetchOnce(itemHref);
         if (!detail) continue;
         detailHtml = detail.html;
-        recordUrl = itemHref;
+        recordUrl = options.allowedHosts ? detail.url : itemHref;
       }
-      const html = detailHtml ?? page.html;
+      const base = extractCardFields(item, detailHtml, config.detail.fields, recordUrl);
+      if (!base) continue;
       const fields = config.detail.fields;
-      const name = (fields.name ? selectText(html, fields.name) : null) ?? (detailHtml ? null : nodeText(item));
-      if (!name || name.length < 2) continue;
-      const websiteRaw = fields.website ? selectText(html, fields.website) : null;
       const record: CrawledRecord = {
-        name: name.slice(0, 300),
-        sourceUrl: recordUrl,
-        ...(normalizeWebsite(websiteRaw) ? { website: normalizeWebsite(websiteRaw) } : {}),
-        ...(fields.country && selectText(html, fields.country)
-          ? { country: selectText(html, fields.country)!.slice(0, 100) }
-          : {}),
-        ...(fields.industry && selectText(html, fields.industry)
-          ? { industry: selectText(html, fields.industry)!.slice(0, 200) }
-          : {}),
-        ...(fields.products && listValues(html, fields.products)
-          ? { products: listValues(html, fields.products) }
-          : {}),
-        ...(fields.keywords && listValues(html, fields.keywords)
-          ? { keywords: listValues(html, fields.keywords) }
-          : {}),
-        // 联系人字段（PII）双保险：只从详情页 HTML 抽取——列表页回退时 detail.fields
-        // 选择器作用于整张列表页，会把同一值复制给整页条目（配置校验已拦截，这里再兜一层）。
+        ...base,
+        // 联系人字段（PII）双保险：只从详情页 HTML 抽取——列表页回退绝不抽取联系人字段。
         ...(detailHtml && fields.contactName && selectText(detailHtml, fields.contactName)
           ? { contactName: selectText(detailHtml, fields.contactName)!.slice(0, 200) }
           : {}),

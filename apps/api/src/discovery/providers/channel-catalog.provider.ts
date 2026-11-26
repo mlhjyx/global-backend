@@ -2,13 +2,12 @@
  * channel_catalog 发现适配器（Batch 1.4-B；local_query 零出网血缘变体）：
  *
  * 与 `RegistryFrameDiscoveryProvider` 同构：零出网、零成本，从平台表 `source_channel_record`
- * 读取已审核（APPROVED）且所属渠道已启用（ENABLED）的企业记录，按国家与行业/关键词
+ * 读取启用渠道（ENABLED）的 APPROVED/PENDING 企业记录，按国家与行业/关键词
  * 确定性过滤并构造 `channel_catalog.query` 确定性回执。
  *
  * 双重开关：
- *  - 第一道：`CHANNEL_CATALOG_PROVIDER=on` 时声明 `discovery-company-result-lineage/v1`；
- *    默认 off（与 `REGISTRY_FRAME_PROVIDER` / `COMPANIES_HOUSE_REGISTRY_PROVIDER` 同约定）；
- *  - 第二道：`data_provider.channel_catalog` 状态（seed 默认 DISABLED）。
+ *  - 第一道：默认开启并声明 `discovery-company-result-lineage/v1`；设 `CHANNEL_CATALOG_PROVIDER=off` 可紧急关停；
+ *  - 第二道：`data_provider.channel_catalog` 状态（seed 默认 ENABLED）。
  */
 import type { PrismaClient } from '@prisma/client';
 import {

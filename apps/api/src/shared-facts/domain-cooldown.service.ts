@@ -190,6 +190,13 @@ function clampWindowDays(raw: number | undefined): number {
   return Math.min(90, Math.max(1, value));
 }
 
+export function normalizeCooldownCategory(raw: string | null | undefined): string | null {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim().toLowerCase();
+  if (!trimmed) return null;
+  return trimmed.slice(0, 64);
+}
+
 function emptyAdvisory(degraded = false): DomainCooldownStatus {
   return degraded
     ? { cooledDown: false, distinctWorkspaces30d: 0, retryAfterDays: 0, advisoryOnly: true, degraded: true }
@@ -228,26 +235,36 @@ export class DomainCooldownService {
     return this.pepper !== null;
   }
 
-  computeDomainHmac(normalizedDomain: string): string {
+  computeDomainHmac(normalizedDomain: string, category?: string | null): string {
     if (!this.pepper) {
       throw new Error('ADR003_COOLDOWN_PEPPER_NOT_CONFIGURED');
     }
+    const cat = normalizeCooldownCategory(category);
+    const payload = cat ? `domain:${normalizedDomain}:cat:${cat}` : `domain:${normalizedDomain}`;
     return createHmac('sha256', this.pepper)
-      .update(`domain:${normalizedDomain}`, 'utf8')
+      .update(payload, 'utf8')
       .digest('hex');
   }
 
-  computeWorkspaceTouchMember(normalizedDomain: string, workspaceId: string): string {
+  computeWorkspaceTouchMember(
+    normalizedDomain: string,
+    workspaceId: string,
+    category?: string | null,
+  ): string {
     if (!this.pepper) {
       throw new Error('ADR003_COOLDOWN_PEPPER_NOT_CONFIGURED');
     }
+    const cat = normalizeCooldownCategory(category);
+    const payload = cat
+      ? `ws-touch:${normalizedDomain}:cat:${cat}:${workspaceId}`
+      : `ws-touch:${normalizedDomain}:${workspaceId}`;
     return createHmac('sha256', this.pepper)
-      .update(`ws-touch:${normalizedDomain}:${workspaceId}`, 'utf8')
+      .update(payload, 'utf8')
       .digest('hex');
   }
 
-  cooldownRedisKey(normalizedDomain: string): string {
-    return `${DOMAIN_COOLDOWN_REDIS_PREFIX}${this.computeDomainHmac(normalizedDomain)}}`;
+  cooldownRedisKey(normalizedDomain: string, category?: string | null): string {
+    return `${DOMAIN_COOLDOWN_REDIS_PREFIX}${this.computeDomainHmac(normalizedDomain, category)}}`;
   }
 
   private toStatus(snapshot: CooldownWindowSnapshot, nowMs: number, degraded: boolean): DomainCooldownStatus {
@@ -275,7 +292,7 @@ export class DomainCooldownService {
 
   async checkCooldown(
     rawDomain: string | null | undefined,
-    opts: { nowMs?: number } = {},
+    opts: { nowMs?: number; category?: string | null } = {},
   ): Promise<DomainCooldownStatus> {
     if (!this.pepper) return emptyAdvisory(true);
     const domain = normalizeCompanyDomain(rawDomain);
@@ -283,7 +300,7 @@ export class DomainCooldownService {
 
     const nowMs = opts.nowMs ?? Date.now();
     const windowStartMs = nowMs - this.windowMs;
-    const key = this.cooldownRedisKey(domain);
+    const key = this.cooldownRedisKey(domain, opts.category);
     try {
       const snapshot = await this.backend.pruneAndInspect(key, windowStartMs, this.threshold);
       return this.toStatus(snapshot, nowMs, false);
@@ -304,7 +321,7 @@ export class DomainCooldownService {
   async recordTouch(
     rawDomain: string | null | undefined,
     workspaceId: string,
-    opts: { nowMs?: number } = {},
+    opts: { nowMs?: number; category?: string | null } = {},
   ): Promise<DomainCooldownStatus> {
     if (!this.pepper) return emptyAdvisory(true);
     const domain = normalizeCompanyDomain(rawDomain);
@@ -312,8 +329,8 @@ export class DomainCooldownService {
     if (!domain || !ws) return emptyAdvisory(false);
 
     const nowMs = opts.nowMs ?? Date.now();
-    const key = this.cooldownRedisKey(domain);
-    const member = this.computeWorkspaceTouchMember(domain, ws);
+    const key = this.cooldownRedisKey(domain, opts.category);
+    const member = this.computeWorkspaceTouchMember(domain, ws, opts.category);
     try {
       const snapshot = await this.backend.recordAndInspect(
         key,

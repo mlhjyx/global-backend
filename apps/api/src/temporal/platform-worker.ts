@@ -56,6 +56,7 @@ import { createChannelCrawlActivities } from "./channel-crawl.activities";
 import { recordChannelRunInTransaction } from "../channels/channel-run-recorder";
 import { materializeChannelRecords } from "../channels/channel-records";
 import { createPrismaChannelRecordWriter } from "../channels/channel-records.prisma";
+import { projectApprovedChannelGreenFacts } from "../channels/channel-platform-writer";
 import {
   buildToolBroker,
   sourcePolicyReaderFrom,
@@ -335,8 +336,20 @@ async function main(): Promise<void> {
         materializeRecords:
           (process.env.CHANNEL_CRAWL_MATERIALIZE ?? "").trim() === "off"
             ? async () => 0
-            : (input) =>
-                materializeChannelRecords(createPrismaChannelRecordWriter(writer), input),
+            : async (input) => {
+                const count = await materializeChannelRecords(
+                  createPrismaChannelRecordWriter(writer),
+                  input,
+                );
+                if (count > 0) {
+                  await projectApprovedChannelGreenFacts({
+                    platformWriter: writer,
+                    channelId: input.channelId,
+                    crawlRunId: input.crawlRunId,
+                  });
+                }
+                return count;
+              },
       }),
     },
   });

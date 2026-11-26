@@ -142,4 +142,69 @@ describe('M1 配置驱动通用爬虫 v0', () => {
     const result = await crawlChannel(degraded as never, fetchPage, { pageCap: 1, perRequestDelayMs: 0, sleep: async () => {} });
     expect(result.records[0]!.email).toBeUndefined();
   });
+
+  it('scopes list-only field extraction per item node (never leaks across cards) and supports singlePage=true', async () => {
+    const singlePageConfig = parseChannelConfig('crawl', {
+      list: {
+        url: 'https://expo.example/all-exhibitors',
+        singlePage: true,
+        maxPages: 1,
+        itemSelector: 'div.ex-body',
+      },
+      detail: {
+        enabled: false,
+        fields: {
+          name: '.company',
+          website: 'a.web::attr(href)',
+          country: '.country',
+          industry: '.ind',
+          products: '.prod li',
+          keywords: '.kw',
+        },
+      },
+    });
+    expect(crawlPageUrls(singlePageConfig as never, 10)).toEqual([
+      'https://expo.example/all-exhibitors',
+    ]);
+
+    const fetchPage = fetcher({
+      'https://expo.example/all-exhibitors': `
+        <div class="ex-body">
+          <span class="company">Alpha Co</span>
+          <a class="web" href="https://alpha.example">web</a>
+          <span class="country">Italy</span>
+          <span class="ind">Solar</span>
+          <ul class="prod"><li>HJT Module</li></ul>
+          <span class="kw">PV</span>
+        </div>
+        <div class="ex-body">
+          <span class="company">Beta Co</span>
+          <span class="country">Germany</span>
+          <span class="ind">Storage</span>
+        </div>
+      `,
+    });
+    const result = await crawlChannel(singlePageConfig as never, fetchPage, {
+      pageCap: 5,
+      perRequestDelayMs: 0,
+      sleep: async () => {},
+    });
+    expect(result.records).toHaveLength(2);
+    expect(result.records[0]).toMatchObject({
+      name: 'Alpha Co',
+      website: 'https://alpha.example/',
+      country: 'Italy',
+      industry: 'Solar',
+      products: ['HJT Module'],
+      keywords: ['PV'],
+    });
+    expect(result.records[1]).toMatchObject({
+      name: 'Beta Co',
+      country: 'Germany',
+      industry: 'Storage',
+    });
+    expect(result.records[1]!.website).toBeUndefined();
+    expect(result.records[1]!.products).toBeUndefined();
+    expect(result.records[1]!.keywords).toBeUndefined();
+  });
 });

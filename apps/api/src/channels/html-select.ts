@@ -167,19 +167,25 @@ function matches(node: HtmlNode, compound: Compound): boolean {
 }
 
 /**
+ * 在某个节点子树内取全部匹配节点（用于列表条目内部的标签/列表值提取）。
+ */
+export function selectAllInNode(node: HtmlNode, selector: string): HtmlNode[] {
+  const [base, extractor] = selector.split('::') as [string, string | undefined];
+  const steps = parseSelector(base);
+  if (steps.length === 0) return [];
+  const matched = matchDescendants(node, steps, steps.length - 1);
+  if (!extractor || extractor === 'text') return matched;
+  const attr = /^attr\(([^)]+)\)$/u.exec(extractor);
+  if (!attr) return [];
+  return matched.filter((entry) => attr[1]!.toLowerCase() in entry.attrs);
+}
+
+/**
  * 取匹配节点的内部 HTML 文本与属性值。`selector` 可带 `::attr(name)` / `::text` 后缀。
  * 解析失败/无匹配 → 空数组。
  */
 export function selectAll(html: string, selector: string): HtmlNode[] {
-  const [base, extractor] = selector.split('::') as [string, string | undefined];
-  const steps = parseSelector(base);
-  if (steps.length === 0) return [];
-  const root = parseHtml(html);
-  const matched = matchDescendants(root, steps, steps.length - 1);
-  if (!extractor || extractor === 'text') return matched;
-  const attr = /^attr\(([^)]+)\)$/u.exec(extractor);
-  if (!attr) return [];
-  return matched.filter((node) => attr[1]!.toLowerCase() in node.attrs);
+  return selectAllInNode(parseHtml(html), selector);
 }
 
 /** 从右到左匹配后代组合（正确语义：最右步命中节点，逐级在祖先链上匹配左一步）。 */

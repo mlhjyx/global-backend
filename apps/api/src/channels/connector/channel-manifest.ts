@@ -86,6 +86,49 @@ export function hostAllowed(host: string, allowedHosts: readonly string[]): bool
   return allowedHosts.some((pattern) => hostMatches(host, pattern));
 }
 
+function validateCrawlManifest(
+  manifest: ChannelManifestDocument,
+  issues: ChannelManifestIssue[],
+): void {
+  if (!manifest.crawl) return;
+  if (manifest.crawl.list.url !== undefined) {
+    let parsed: URL | null = null;
+    try {
+      parsed = new URL(manifest.crawl.list.url.replace('{page}', '1'));
+    } catch {
+      issues.push({ path: '/crawl/list/url', message: 'crawl.list.url must be a valid https URL' });
+    }
+    if (parsed) {
+      if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.hash) {
+        issues.push({
+          path: '/crawl/list/url',
+          message: 'crawl.list.url must use https without credentials or fragments',
+        });
+      } else if (!hostAllowed(parsed.hostname, manifest.transport.allowedHosts ?? [])) {
+        issues.push({
+          path: '/crawl/list/url',
+          message: `crawl.list.url host ${parsed.hostname} must be covered by allowedHosts`,
+        });
+      }
+    }
+  }
+  const fields = manifest.crawl.detail?.fields ?? {};
+  for (const key of Object.keys(fields)) {
+    if (!(CHANNEL_MANIFEST_FIELD_KEYS as readonly string[]).includes(key)) {
+      issues.push({ path: `/crawl/detail/fields/${key}`, message: 'unknown channel field' });
+    }
+  }
+  const usesContact = Object.keys(fields).some((key) =>
+    (CHANNEL_MANIFEST_CONTACT_FIELD_KEYS as readonly string[]).includes(key),
+  );
+  if (usesContact && (manifest.crawl.detail?.enabled !== true || !manifest.crawl.list.itemUrlSelector)) {
+    issues.push({
+      path: '/crawl/detail/fields',
+      message: 'contact fields require crawl.detail.enabled=true and crawl.list.itemUrlSelector (detail-page mode)',
+    });
+  }
+}
+
 /** 语义校验 + 默认值：返回归一化后的 manifest（auth/pagination 空值显式化）。 */
 export function parseChannelManifest(raw: unknown): ChannelManifestDocument {
   if (!validateSchema(raw)) {
@@ -201,22 +244,7 @@ export function parseChannelManifest(raw: unknown): ChannelManifestDocument {
     }
   }
 
-  if (manifest.crawl) {
-    for (const key of Object.keys(manifest.crawl.detail?.fields ?? {})) {
-      if (!(CHANNEL_MANIFEST_FIELD_KEYS as readonly string[]).includes(key)) {
-        issues.push({ path: `/crawl/detail/fields/${key}`, message: 'unknown channel field' });
-      }
-    }
-    const usesContact = Object.keys(manifest.crawl.detail?.fields ?? {}).some((key) =>
-      (CHANNEL_MANIFEST_CONTACT_FIELD_KEYS as readonly string[]).includes(key),
-    );
-    if (usesContact && (manifest.crawl.detail?.enabled !== true || !manifest.crawl.list.itemUrlSelector)) {
-      issues.push({
-        path: '/crawl/detail/fields',
-        message: 'contact fields require crawl.detail.enabled=true and crawl.list.itemUrlSelector (detail-page mode)',
-      });
-    }
-  }
+  validateCrawlManifest(manifest, issues);
 
   if (issues.length > 0) throw new ChannelManifestError(issues);
   return manifest;

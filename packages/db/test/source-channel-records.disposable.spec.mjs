@@ -14,12 +14,15 @@ function client(url) {
   return new PrismaClient({ datasources: { db: { url } } });
 }
 
+const createdChannelIds = new Set();
+
 async function createChannel(db) {
   const id = randomUUID();
   await db.$executeRaw`
     INSERT INTO "source_channel" ("id", "name", "mode", "category", "status", "config", "updated_at")
     VALUES (${id}::uuid, ${`records-spec-${id.slice(0, 8)}`}, 'crawl', 'trade_fair', 'ENABLED', '{}'::jsonb, now())
   `;
+  createdChannelIds.add(id);
   return id;
 }
 
@@ -60,7 +63,16 @@ describe("source_channel_record (物化记录池)", () => {
     await db.$queryRaw`SELECT 1`;
   });
   after(async () => {
-    await db?.$disconnect();
+    try {
+      if (db) {
+        for (const id of createdChannelIds) {
+          await db.$executeRaw`DELETE FROM "source_channel" WHERE "id" = ${id}::uuid`;
+        }
+      }
+    } finally {
+      createdChannelIds.clear();
+      await db?.$disconnect();
+    }
   });
 
   it("upserts on (channel_id, dedupe_key): 重跑同键更新 last_seen 而不新增行", async () => {

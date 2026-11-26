@@ -11,6 +11,13 @@ const ACC = '33333333-3333-4333-8333-333333333333';
 const CH_ID = '44444444-4444-4444-8444-444444444444';
 const REC_ID = '55555555-5555-4555-8555-555555555555';
 
+function mockCatalogDb(findMany: ReturnType<typeof vi.fn>, channelIds = [CH_ID]) {
+  return {
+    sourceChannel: { findMany: vi.fn(async () => channelIds.map((id) => ({ id }))) },
+    sourceChannelRecord: { findMany },
+  } as never;
+}
+
 describe('ChannelCatalogDiscoveryProvider (本地已审渠道库 zero-egress)', () => {
   it('按国家与关键词过滤 APPROVED 记录，生成确定性 local_query 回执且通过 Raw 载荷校验', async () => {
     const findMany = vi.fn(async () => [
@@ -47,7 +54,7 @@ describe('ChannelCatalogDiscoveryProvider (本地已审渠道库 zero-egress)', 
     ]);
     const onDurableReceipt = vi.fn();
     const provider = new ChannelCatalogDiscoveryProvider({
-      prisma: { sourceChannelRecord: { findMany } } as never,
+      prisma: mockCatalogDb(findMany),
       lineageEnabled: true,
     });
     const res = await provider.discoverCompanies(
@@ -78,7 +85,7 @@ describe('ChannelCatalogDiscoveryProvider (本地已审渠道库 zero-egress)', 
     expect(prodAccountKey.length).toBe(129);
     const onDurableReceipt = vi.fn();
     const provider = new ChannelCatalogDiscoveryProvider({
-      prisma: { sourceChannelRecord: { findMany: vi.fn(async () => []) } } as never,
+      prisma: mockCatalogDb(vi.fn(async () => [])),
       lineageEnabled: true,
     });
     const res = await provider.discoverCompanies(
@@ -142,7 +149,7 @@ describe('ChannelCatalogDiscoveryProvider (本地已审渠道库 zero-egress)', 
       },
     ]);
     const provider = new ChannelCatalogDiscoveryProvider({
-      prisma: { sourceChannelRecord: { findMany } } as never,
+      prisma: mockCatalogDb(findMany),
       lineageEnabled: true,
     });
     const res = await provider.discoverCompanies(
@@ -153,11 +160,76 @@ describe('ChannelCatalogDiscoveryProvider (本地已审渠道库 zero-egress)', 
     expect(res.records).toHaveLength(1);
     expect(findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: {
-          reviewStatus: { in: ['APPROVED', 'PENDING'] },
+        where: expect.objectContaining({
+          reviewStatus: 'PENDING',
           channel: { status: 'ENABLED' },
-        },
+        }),
       }),
     );
+  });
+
+  it('synthesizes deterministic SHA-256 contentHash when DB contentHash is null and prevents channel starvation', async () => {
+    const CH_A = '44444444-4444-4444-8444-444444444441';
+    const CH_B = '44444444-4444-4444-8444-444444444442';
+    const propakRows = Array.from({ length: 50 }, (_, idx) => ({
+      id: `aaaaaaaa-aaaa-4aaa-8aaa-${String(idx).padStart(12, '0')}`,
+      channelId: CH_A,
+      dedupeKey: `n:propak-${idx}`,
+      name: `ProPak Co ${idx}`,
+      website: null,
+      country: null,
+      industry: 'packaging',
+      products: ['packaging'],
+      keywords: [],
+      sourceUrl: 'https://www.propakasia.com/ppka/2026/en/list_participants.asp',
+      contentHash: null,
+      lastSeenAt: new Date('2026-11-25T00:00:00.000Z'),
+      channel: { name: 'ProPak Asia 2026', category: 'trade_fair', license: 'public' },
+    }));
+    const keyRow = {
+      id: REC_ID,
+      channelId: CH_B,
+      reviewStatus: 'APPROVED',
+      dedupeKey: 'domain:solar-it.it',
+      name: 'Solar Italia S.r.l.',
+      website: 'https://solar-it.it',
+      country: 'IT',
+      industry: 'photovoltaic',
+      products: ['HJT solar module'],
+      keywords: ['solar'],
+      sourceUrl: 'https://www.key-expo.com/exhibitors/solar-it',
+      contentHash: null,
+      lastSeenAt: new Date('2026-11-26T00:00:00.000Z'),
+      channel: { name: 'KEY - The Energy Transition Expo (Rimini)', category: 'trade_fair', license: 'public' },
+    };
+
+    const pendingDuplicate = {
+      ...keyRow,
+      channelId: CH_A,
+      reviewStatus: 'PENDING',
+      name: 'Pending Solar Website Match',
+    };
+    const findChannelRecords = vi.fn(async ({ where }: { where: { channelId: string; reviewStatus: string } }) => {
+      if (where.channelId === CH_A) return where.reviewStatus === 'PENDING' ? [pendingDuplicate, ...propakRows] : [];
+      return where.reviewStatus === 'APPROVED' ? [keyRow] : [];
+    });
+    const provider = new ChannelCatalogDiscoveryProvider({
+      prisma: mockCatalogDb(findChannelRecords, [CH_A, CH_B]),
+      lineageEnabled: true,
+    });
+
+    const res = await provider.discoverCompanies(
+      { sourceClass: 'industry_data', filters: { country: 'IT', industry: 'photovoltaic' }, keywords: ['solar'], limit: 5 },
+      { workspaceId: WS, runId: RUN, durableBudgetAuthority: { authorityId: AUTH, accountId: ACC }, onDurableReceipt: vi.fn() },
+    );
+
+    expect(res.records).toHaveLength(1);
+    expect(res.records[0]?.domain).toBe('solar-it.it');
+    expect(res.records[0]?.name).toBe('Solar Italia S.r.l.');
+    expect(findChannelRecords).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ channel: { status: 'ENABLED' } }),
+    }));
+    expect(res.records[0]?.provenance?.contentHash).toMatch(/^[0-9a-f]{64}$/u);
+    expect(validateRawSourceProviderPayload('channel_catalog', res.records[0]).ok).toBe(true);
   });
 });

@@ -197,4 +197,40 @@ describe('DomainCooldownService (30-day HMAC cross-tenant collision cooldown)', 
       degraded: true,
     });
   });
+
+  it('scopes cooldown collisions by optional category while preserving domain-wide default when omitted', async () => {
+    const service = new DomainCooldownService({
+      pepper: TEST_PEPPER,
+      maxDistinctWorkspaces30d: 2,
+    });
+    const t0 = Date.parse('2026-11-26T00:00:00.000Z');
+
+    // Same category accumulates toward threshold
+    await service.recordTouch('multi-vertical.de', 'ws-1', { nowMs: t0, category: ' Solar_PV ' });
+    const solarSecond = await service.recordTouch('multi-vertical.de', 'ws-2', {
+      nowMs: t0 + 1_000,
+      category: 'solar_pv',
+    });
+    expect(solarSecond.cooledDown).toBe(true);
+    expect(solarSecond.distinctWorkspaces30d).toBe(2);
+
+    // Different category is isolated (30-day same-category anti-collision lock)
+    const packagingCheck = await service.checkCooldown('multi-vertical.de', {
+      nowMs: t0 + 2_000,
+      category: 'packaging',
+    });
+    expect(packagingCheck.cooledDown).toBe(false);
+    expect(packagingCheck.distinctWorkspaces30d).toBe(0);
+
+    // Omitting category stays identical to legacy domain-only HMAC
+    expect(service.computeDomainHmac('multi-vertical.de', undefined)).toBe(
+      service.computeDomainHmac('multi-vertical.de'),
+    );
+    expect(service.computeDomainHmac('multi-vertical.de', '   ')).toBe(
+      service.computeDomainHmac('multi-vertical.de'),
+    );
+    expect(service.computeDomainHmac('multi-vertical.de', 'solar_pv')).not.toBe(
+      service.computeDomainHmac('multi-vertical.de'),
+    );
+  });
 });
