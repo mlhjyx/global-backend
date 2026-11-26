@@ -24,11 +24,18 @@ import {
   extractCompanyWebsiteStreaming,
   type StreamingCompanyExtraction,
 } from '../discovery/streaming/raw-http-extractor';
+import {
+  createSharedFactsHookFromEnv,
+  normalizeCompanyDomain,
+  type L0DomainAdvisory,
+  type SharedFactsStreamingHook,
+} from '../discovery/streaming/shared-facts-hook';
 import { judgeCompanyFitV3 } from '../discovery/streaming/fit-v3';
 import {
   createInitialStreamingProgress,
   readStreamingRunProgress,
   upsertStreamingCandidate,
+  type StreamingCandidateSnapshot,
   type StreamingRunProgressSnapshot,
 } from '../discovery/streaming/streaming-progress';
 import type { DiscoveryRunFailure } from './discovery.run-failure';
@@ -50,6 +57,8 @@ export interface StreamingL1CompanyResult {
   readonly usedWwwRetry: boolean;
   readonly pdfSkipped: boolean;
   readonly channelsCount: number;
+  readonly sharedFactHit?: boolean;
+  readonly cooldownFlagged?: boolean;
 }
 
 export interface StreamingFinalizeSummary {
@@ -156,6 +165,162 @@ function isLinkedinCompanyUrl(rawUrl: string): boolean {
 
 function isXAccountUrl(rawUrl: string): boolean {
   return Boolean(hostMatchesDomain(rawUrl, 'x.com') ?? hostMatchesDomain(rawUrl, 'twitter.com'));
+}
+
+const PRIVATE_IMPORT_ORIGINS = new Set([
+  'imported_buyer',
+  'imported-buyer',
+  'tenant_import',
+  'tenant-import',
+  'csv_import',
+  'csv-import',
+  'crm_import',
+  'crm-import',
+  'manual_import',
+  'private_upload',
+  'customer_list',
+]);
+
+function isPrivateImportOriginTag(value: unknown): boolean {
+  if (typeof value !== 'string') return false;
+  const lower = value.trim().toLowerCase();
+  return (
+    PRIVATE_IMPORT_ORIGINS.has(lower) ||
+    lower.startsWith('import:') ||
+    lower.startsWith('imported_') ||
+    lower.startsWith('imported-')
+  );
+}
+
+async function detectImportedBuyerInTx(
+  tx: Prisma.TransactionClient,
+  companyId: string,
+  attributes: unknown,
+): Promise<boolean> {
+  if (isPlainRecord(attributes)) {
+    const origin = attributes.origin ?? attributes.source ?? attributes.sourceKind;
+    if (
+      attributes.imported_buyer === true ||
+      attributes.isImportedBuyer === true ||
+      (typeof attributes.importBatchId === 'string' && attributes.importBatchId.trim().length > 0) ||
+      isPrivateImportOriginTag(origin)
+    ) {
+      return true;
+    }
+  }
+  const txAny = tx as unknown as {
+    importedBuyer?: { findFirst?: (args: unknown) => Promise<unknown> };
+    companyChannelSighting?: { findFirst?: (args: unknown) => Promise<unknown> };
+  };
+  if (typeof txAny.importedBuyer?.findFirst === 'function') {
+    const importedRow = await txAny.importedBuyer.findFirst({
+      where: { canonicalCompanyId: companyId },
+      select: { id: true },
+    });
+    if (importedRow) return true;
+  }
+  if (typeof txAny.companyChannelSighting?.findFirst === 'function') {
+    const importSighting = await txAny.companyChannelSighting.findFirst({
+      where: { companyId, externalRef: { startsWith: 'import:' } },
+      select: { id: true },
+    });
+    if (importSighting) return true;
+  }
+  return false;
+}
+
+function buildL0CandidateSnapshot(
+  company: { id: string; name: string; domain: string | null; country: string | null },
+  advisory: L0DomainAdvisory | undefined,
+  now: string,
+): StreamingCandidateSnapshot {
+  const cooledDown = Boolean(advisory?.cooldown.cooledDown);
+  return {
+    companyId: company.id,
+    name: company.name,
+    domain: company.domain,
+    country: company.country,
+    stage: 'l0_recalled',
+    fitVerdict: null,
+    fitScore: null,
+    fetchMethod: null,
+    channelsFound: { emails: 0, phones: 0, forms: 0, socials: 0 },
+    ...(cooledDown
+      ? { cooldownFlagged: true, cooldownRetryAfterDays: advisory!.cooldown.retryAfterDays }
+      : {}),
+    reasonSummary: null,
+    updatedAt: now,
+  };
+}
+
+async function resolveL1ExtractionWithSharedFacts(input: {
+  sharedFacts: SharedFactsStreamingHook;
+  broker: ExecutionBroker;
+  prisma: PrismaService;
+  workspaceId: string;
+  companyId: string;
+  runAccountKey: string;
+  company: {
+    name: string;
+    domain: string | null;
+    country: string | null;
+    attributes: unknown;
+  };
+  isImportedBuyer: boolean;
+}): Promise<{
+  extraction: StreamingCompanyExtraction | null;
+  sharedFactHit: boolean;
+  cooldownFlagged: boolean;
+  cooldownRetryAfterDays: number | null;
+}> {
+  const preFetch = await input.sharedFacts.lookupL1PreFetch({
+    domain: input.company.domain,
+  });
+  const cooldownFlagged = preFetch.cooldown.cooledDown;
+  const cooldownRetryAfterDays = cooldownFlagged ? preFetch.cooldown.retryAfterDays : null;
+
+  if (preFetch.hit && preFetch.syntheticExtraction) {
+    return {
+      extraction: preFetch.syntheticExtraction,
+      sharedFactHit: true,
+      cooldownFlagged,
+      cooldownRetryAfterDays,
+    };
+  }
+
+  let extraction: StreamingCompanyExtraction | null = null;
+  if (input.company.domain) {
+    extraction = await extractCompanyWebsiteStreaming({
+      broker: input.broker,
+      workspaceId: input.workspaceId,
+      companyId: input.companyId,
+      runId: input.runAccountKey,
+      domain: input.company.domain,
+      authorizeExternalAction: () =>
+        input.prisma.withWorkspace(input.workspaceId, (tx) =>
+          companyMayUseExternalProcessing(tx, input.workspaceId, input.companyId),
+        ),
+    });
+    if (extraction.pagesFetched.length > 0) {
+      await input.sharedFacts.writeBackFromStreamingExtraction({
+        domain: input.company.domain,
+        legalName: input.company.name,
+        country: input.company.country,
+        extraction,
+        isImportedBuyer: input.isImportedBuyer,
+        companyAttributes: isPlainRecord(input.company.attributes)
+          ? input.company.attributes
+          : null,
+      });
+    }
+  }
+
+  return {
+    extraction,
+    sharedFactHit: false,
+    cooldownFlagged,
+    cooldownRetryAfterDays,
+  };
 }
 
 async function persistExtractionFacts(
@@ -267,10 +432,12 @@ export function createStreamingDiscoveryActivities(deps: {
   broker: ExecutionBroker;
   runtimeTelemetry?: RuntimeTelemetry;
   budgetStore?: BudgetStore;
+  sharedFactsHook?: SharedFactsStreamingHook;
 }) {
   const budgets =
     deps.budgetStore ??
     new UnavailableBudgetStore('streaming discovery activities require an authoritative BudgetStore');
+  const sharedFacts = deps.sharedFactsHook ?? createSharedFactsHookFromEnv(process.env);
 
   const ensureRunBudget = async (args: StreamingAuthorityInput): Promise<ExecutionBudgetBinding> => {
     let binding: ExecutionBudgetBinding;
@@ -378,6 +545,10 @@ export function createStreamingDiscoveryActivities(deps: {
             skipDuplicates: true,
           });
         }
+        const l0Advisories =
+          companies.length > 0
+            ? await sharedFacts.inspectL0Domains(companies.slice(0, 20).map((c) => c.domain))
+            : new Map<string, L0DomainAdvisory>();
         await lockDiscoveryRunRow(tx, args.workspaceId, args.runId);
         const run = await tx.discoveryRun.findUnique({ where: { id: args.runId } });
         if (run) {
@@ -405,19 +576,10 @@ export function createStreamingDiscoveryActivities(deps: {
                 completedAt: companyIds.length > 0 ? null : now,
               },
             },
-            recentCandidates: companies.slice(0, 20).map((company) => ({
-              companyId: company.id,
-              name: company.name,
-              domain: company.domain,
-              country: company.country,
-              stage: 'l0_recalled' as const,
-              fitVerdict: null,
-              fitScore: null,
-              fetchMethod: null,
-              channelsFound: { emails: 0, phones: 0, forms: 0, socials: 0 },
-              reasonSummary: null,
-              updatedAt: now,
-            })),
+            recentCandidates: companies.slice(0, 20).map((company) => {
+              const key = normalizeCompanyDomain(company.domain);
+              return buildL0CandidateSnapshot(company, key ? l0Advisories.get(key) : undefined, now);
+            }),
           }));
           const phases = isPlainRecord(run.phases) ? { ...run.phases } : {};
           await tx.discoveryRun.update({
@@ -459,11 +621,14 @@ export function createStreamingDiscoveryActivities(deps: {
           const allowed = await companyMayUseExternalProcessing(tx, args.workspaceId, args.companyId);
           const company = await tx.canonicalCompany.findUnique({ where: { id: args.companyId } });
           const icp = await tx.icpDefinition.findUnique({ where: { id: args.icpId } });
+          const isImportedBuyer = company
+            ? await detectImportedBuyerInTx(tx, args.companyId, company.attributes)
+            : false;
           await tx.discoveryCompanyJob.updateMany({
             where: { runId: args.runId, canonicalCompanyId: args.companyId },
             data: { stage: 'profiling', startedAt: new Date() },
           });
-          return { allowed, company, icp };
+          return { allowed, company, icp, isImportedBuyer };
         });
 
         if (!loaded.company || !loaded.icp || !loaded.allowed) {
@@ -476,24 +641,24 @@ export function createStreamingDiscoveryActivities(deps: {
             usedWwwRetry: false,
             pdfSkipped: false,
             channelsCount: 0,
+            sharedFactHit: false,
+            cooldownFlagged: false,
           };
         }
 
         throwIfActivityCancelled();
-        let extraction: StreamingCompanyExtraction | null = null;
-        if (loaded.company.domain) {
-          extraction = await extractCompanyWebsiteStreaming({
-            broker: deps.broker,
-            workspaceId: args.workspaceId,
-            companyId: args.companyId,
-            runId: binding.accountKey,
-            domain: loaded.company.domain,
-            authorizeExternalAction: () =>
-              deps.prisma.withWorkspace(args.workspaceId, (tx) =>
-                companyMayUseExternalProcessing(tx, args.workspaceId, args.companyId),
-              ),
-          });
-        }
+        const resolvedExtraction = await resolveL1ExtractionWithSharedFacts({
+          sharedFacts,
+          broker: deps.broker,
+          prisma: deps.prisma,
+          workspaceId: args.workspaceId,
+          companyId: args.companyId,
+          runAccountKey: binding.accountKey,
+          company: loaded.company,
+          isImportedBuyer: loaded.isImportedBuyer,
+        });
+        const extraction = resolvedExtraction.extraction;
+        const { sharedFactHit, cooldownFlagged, cooldownRetryAfterDays } = resolvedExtraction;
 
         throwIfActivityCancelled();
         const fit = await judgeCompanyFitV3({
@@ -520,6 +685,14 @@ export function createStreamingDiscoveryActivities(deps: {
             jsonLdSummary: extraction?.jsonLd.descriptions.join(' ') || null,
           },
         });
+
+        if (loaded.company.domain && (fit.verdict === 'match' || fit.verdict === 'weak')) {
+          await sharedFacts.recordQualifiedTouch({
+            domain: loaded.company.domain,
+            workspaceId: args.workspaceId,
+            isImportedBuyer: loaded.isImportedBuyer,
+          });
+        }
 
         const channelsFound = {
           emails: extraction ? extraction.channels.roleEmails.length + extraction.channels.otherEmails.length : 0,
@@ -557,6 +730,8 @@ export function createStreamingDiscoveryActivities(deps: {
                     crawl4aiFallbacks: l1.crawl4aiFallbacks + (extraction?.usedCrawl4aiFallback ? 1 : 0),
                     pdfSkipped: l1.pdfSkipped + (extraction?.pdfSkipped ? 1 : 0),
                     wwwRetries: l1.wwwRetries + (extraction?.usedWwwRetry ? 1 : 0),
+                    sharedFactHits: (l1.sharedFactHits ?? 0) + (sharedFactHit ? 1 : 0),
+                    cooldownFlagged: (l1.cooldownFlagged ?? 0) + (cooldownFlagged ? 1 : 0),
                     fitMatch: l1.fitMatch + (fit.verdict === 'match' ? 1 : 0),
                     fitWeak: l1.fitWeak + (fit.verdict === 'weak' ? 1 : 0),
                     fitMismatch: l1.fitMismatch + (fit.verdict === 'mismatch' ? 1 : 0),
@@ -572,6 +747,10 @@ export function createStreamingDiscoveryActivities(deps: {
                   fitScore: fit.score,
                   fetchMethod,
                   channelsFound,
+                  ...(sharedFactHit ? { sharedFactHit: true } : {}),
+                  ...(cooldownFlagged
+                    ? { cooldownFlagged: true, cooldownRetryAfterDays }
+                    : {}),
                   reasonSummary: fit.fitReasons.reasons[0]?.slice(0, 180) ?? null,
                   updatedAt: now,
                 }),
@@ -592,6 +771,8 @@ export function createStreamingDiscoveryActivities(deps: {
               verdict: fit.verdict,
               score: fit.score,
               fetchMethod,
+              sharedFactHit,
+              cooldownFlagged,
             },
           });
         });
@@ -605,6 +786,8 @@ export function createStreamingDiscoveryActivities(deps: {
           usedWwwRetry: extraction?.usedWwwRetry ?? false,
           pdfSkipped: extraction?.pdfSkipped ?? false,
           channelsCount,
+          sharedFactHit,
+          cooldownFlagged,
         };
       } finally {
         heartbeat.stop();
