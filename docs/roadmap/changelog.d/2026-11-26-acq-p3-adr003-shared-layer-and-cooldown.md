@@ -1,6 +1,6 @@
 ---
 date: 2026-11-26
-pr: TBD
+pr: 1117
 title: "feat(shared-facts): 落地 ADR-003 共享绿色企业事实层与 30 天跨租户撞单冷却"
 ---
 
