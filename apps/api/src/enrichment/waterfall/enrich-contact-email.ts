@@ -112,6 +112,7 @@ export interface EnrichContactDeps {
   perContactCapMicrousd?: number;
   /** 验证瀑布单地址调用上限（计划 ≤6）。 */
   maxVerificationCalls?: number;
+  onRateLimited?: () => void;
   /** 进程内回调：本联系人拿到 VALID 个人邮箱时通知同公司后续联系人复用格式学习（绝不出进程）。 */
   onValidEmail?: (email: string) => void;
 }
@@ -205,6 +206,7 @@ export async function enrichContactEmail(
       clock: now,
       actorId,
       maxVerificationCalls: deps.maxVerificationCalls,
+      onRateLimited: deps.onRateLimited,
       onValidEmail: deps.onValidEmail,
     },
     {
@@ -310,6 +312,7 @@ export async function enrichContactEmail(
 
     attempts += 1;
     const outcome = await finder.findEmail(findInput);
+    if (outcome.status === 'error' && outcome.errorCode === 'rate_limited') deps.onRateLimited?.();
     budget.settle(finder.costMicrousd, outcome.costMicrousd);
     costMicrousd += outcome.costMicrousd;
 
@@ -380,6 +383,7 @@ export async function enrichContactEmail(
         })
       : null;
     if (verification) {
+      if (verification.steps.some((step) => step.result.error === 'rate_limited')) deps.onRateLimited?.();
       costMicrousd += verification.costMicrousd;
       budget.settle(0, verification.costMicrousd);
     }

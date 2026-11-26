@@ -805,8 +805,8 @@ export async function markEnrichmentStepHold(tx: Prisma.TransactionClient, input
 
 /** Company-scoped keyset listing of already admitted heads; SELECT-only. */
 export async function listCompanyEnrichmentHeads(database: WorkspaceEnrichmentTransactions, context: { workspaceId: string; companyId: string }, page: {
-  limit: number; cursor: { createdAt: string; id: string } | null; businessRunId: string | null;
-}): Promise<readonly { id: string; createdAt: string }[] | null> {
+  limit: number; cursor: { createdAt: string; id: string } | null; businessRunId: string | null; includeStreaming?: boolean;
+}): Promise<readonly { id: string; createdAt: string; streaming: boolean }[] | null> {
   if (!uuid(context.workspaceId) || !uuid(context.companyId) || !Number.isSafeInteger(page.limit) || page.limit < 1 || page.limit > 10) throw new EnrichmentSafetyError("INVALID_PLAN");
   return database.withWorkspace(context.workspaceId, async (tx) => {
     // A missing/foreign/soft-deleted company is not a legitimate empty result; zero executions for a
@@ -814,12 +814,31 @@ export async function listCompanyEnrichmentHeads(database: WorkspaceEnrichmentTr
     const company = await tx.$queryRaw<{ id: string }[]>`SELECT id::text FROM public.canonical_company
       WHERE id=${context.companyId}::uuid AND workspace_id=${context.workspaceId}::uuid LIMIT 1`;
     if (company.length !== 1) return null;
-    const rows = await tx.$queryRaw<{ id: string; created_at: Date }[]>`SELECT e.id::text,e.created_at
-      FROM public.contact_enrichment_execution e
-      WHERE e.workspace_id=${context.workspaceId}::uuid AND e.company_id=${context.companyId}::uuid
-        AND (${page.businessRunId}::uuid IS NULL OR e.business_run_id=${page.businessRunId}::uuid)
-        AND (${page.cursor === null ? null : page.cursor.createdAt}::timestamptz IS NULL OR (e.created_at,e.id) > (${page.cursor === null ? null : page.cursor.createdAt}::timestamptz, ${page.cursor === null ? null : page.cursor.id}::uuid))
-      ORDER BY e.created_at,e.id LIMIT ${page.limit + 1}`;
-    return rows.map((row) => ({ id: row.id, createdAt: row.created_at.toISOString() }));
+    // Legacy heads use clock_timestamp() with microseconds. Compare both sources
+    // at the millisecond precision carried by the public cursor.
+    const rows = await tx.$queryRaw<{ id: string; created_at: Date; streaming: boolean }[]>`
+      WITH page_scope AS (
+        SELECT ${context.workspaceId}::uuid AS workspace_id, ${context.companyId}::uuid AS company_id,
+          ${page.businessRunId}::uuid AS run_id, ${page.cursor?.createdAt ?? null}::timestamptz AS cursor_at,
+          ${page.cursor?.id ?? null}::uuid AS cursor_id
+      )
+      SELECT head.id::text, head.created_at, head.streaming
+      FROM (
+        SELECT e.id, date_trunc('milliseconds', e.created_at) AS created_at, FALSE AS streaming
+        FROM public.contact_enrichment_execution e CROSS JOIN page_scope s
+        WHERE e.workspace_id = s.workspace_id AND e.company_id = s.company_id
+          AND (s.run_id IS NULL OR e.business_run_id = s.run_id)
+          AND e.created_at >= COALESCE(s.cursor_at, '-infinity'::timestamptz)
+        UNION ALL
+        SELECT j.id, j.contact_enrichment_started_at AS created_at, TRUE AS streaming
+        FROM public.discovery_company_job j CROSS JOIN page_scope s
+        WHERE ${page.includeStreaming === true}::boolean AND j.workspace_id = s.workspace_id
+          AND j.canonical_company_id = s.company_id AND j.contact_enrichment_operation_ref IS NOT NULL
+          AND (s.run_id IS NULL OR j.run_id = s.run_id)
+          AND j.contact_enrichment_started_at >= COALESCE(s.cursor_at, '-infinity'::timestamptz)
+      ) head CROSS JOIN page_scope s
+      WHERE s.cursor_at IS NULL OR (head.created_at, head.id) > (s.cursor_at, s.cursor_id)
+      ORDER BY head.created_at, head.id LIMIT ${page.limit + 1}`;
+    return rows.map((row) => ({ id: row.id, createdAt: row.created_at.toISOString(), streaming: row.streaming }));
   });
 }

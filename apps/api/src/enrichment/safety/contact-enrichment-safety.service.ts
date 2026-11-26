@@ -35,7 +35,9 @@ export interface ContactEnrichmentSafetyServiceDeps {
     findByRef(input: { workspaceId: string; companyId: string; operationRef: string }): Promise<ExistingSafetyExecution | null>;
     execute(input: { view: EnrichmentExecutionView; workspaceId: string; companyId: string; actorId: string; mode: "EXECUTE" | "RECOVER_NO_WIRE" }): Promise<EnrichCompanyContactsResult>;
   };
-  readonly results: Pick<ContactEnrichmentResultsPort, "listEnrichmentExecutions" | "readEnrichmentExecution" | "listEnrichmentQualityFacts" | "readEnrichmentQualityFacts">;
+  readonly results: Pick<ContactEnrichmentResultsPort, "listEnrichmentExecutions" | "readEnrichmentExecution" | "listEnrichmentQualityFacts" | "readEnrichmentQualityFacts"> & {
+    readStreamingEnrichmentExecution?(context: RequestContext, companyId: string, operationRef: string): Promise<unknown | null>;
+  };
   authorizeRecovery(context: RequestContext, companyId: string): Promise<boolean>;
 }
 export interface ContactEnrichmentSafetyRunInput { readonly workspaceId: string; readonly companyId: string; readonly businessRunId: string; readonly binding: ExecutionBudgetBinding; readonly lawfulBasis: LawfulBasis; readonly remainingMicrousd: string; readonly actorId: string; }
@@ -95,6 +97,8 @@ export class ContactEnrichmentSafetyService implements ContactEnrichmentResultsP
     this.address(context.workspaceId, companyId, operationRef);
     const scopes = new Set(context.scopes ?? []);
     if (!["acquisition:write", "contact-discovery:read", "compliance:manage"].every((scope) => scopes.has(scope as never))) throw new ForbiddenException("contact enrichment recovery scope required");
+    const streaming = await this.deps.results.readStreamingEnrichmentExecution?.(context, companyId, operationRef);
+    if (streaming) return streaming;
     const existing = await this.deps.execution.findByRef({ workspaceId: context.workspaceId, companyId, operationRef });
     if (!existing || existing.workspaceId !== context.workspaceId || existing.companyId !== companyId) return null;
     if (!(await this.deps.authorizeRecovery(context, companyId))) throw new ForbiddenException("contact enrichment recovery subject unavailable");

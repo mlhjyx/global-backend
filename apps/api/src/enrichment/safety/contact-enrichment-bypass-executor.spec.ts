@@ -69,6 +69,7 @@ describe('contact-enrichment-bypass-executor (F8 bypass parity)', () => {
         attempted: 1,
         costMicrousd: 1700,
         deadlineHit: false,
+        rateLimited: true,
         results: [{ contactId: 'c-1', status: 'stored' as const }],
       };
     });
@@ -89,6 +90,7 @@ describe('contact-enrichment-bypass-executor (F8 bypass parity)', () => {
       companyId: C,
       results: [{ contactId: 'c-1', status: 'stored' }],
     });
+    expect(httpResult.rateLimited).toBeUndefined();
 
     const runResult = await executor.executeRun({
       workspaceId: W,
@@ -108,7 +110,7 @@ describe('contact-enrichment-bypass-executor (F8 bypass parity)', () => {
       remainingMicrousd: '250000',
       actorId: 'discovery-run:test',
     });
-    expect(runResult.admission).toBe('ADMITTED');
+    expect(runResult).toMatchObject({ admission: 'ADMITTED', rateLimited: true });
     expect(runWaterfall).toHaveBeenCalledTimes(2);
   });
 

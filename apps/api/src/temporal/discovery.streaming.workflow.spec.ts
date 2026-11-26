@@ -12,6 +12,7 @@ const mockActs = vi.hoisted(() => ({
   enrichStreamingTopKCompany: vi.fn(),
   finalizeStreamingRun: vi.fn(),
 }));
+const historyHasF7 = vi.hoisted(() => vi.fn());
 
 vi.mock('@temporalio/workflow', () => {
   class CancelledFailure extends Error {
@@ -29,6 +30,7 @@ vi.mock('@temporalio/workflow', () => {
       nonCancellable: async <T>(fn: () => Promise<T>) => fn(),
     },
     isCancellation: (err: unknown) => err instanceof Error && err.name === 'CancelledFailure',
+    patched: historyHasF7,
     proxyActivities: () => mockActs,
     CancelledFailure,
   };
@@ -70,6 +72,7 @@ function makeInput(overrides: Partial<DiscoveryStreamingInput> = {}): DiscoveryS
 describe('discoveryStreamingWorkflow (Plan B three-stage funnel)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    historyHasF7.mockReturnValue(true);
     mockActs.loadPlanQueries.mockResolvedValue({
       queries: [
         { source_class: 'public_intelligence', filters: { country: 'IT' }, keywords: ['moduli fotovoltaici'], rationale: 'q1', priority: 1 },
@@ -125,6 +128,8 @@ describe('discoveryStreamingWorkflow (Plan B three-stage funnel)', () => {
     // Only c-1 (match) and c-2 (weak) enter L2; c-3 (mismatch) is excluded!
     expect(mockActs.enrichStreamingTopKCompany).toHaveBeenCalledTimes(2);
     expect(mockActs.enrichStreamingTopKCompany.mock.calls.map((c) => c[0].companyId)).toEqual(['c-1', 'c-2']);
+    expect(mockActs.enrichStreamingTopKCompany.mock.calls[0]![0]).toHaveProperty('enrichmentSlot', 0);
+    expect(mockActs.enrichStreamingTopKCompany.mock.calls[1]![0]).not.toHaveProperty('enrichmentSlot');
     expect(mockActs.registerWatchesForRun).toHaveBeenCalledTimes(1);
     expect(mockActs.finalizeStreamingRun).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -138,6 +143,26 @@ describe('discoveryStreamingWorkflow (Plan B three-stage funnel)', () => {
         }),
       }),
     );
+  });
+
+  it('bounds F7 to the existing company cap and keeps older histories on the old activity args', async () => {
+    const companyIds = Array.from({ length: 28 }, (_, index) => 'match-' + String(index).padStart(2, '0'));
+    mockActs.recordStreamingL0Complete.mockResolvedValue({ companyIds });
+    mockActs.processStreamingL1Company.mockImplementation(async ({ companyId }) => ({
+      companyId, verdict: 'match', score: 90,
+    }));
+    await discoveryStreamingWorkflow(makeInput({ streamingTopKCap: 28 }));
+    const calls = mockActs.enrichStreamingTopKCompany.mock.calls;
+    expect(calls).toHaveLength(28);
+    expect(calls.slice(0, 25).map(([request]) => request.enrichmentSlot))
+      .toEqual(Array.from({ length: 25 }, (_, index) => index));
+    expect(calls.slice(25).every(([request]) => request.enrichmentSlot === undefined)).toBe(true);
+
+    historyHasF7.mockReturnValue(false);
+    mockActs.enrichStreamingTopKCompany.mockClear();
+    await discoveryStreamingWorkflow(makeInput({ streamingTopKCap: 2 }));
+    expect(mockActs.enrichStreamingTopKCompany.mock.calls).toHaveLength(2);
+    expect(mockActs.enrichStreamingTopKCompany.mock.calls.every(([request]) => !('enrichmentSlot' in request))).toBe(true);
   });
 
   it('finalizes as CANCELLED inside CancellationScope.nonCancellable with preserved partial L1 counts', async () => {
