@@ -522,9 +522,10 @@ export class WeeklyReportService {
       typeof (tx as { judgmentRecord?: { findMany?: unknown } }).judgmentRecord?.findMany === 'function'
         ? await tx.judgmentRecord.findMany({
             where: { icpId, canonicalCompanyId: { in: companyIds } },
+            distinct: ['canonicalCompanyId'],
             select: { canonicalCompanyId: true, verdict: true, criteria: true },
-            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-            take: companyIds.length * 3,
+            orderBy: [{ canonicalCompanyId: 'asc' }, { createdAt: 'desc' }, { id: 'desc' }],
+            take: companyIds.length,
           })
         : [];
     const latestJudgmentByCompany = new Map<string, BattleJudgmentRecord>();
@@ -541,6 +542,7 @@ export class WeeklyReportService {
       typeof (tx as { companySignal?: { findMany?: unknown } }).companySignal?.findMany === 'function'
         ? await tx.companySignal.findMany({
             where: { companyId: { in: companyIds } },
+            distinct: ['companyId', 'providerKey', 'signalKind'],
             select: {
               companyId: true,
               providerKey: true,
@@ -550,8 +552,14 @@ export class WeeklyReportService {
               excerpt: true,
               observedAt: true,
             },
-            orderBy: [{ observedAt: 'desc' }, { id: 'desc' }],
-            take: companyIds.length * 5,
+            orderBy: [
+              { companyId: 'asc' },
+              { providerKey: 'asc' },
+              { signalKind: 'asc' },
+              { observedAt: 'desc' },
+              { id: 'desc' },
+            ],
+            take: companyIds.length * 6,
           })
         : [];
     const signalsByCompany = new Map<string, LeadPackageCompanySignal[]>();
@@ -560,6 +568,9 @@ export class WeeklyReportService {
       const list = signalsByCompany.get(row.companyId) ?? [];
       list.push(row);
       signalsByCompany.set(row.companyId, list);
+    }
+    for (const list of signalsByCompany.values()) {
+      list.sort((a, b) => Date.parse(String(b.observedAt)) - Date.parse(String(a.observedAt)));
     }
     const sellerContext = await loadBattleSellerContext(tx, {
       companyId: icp.companyId,

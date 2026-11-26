@@ -169,14 +169,20 @@ export async function discoverContactsCore(
       accountKey,
     });
     let budgetTruncated = false;
-    for (const adapter of loaded.adapters) {
+    let incompleteAttempt = false;
+    for (let i = 0; i < loaded.adapters.length; i += 1) {
+        const adapter = loaded.adapters[i]!;
         if (input.contactBudget?.exhausted()) {
           budgetTruncated = true;
+          incompleteAttempt = true;
           break;
         }
         try {
           const authorized = await authorizeExternalAction();
-          if (!authorized) break;
+          if (!authorized) {
+            incompleteAttempt = true;
+            break;
+          }
           const durableReceipts: Array<{
             producerId: ContactDiscoveryReceiptProducer;
             receipt: DurableExecutionReceipt;
@@ -240,7 +246,10 @@ export async function discoverContactsCore(
         }
         const runStatus = await budgets.status({ workspaceId: binding.scopeKey, accountKey });
         input.contactBudget?.observe(runStatus.remainingMicrousd);
-        if (runStatus.exhausted) break;
+        if (runStatus.exhausted) {
+          if (i < loaded.adapters.length - 1) incompleteAttempt = true;
+          break;
+        }
     }
 
     const adapterDiagnostics: Record<string, number> = {};
@@ -369,6 +378,7 @@ export async function discoverContactsCore(
       }
       if (
         !budgetTruncated &&
+        !incompleteAttempt &&
         perAdapter.length > 0 &&
         typeof (tx.canonicalCompany as { updateMany?: unknown }).updateMany === 'function'
       ) {

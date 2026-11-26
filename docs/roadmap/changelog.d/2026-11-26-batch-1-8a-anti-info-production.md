@@ -1,7 +1,7 @@
 ---
 date: 2026-11-26
 pr:
-title: "feat(contacts,report): wire governed social people search tools, fix six live battle CSV bugs, and upgrade battle CSV to 21 columns (Batch 1.8A)"
+title: "feat(contacts,report): 接入社媒商业搜人与 21 列作战清表并根治六项现网缺陷（Batch 1.8A）"
 ---
 
 - 起因：生产实测意大利光伏客户作战清表暴露两类核心阻塞：(1) 社媒找决策人仍只依赖免费 SearXNG，导致 Exa People / Serper LinkedIn X-Ray 尚未接入受治理工具链，且 `contact_discovery_attempted_at` 缺少写回导致 0 联系人公司反复重试；(2) 作战清表存在 6 项现网缺陷（#96-1 意语转交信混入中文部门名且具名 `CATCH_ALL_RISKY` 落入 C 级；#96-2 任意 `<form>` 与商品 URL 误判为供应商门户；#96-3 证据摘要只剩 `fit=match` 缺失评审理由与官网品牌；#96-4 卖方中文名退化且 `sellerInboundFooter` 与 `validateLinkedInConnectionNote` 未接线；#96-5 `.com` 域带 `+39` 电话仍判 `UNKNOWN` 引发 Art.14 漏排；#96-6 公司 LinkedIn 混入个人主页列），同时缺乏真实信号 Trigger、同事内推转介包与当地时区拨号提示。

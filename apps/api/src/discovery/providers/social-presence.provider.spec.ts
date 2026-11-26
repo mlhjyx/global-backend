@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { looksLikeOrganizationName } from './contact-extraction';
+import { textMentionsDomain } from './social-role-lexicon';
 import {
   buildSocialDorks,
   choosePersonTitle,
@@ -793,5 +794,12 @@ describe('social presence M2b: archive copies and live public pages (D1)', () =>
     await expect(
       adapter.discoverContacts(COMPANY, { workspaceId: 'ws-1' } as never),
     ).resolves.toEqual({ contacts: [], costCents: 0 });
+  });
+
+  it('matches domains strictly by character boundary without dynamic RegExp (CodeQL-safe)', () => {
+    expect(textMentionsDomain('Visit https://www.coenergia.com/it for solar', 'www.coenergia.com')).toBe(true);
+    expect(textMentionsDomain('See technical.design for details', 'technical.de')).toBe(false);
+    expect(textMentionsDomain('mycoenergia.com is another firm', 'coenergia.com')).toBe(false);
+    expect(textMentionsDomain('sub-coenergia.com is another firm', 'coenergia.com')).toBe(false);
   });
 });

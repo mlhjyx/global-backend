@@ -490,11 +490,12 @@ describe('battle-csv-builder (Batch 1.4-C + Batch 1.8A 21-column audited battle 
         },
       },
       judgmentRecord: {
-        verdict: 'match',
+        verdict: 'FIT',
         criteria: [
-          { label: '区域覆盖', applicable: true, score: 0.95, rationale: '深耕意大利北部光伏分销网络，覆盖伦巴第与威尼托' },
-          { label: '品类匹配', applicable: true, score: 0.88, rationale: '常年现货分销大型工商业光伏组件与逆变器' },
-          { label: '不适用项', applicable: false, score: 1, rationale: '不应出现的无关理由' },
+          { id: 'C1_REGION', label: 'pass', applicable: true, score: 9, rationale: '深耕意大利北部光伏分销网络，覆盖伦巴第与威尼托' },
+          { id: 'C2_ROLE', label: 'pass', applicable: true, score: null, rationale: '常年现货分销大型工商业光伏组件与逆变器' },
+          { id: 'C3_RISK', label: 'fail', applicable: true, score: null, rationale: '低优失败项' },
+          { id: 'C4_SIZE', label: 'not_applicable', applicable: false, score: null, rationale: '不应出现的无关理由' },
         ],
       },
       companyContactPoints: [{ kind: 'email', value: 'info@solarstock.it' }],
@@ -503,13 +504,73 @@ describe('battle-csv-builder (Batch 1.4-C + Batch 1.8A 21-column audited battle 
     });
 
     expect(row.evidenceSummary).toContain('fit=match');
-    expect(row.evidenceSummary).toContain('区域覆盖:');
+    expect(row.evidenceSummary).toContain('C1_REGION(pass):');
+    expect(row.evidenceSummary).toContain('C2_ROLE(pass):');
+    expect(row.evidenceSummary.indexOf('C2_ROLE(pass):')).toBeLessThan(row.evidenceSummary.indexOf('C3_RISK(fail):'));
     expect(row.evidenceSummary).toContain('意大利本土光伏批发与系统集成商');
     expect(row.evidenceSummary).toContain('role=distributor');
     expect(row.evidenceSummary).toContain('brands=SMA, Fronius, Huawei, JinkoSolar');
     expect(row.evidenceSummary).not.toContain('无意图信号');
     expect(row.evidenceSummary).not.toContain('不应出现的无关理由');
     expect(Array.from(row.evidenceSummary).length).toBeLessThanOrEqual(260);
+  });
+
+  it('verifier-2 fixes: rejects spoofed LinkedIn URLs and never treats company other emails as A-tier or personal direct email', () => {
+    // 1. AEG Market with only company `other` email (`servizioclienti@`) -> C-tier and STILL gets referralInfoDraft
+    const aegOtherOnly = buildBattleCsvRow({
+      lead: { id: 'lead-aeg-other', canonicalCompanyId: 'co-aeg-other', totalScore: 0.78, fitVerdict: 'match', scoreDetail: null },
+      company: { id: 'co-aeg-other', name: 'AEG Market S.r.l.', domain: 'aegmarket.it', country: 'IT', attributes: {} },
+      companyContactPoints: [],
+      companyContactChannels: [{ channel: 'email', value: 'servizioclienti@aegmarket.it' }],
+      decisionMakers: [],
+      draft: null,
+    });
+    expect(aegOtherOnly.contactEmail).toBe('servizioclienti@aegmarket.it');
+    expect(aegOtherOnly.channelTier).toBe('C');
+    expect(aegOtherOnly.referralInfoDraft).toContain('Cortese richiesta di inoltro');
+
+    // 2. Company fallback prefers A-tier functional (`acquisti@`) > role (`info@`) > `other` (`servizioclienti@`/`privacy@`)
+    const preferRoleOverOther = buildBattleCsvRow({
+      lead: { id: 'lead-pref-role', canonicalCompanyId: 'co-pref-role', totalScore: 0.78, fitVerdict: 'match', scoreDetail: null },
+      company: { id: 'co-pref-role', name: 'Solar One S.r.l.', domain: 'solarone.it', country: 'IT', attributes: {} },
+      companyContactPoints: [{ kind: 'email', value: 'info@solarone.it' }],
+      companyContactChannels: [{ channel: 'email', value: 'privacy@solarone.it' }],
+      decisionMakers: [],
+      draft: null,
+    });
+    expect(preferRoleOverOther.contactEmail).toBe('info@solarone.it');
+
+    const preferFunctionalOverOther = buildBattleCsvRow({
+      lead: { id: 'lead-pref-func', canonicalCompanyId: 'co-pref-func', totalScore: 0.78, fitVerdict: 'match', scoreDetail: null },
+      company: { id: 'co-pref-func', name: 'Solar Two S.r.l.', domain: 'solartwo.it', country: 'IT', attributes: {} },
+      companyContactPoints: [{ kind: 'email', value: 'acquisti@solartwo.it' }],
+      companyContactChannels: [{ channel: 'email', value: 'amministrazione@solartwo.it' }],
+      decisionMakers: [],
+      draft: null,
+    });
+    expect(preferFunctionalOverOther.contactEmail).toBe('acquisti@solartwo.it');
+    expect(preferFunctionalOverOther.channelTier).toBe('A');
+
+    // 3. Named decision maker without personal email + company `other` email + spoofed LinkedIn URL -> stays C-tier, rejects spoofed URL
+    const namedNoEmailWithCompanyOther = buildBattleCsvRow({
+      lead: { id: 'lead-named-other', canonicalCompanyId: 'co-named-other', totalScore: 0.8, fitVerdict: 'match', scoreDetail: null },
+      company: { id: 'co-named-other', name: 'Rexel Italia S.p.A.', domain: 'rexel.it', country: 'IT', attributes: {} },
+      companyContactPoints: [],
+      companyContactChannels: [{ channel: 'email', value: 'rexel@rexel.it' }],
+      decisionMakers: [
+        {
+          id: 'dm-no-mail',
+          fullName: 'Luca Neri',
+          title: 'Responsabile Acquisti',
+          department: 'Procurement',
+          points: [{ type: 'linkedin', value: 'https://evil.example/linkedin.com/in/luca-neri', status: 'UNVERIFIED' }],
+        },
+      ],
+      draft: null,
+    });
+    expect(namedNoEmailWithCompanyOther.linkedinUrl).toBeNull();
+    expect(namedNoEmailWithCompanyOther.channelTier).toBe('C');
+    expect(namedNoEmailWithCompanyOther.referralInfoDraft).toContain('Ufficio Acquisti');
   });
 
   it('#96-4 / #96-5 / #96-6 + 21-column Trigger/Blurb/OutreachWindow: enforces LinkedIn validator, resolves +39 phone country, separates Co-LI, and renders real signal trigger', () => {

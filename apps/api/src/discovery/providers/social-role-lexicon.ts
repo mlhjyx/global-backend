@@ -166,12 +166,29 @@ export function matchesCompany(text: string, company: { name: string; domain?: s
   return companyMatchLevel(text, company) !== 'none';
 }
 
-/** 公司域名整体出现（边界匹配：允许 www./路径前缀，拒绝 technical.design 这类同前缀 TLD）。 */
+function isDomainBoundaryChar(ch: string | undefined): boolean {
+  if (!ch) return true;
+  const code = ch.charCodeAt(0);
+  const isLowerAlpha = code >= 97 && code <= 122;
+  const isDigit = code >= 48 && code <= 57;
+  return !isLowerAlpha && !isDigit && ch !== '-';
+}
+
+/** 公司域名整体出现（纯字符边界匹配，零动态 RegExp：允许 www./路径前缀，拒绝 technical.design 这类同前缀 TLD）。 */
 export function textMentionsDomain(text: string, domain: string | undefined): boolean {
   const needle = domain?.toLowerCase().replace(/^www\./, '');
   if (!needle) return false;
-  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`(^|[^a-z0-9-])${escaped}(?![a-z0-9-])`, 'i').test(text);
+  const haystack = text.toLowerCase();
+  let pos = haystack.indexOf(needle);
+  while (pos !== -1) {
+    const before = pos > 0 ? haystack[pos - 1] : undefined;
+    const after = haystack[pos + needle.length];
+    if (isDomainBoundaryChar(before) && isDomainBoundaryChar(after)) {
+      return true;
+    }
+    pos = haystack.indexOf(needle, pos + 1);
+  }
+  return false;
 }
 
 /** 多词公司名的完整短语（折叠后按 token 边界连续出现）：比单个泛词更有区分度。 */

@@ -762,32 +762,30 @@ describe('WeeklyReportService (BI-22)', () => {
       contactPoints: [{ companyId, kind: 'email', value: 'info@iosolar.com', status: 'UNVERIFIED' }],
     });
     const h = harness(fixture);
+    const judgmentFindMany = vi.fn(async () => [
+      {
+        canonicalCompanyId: companyId,
+        verdict: 'FIT',
+        criteria: [{ id: 'C1_DISTRIBUTION', label: 'pass', applicable: true, score: 9, rationale: '深耕意大利工商业光伏批发' }],
+      },
+    ]);
+    const signalFindMany = vi.fn(async () => [
+      {
+        companyId,
+        providerKey: 'structured_harvest',
+        signalKind: 'page_change',
+        sourceUrl: 'https://iosolar.com/careers',
+        title: 'Hiring PV Procurement Manager in Milan',
+        excerpt: 'Growing solar module sourcing team',
+        observedAt: new Date('2026-11-21T08:00:00.000Z'),
+      },
+    ]);
     Object.assign(h.tx, {
       companyContactChannel: {
         findMany: vi.fn(async () => [{ companyId, channel: 'phone', value: '+39 0543 097431', status: 'UNVERIFIED' }]),
       },
-      judgmentRecord: {
-        findMany: vi.fn(async () => [
-          {
-            canonicalCompanyId: companyId,
-            verdict: 'match',
-            criteria: [{ label: '意大利分销', applicable: true, score: 0.92, rationale: '深耕意大利工商业光伏批发' }],
-          },
-        ]),
-      },
-      companySignal: {
-        findMany: vi.fn(async () => [
-          {
-            companyId,
-            providerKey: 'structured_harvest',
-            signalKind: 'page_change',
-            sourceUrl: 'https://iosolar.com/careers',
-            title: 'Hiring PV Procurement Manager in Milan',
-            excerpt: 'Growing solar module sourcing team',
-            observedAt: new Date('2026-11-21T08:00:00.000Z'),
-          },
-        ]),
-      },
+      judgmentRecord: { findMany: judgmentFindMany },
+      companySignal: { findMany: signalFindMany },
       companyProfile: {
         findUnique: vi.fn(async () => ({
           name: '琏升科技股份有限公司',
@@ -812,8 +810,14 @@ describe('WeeklyReportService (BI-22)', () => {
     expect(rawRows[0]).toHaveLength(21);
     const rows = parse(report.csv, { bom: true, columns: true }) as Array<Record<string, string>>;
     expect(rows).toHaveLength(1);
+    expect(judgmentFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ distinct: ['canonicalCompanyId'], take: 1 }),
+    );
+    expect(signalFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ distinct: ['companyId', 'providerKey', 'signalKind'] }),
+    );
     expect(rows[0]!['国家/地区']).toBe('IT');
-    expect(rows[0]!['关键证据摘要(C1-C5)']).toContain('意大利分销:');
+    expect(rows[0]!['关键证据摘要(C1-C5)']).toContain('C1_DISTRIBUTION(pass):');
     expect(rows[0]!['关键证据摘要(C1-C5)']).toContain('brands=Longi, JA Solar');
     expect(rows[0]!['近期破冰钩子(Trigger)']).toContain('[HIRING_BUYING_ROLE]');
     expect(rows[0]!['C级info@转交请求信']).toContain('Liansheng PV Co., Ltd.');

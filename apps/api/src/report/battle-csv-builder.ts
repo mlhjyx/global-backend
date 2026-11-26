@@ -92,13 +92,43 @@ export interface BattleRowBuildInput {
   readonly sellerInboundFooter?: string | null;
 }
 
-const PERSONAL_LINKEDIN_RE = /linkedin\.com\/(?:in|pub)\//iu;
-const COMPANY_LINKEDIN_RE = /linkedin\.com\/(?:company|showcase)\//iu;
 const NOISE_SCORE_NOTE_RE = /无(?:真实)?意图信号|暂无意图信号|未检测到(?:真实)?意图信号|no intent signal/iu;
 const CJK_SCRIPT_RE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
 const STRIP_LINKEDIN_URL_RE = /\b(?:https?:\/\/|www\.)\S+/giu;
 const STRIP_LINKEDIN_PLACEHOLDER_RE = /\[[^\]]{1,40}\]|\{[^}]{1,40}\}|<[^>]{1,40}>/gu;
 const MAX_EVIDENCE_CHARS = 260;
+
+const FUNCTIONAL_A_TIER_PRIORITY: Readonly<Record<string, number>> = Object.freeze({
+  procurement: 0,
+  generic_sales: 1,
+  management: 2,
+  support: 3,
+  finance: 4,
+});
+
+function parseLinkedinPathname(rawUrl: string): string | null {
+  const trimmed = rawUrl.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = /^https?:\/\//iu.test(trimmed) ? new URL(trimmed) : new URL(`https://${trimmed}`);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null;
+    const host = parsed.hostname.toLowerCase();
+    if (host !== 'linkedin.com' && !host.endsWith('.linkedin.com')) return null;
+    return parsed.pathname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function isPersonalLinkedinUrl(url: string): boolean {
+  const path = parseLinkedinPathname(url);
+  return path !== null && (path.startsWith('/in/') || path.startsWith('/pub/'));
+}
+
+function isCompanyLinkedinUrl(url: string): boolean {
+  const path = parseLinkedinPathname(url);
+  return path !== null && (path.startsWith('/company/') || path.startsWith('/showcase/'));
+}
 
 const DEFAULT_PRODUCT_BY_LANGUAGE: Readonly<Record<string, string>> = Object.freeze({
   it: 'componenti e prodotti industriali OEM/ODM',
@@ -130,21 +160,45 @@ function extractCarriedBrands(attrs: Record<string, unknown>): string[] {
   return [...new Set(names)];
 }
 
+function judgmentLabelRank(label: string): number {
+  const normalized = label.toLowerCase();
+  if (normalized === 'pass') return 3;
+  if (normalized === 'unclear') return 2;
+  if (normalized === 'fail') return 1;
+  return 0;
+}
+
 function extractJudgmentRationales(judgmentRecord: BattleJudgmentRecord | null | undefined): string[] {
   if (!judgmentRecord || !Array.isArray(judgmentRecord.criteria)) return [];
-  const items: Array<{ label: string; rationale: string; score: number; index: number }> = [];
+  const items: Array<{
+    id: string;
+    label: string;
+    labelRank: number;
+    rationale: string;
+    score: number | null;
+    index: number;
+  }> = [];
   judgmentRecord.criteria.forEach((raw, index) => {
     const rec = asRecord(raw);
     if (rec.applicable === false) return;
+    const label = typeof rec.label === 'string' ? rec.label.replace(/\s+/gu, ' ').trim() : '';
+    if (label.toLowerCase() === 'not_applicable') return;
     const rationale = typeof rec.rationale === 'string' ? rec.rationale.replace(/\s+/gu, ' ').trim() : '';
     if (!rationale) return;
-    const label = typeof rec.label === 'string' ? rec.label.replace(/\s+/gu, ' ').trim() : '';
-    const score = typeof rec.score === 'number' && Number.isFinite(rec.score) ? rec.score : 0;
-    items.push({ label, rationale, score, index });
+    const id = typeof rec.id === 'string' ? rec.id.replace(/\s+/gu, ' ').trim() : '';
+    const score = typeof rec.score === 'number' && Number.isFinite(rec.score) ? rec.score : null;
+    items.push({ id, label, labelRank: judgmentLabelRank(label), rationale, score, index });
   });
-  items.sort((a, b) => b.score - a.score || a.index - b.index);
+  items.sort((a, b) => {
+    if (a.score !== null && b.score !== null && a.score !== b.score) return b.score - a.score;
+    if (a.labelRank !== b.labelRank) return b.labelRank - a.labelRank;
+    if ((b.score !== null) !== (a.score !== null)) return (b.score !== null ? 1 : 0) - (a.score !== null ? 1 : 0);
+    return a.index - b.index;
+  });
   return items.slice(0, 3).map((item) => {
     const clipped = item.rationale.slice(0, 80);
+    if (item.id && item.label) return `${item.id}(${item.label}): ${clipped}`;
+    if (item.id) return `${item.id}: ${clipped}`;
     return item.label ? `${item.label}: ${clipped}` : clipped;
   });
 }
@@ -245,6 +299,29 @@ function collectSwitchboardChannels(switchboardContacts: readonly BattleDecision
   };
 }
 
+/** 仅按 A 级职能箱（采购>销售>管理>客服>财务）→ 标准总机 role（info@ 等）→ 其余 other 顺序挑选公司回退箱。 */
+function pickCompanyFallbackEmail(companyEmails: readonly string[]): string | null {
+  let bestFunctional: { email: string; rank: number } | null = null;
+  let firstRole: string | null = null;
+  let firstOther: string | null = null;
+  for (const email of companyEmails) {
+    const type = classifyContactEmail(email).emailType;
+    const functionalRank = FUNCTIONAL_A_TIER_PRIORITY[type];
+    if (functionalRank !== undefined) {
+      if (!bestFunctional || functionalRank < bestFunctional.rank) {
+        bestFunctional = { email, rank: functionalRank };
+      }
+      continue;
+    }
+    if (type === 'role') {
+      if (!firstRole) firstRole = email;
+      continue;
+    }
+    if (!firstOther) firstOther = email;
+  }
+  return bestFunctional?.email ?? firstRole ?? firstOther ?? null;
+}
+
 function resolveBattleChannels(
   companyContactPoints: readonly { kind: string; value: string; status?: string }[],
   companyContactChannels: readonly BattleCompanyChannel[],
@@ -254,11 +331,11 @@ function resolveBattleChannels(
 ) {
   const contactEmailPoint = leadContact ? pickBestEmailPoint(leadContact.points) : null;
   const contactLinkedinPoints = leadContact?.points.filter((p) => p.type === 'linkedin') ?? [];
-  // #96-6：严格区分个人领英（/in/ 或 /pub/）与公司领英（/company/ 或 /showcase/）。
+  // #96-6：用 URL 主机与路径严格区分个人领英（/in/ 或 /pub/）与公司领英（/company/ 或 /showcase/）。
   const contactLinkedin =
-    contactLinkedinPoints.find((p) => PERSONAL_LINKEDIN_RE.test(p.value))?.value ?? null;
+    contactLinkedinPoints.find((p) => isPersonalLinkedinUrl(p.value))?.value ?? null;
   const contactCompanyLinkedin =
-    contactLinkedinPoints.find((p) => COMPANY_LINKEDIN_RE.test(p.value))?.value ?? null;
+    contactLinkedinPoints.find((p) => isCompanyLinkedinUrl(p.value))?.value ?? null;
 
   const socials = extractCompanySocialProfiles(
     companyContactPoints.map((p) => ({ kind: p.kind, value: p.value, status: p.status ?? 'UNVERIFIED' })),
@@ -266,7 +343,7 @@ function resolveBattleChannels(
   );
   const socialLinkedin = socials.find((s) => s.platform === 'linkedin')?.url ?? null;
   const companyLinkedin =
-    (socialLinkedin && COMPANY_LINKEDIN_RE.test(socialLinkedin) ? socialLinkedin : null) ??
+    (socialLinkedin && isCompanyLinkedinUrl(socialLinkedin) ? socialLinkedin : null) ??
     contactCompanyLinkedin;
   const socialWhatsapp = socials.find((s) => s.platform === 'whatsapp')?.url ?? null;
   const extraSocials = socials
@@ -283,11 +360,11 @@ function resolveBattleChannels(
     companyContactChannels.find((c) => c.channel === 'phone' && c.status !== 'INVALID')?.value ??
     switchboard.phones[0] ??
     null;
-  const functionalCompanyEmail =
-    companyEmails.find((e) => classifyContactEmail(e).emailType !== 'role') ?? null;
-  const chosenEmail = contactEmailPoint?.value ?? functionalCompanyEmail ?? companyEmails[0] ?? null;
+  const chosenEmail = contactEmailPoint?.value ?? pickCompanyFallbackEmail(companyEmails);
+  const isContactOwnedEmail = contactEmailPoint !== null;
   const chosenVerificationState = effectiveEmailVerificationState(contactEmailPoint);
   const emailClass = chosenEmail ? classifyContactEmail(chosenEmail).emailType : null;
+  const isPersonalOrOtherEmail = emailClass === 'personal' || emailClass === 'other';
   // #96-2：只有真正的 supplier_page 才作为供应商门户升级 B 级；普通 contact_form/form_url/contact_page 仅作备选展示。
   const supplierPortalUrl =
     companyContactPoints.find((p) => p.kind === 'supplier_page')?.value ?? null;
@@ -305,9 +382,11 @@ function resolveBattleChannels(
     publicWhatsapp: companyContactPoints.find((p) => p.kind === 'whatsapp')?.value ?? socialWhatsapp,
     extraSocials,
     chosenEmail,
+    isContactOwnedEmail,
     chosenVerificationState,
     emailClass,
-    isPersonalEmail: emailClass === 'personal' || emailClass === 'other',
+    isPersonalEmailForPolicy: isPersonalOrOtherEmail,
+    isNamedPersonalEmail: isContactOwnedEmail && isPersonalOrOtherEmail,
   };
 }
 
@@ -557,7 +636,8 @@ export function buildBattleCsvRow(input: BattleRowBuildInput): BattleCsvRow {
   );
   const track = classifyBuyingCommitteeTrack(leadContact?.title ?? null);
   const channelTier = classifyContactChannelTier({
-    fullName: leadContact?.fullName ?? null,
+    // 仅当 chosenEmail 确属具名联系人个人邮箱时按具名直邮分级，避免把公司回退 other 箱误抬为 B 级个人直邮。
+    fullName: channels.isContactOwnedEmail ? (leadContact?.fullName ?? null) : null,
     title: leadContact?.title ?? null,
     email: channels.chosenEmail,
     emailVerificationState: channels.chosenVerificationState,
@@ -580,7 +660,7 @@ export function buildBattleCsvRow(input: BattleRowBuildInput): BattleCsvRow {
   const d3 = evaluateMultiChannelOutreachPolicy({
     country: effectiveCountry,
     companyName: company.name,
-    isPersonalEmail: channels.isPersonalEmail,
+    isPersonalEmail: channels.isPersonalEmailForPolicy,
     publicBusinessWhatsappUrl: channels.publicWhatsapp,
   });
   const trigger = resolveTriggerHook(company, input.companySignals, input.draft);
@@ -591,7 +671,7 @@ export function buildBattleCsvRow(input: BattleRowBuildInput): BattleCsvRow {
     track,
     channelTier,
     emailClass: channels.emailClass,
-    isPersonalEmail: channels.isPersonalEmail,
+    isPersonalEmail: channels.isNamedPersonalEmail,
     contactLinkedin: channels.contactLinkedin,
     commonGroundHook: trigger.commonGroundHook,
   });

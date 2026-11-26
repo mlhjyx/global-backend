@@ -8,23 +8,34 @@ function makeHarness(opts: {
   companyCountry?: string | null;
   companyChannels?: Array<{ channel: 'phone' | 'email' | 'form_url'; value: string; sourceUrl: string; providerKey: string }>;
   budgetExhausted?: boolean;
+  adapterKeys?: string[];
+  exhaustRunAfterCalls?: number;
+  denyAuthAfterCalls?: number;
 } = {}) {
   const companyUpdateMany = vi.fn(async () => ({ count: 1 }));
   const fieldEvidenceCreate = vi.fn(async () => ({}));
   const companyChannelUpsert = vi.fn(async () => ({}));
+  let authCalls = 0;
 
   const tx = {
     $queryRaw: vi.fn(async () => [{ status: 'ENRICHED', name: 'IO Solar', domain: 'iosolar.com', country: opts.companyCountry ?? null, attributes: {} }]),
     canonicalCompany: {
-      findUnique: vi.fn(async () => ({
-        id: COMPANY_ID,
-        name: 'IO Solar',
-        domain: 'iosolar.com',
-        country: opts.companyCountry ?? null,
-        dedupeKey: 'd:iosolar.com',
-        status: 'ENRICHED',
-        attributes: {},
-      })),
+      findUnique: vi.fn(async () => {
+        authCalls += 1;
+        const status =
+          opts.denyAuthAfterCalls !== undefined && authCalls > opts.denyAuthAfterCalls + 1
+            ? 'SUPPRESSED'
+            : 'ENRICHED';
+        return {
+          id: COMPANY_ID,
+          name: 'IO Solar',
+          domain: 'iosolar.com',
+          country: opts.companyCountry ?? null,
+          dedupeKey: 'd:iosolar.com',
+          status,
+          attributes: {},
+        };
+      }),
       updateMany: companyUpdateMany,
     },
     fieldEvidence: {
@@ -49,26 +60,33 @@ function makeHarness(opts: {
   const prisma = {
     withWorkspace: vi.fn(async <T>(_ws: string, work: (client: unknown) => Promise<T>) => work(tx)),
   };
-  const adapter = {
-    key: 'public_web',
+  const keys = opts.adapterKeys ?? ['public_web'];
+  const adapters = keys.map((key, idx) => ({
+    key,
     discoverContacts: vi.fn(async () => ({
       contacts: [],
       costCents: 0,
-      ...(opts.companyChannels ? { companyChannels: opts.companyChannels } : {}),
+      ...(idx === 0 && opts.companyChannels ? { companyChannels: opts.companyChannels } : {}),
     })),
-  };
+  }));
   const providers = {
-    routeContactDiscovery: vi.fn(async () => [adapter]),
+    routeContactDiscovery: vi.fn(async () => adapters),
   };
+  let statusCalls = 0;
   const budgetStore = {
     attestAuthorized: vi.fn(async () => {}),
-    status: vi.fn(async () => ({ remainingMicrousd: 1_000_000n, exhausted: false })),
+    status: vi.fn(async () => {
+      statusCalls += 1;
+      const exhausted =
+        opts.exhaustRunAfterCalls !== undefined && statusCalls >= opts.exhaustRunAfterCalls;
+      return { remainingMicrousd: exhausted ? 0n : 1_000_000n, exhausted };
+    }),
   };
   const contactBudget = opts.budgetExhausted
     ? { exhausted: () => true, observe: vi.fn() }
     : undefined;
 
-  return { tx, prisma, providers, budgetStore, companyUpdateMany, fieldEvidenceCreate, contactBudget };
+  return { tx, prisma, providers, adapters, budgetStore, companyUpdateMany, fieldEvidenceCreate, contactBudget };
 }
 
 describe('discoverContactsCore · contactDiscoveryAttemptedAt 水印与 #96-5 电话国家回填', () => {
@@ -126,6 +144,40 @@ describe('discoverContactsCore · contactDiscoveryAttemptedAt 水印与 #96-5 �
     );
 
     expect(res.budgetTruncated).toBe(true);
+    expect(h.companyUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it('does NOT stamp contactDiscoveryAttemptedAt when run budget exhausts mid-loop before remaining adapters run', async () => {
+    const h = makeHarness({
+      companyCountry: 'IT',
+      adapterKeys: ['public_web', 'social_presence'],
+      exhaustRunAfterCalls: 1,
+    });
+
+    await discoverContactsCore(
+      { prisma: h.prisma as never, providers: h.providers as never, budgetStore: h.budgetStore as never },
+      baseInput,
+    );
+
+    expect(h.adapters[0]!.discoverContacts).toHaveBeenCalledTimes(1);
+    expect(h.adapters[1]!.discoverContacts).not.toHaveBeenCalled();
+    expect(h.companyUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it('does NOT stamp contactDiscoveryAttemptedAt when authorizeExternalAction exits mid-loop', async () => {
+    const h = makeHarness({
+      companyCountry: 'IT',
+      adapterKeys: ['public_web', 'social_presence'],
+      denyAuthAfterCalls: 1,
+    });
+
+    await discoverContactsCore(
+      { prisma: h.prisma as never, providers: h.providers as never, budgetStore: h.budgetStore as never },
+      baseInput,
+    );
+
+    expect(h.adapters[0]!.discoverContacts).toHaveBeenCalledTimes(1);
+    expect(h.adapters[1]!.discoverContacts).not.toHaveBeenCalled();
     expect(h.companyUpdateMany).not.toHaveBeenCalled();
   });
 });
