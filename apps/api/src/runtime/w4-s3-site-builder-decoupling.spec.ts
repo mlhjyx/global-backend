@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
+import { S3Client, S3ServiceException } from "@aws-sdk/client-s3";
 import { NestFactory } from "@nestjs/core";
 import { describe, expect, it, vi } from "vitest";
 import { isSiteBuilderEnabled } from "./site-builder-feature-flag";
@@ -319,9 +320,42 @@ describe("Wave 4 S3: site-builder decoupling, neutral utilities, and SITE_BUILDE
     expect(sellerDel).toHaveBeenCalledWith("ws/ws-1/");
   });
 
+  it("purges acquisition data with shared S3 credentials when the site bucket does not exist", async () => {
+    vi.stubEnv("S3_ACCESS_KEY", "test-access-key");
+    vi.stubEnv("S3_SECRET_KEY", "test-secret-key");
+    const send = vi.spyOn(S3Client.prototype, "send").mockRejectedValue(
+      new S3ServiceException({
+        name: "NoSuchBucket",
+        $fault: "client",
+        $metadata: { httpStatusCode: 404 },
+      }),
+    );
+    try {
+      const sellerDel = vi.fn(async () => 2);
+      const exportDel = vi.fn(async () => 1);
+      const acts = createWorkspacePurgeActivities({
+        prisma: { withWorkspace: async () => [{}] } as never,
+        personalArtifactCleanupPort: { eraseFinalObject: vi.fn() },
+        sellerDocumentsStorage: { bucket: "seller-docs", deletePrefix: sellerDel },
+        dataExportStorage: { bucket: "exports", delete: vi.fn(), deletePrefix: exportDel },
+      });
+      const targets = await acts.snapshotWorkspacePurgeTargets({ workspaceId: "ws-1" });
+      const counts = await acts.purgeWorkspaceStorage({
+        workspaceId: "ws-1",
+        ...targets,
+        personalObjects: [],
+      });
+      expect(counts).toEqual({ sellerDocuments: 3, siteBuilder: 0, operationArtifacts: 0 });
+      expect(sellerDel).toHaveBeenCalledWith("ws/ws-1/");
+      expect(exportDel).toHaveBeenCalledWith("ws/ws-1/");
+    } finally {
+      send.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("purges retained Site Builder objects even without the Site Builder runtime", async () => {
-    const init = vi.spyOn(NeutralStorageService.prototype, "onModuleInit").mockResolvedValue();
-    const assertReady = vi.spyOn(NeutralStorageService.prototype, "assertReady").mockImplementation(() => {});
+    const prepare = vi.spyOn(NeutralStorageService.prototype, "prepareForWorkspacePurge").mockResolvedValue(true);
     const deletePrefix = vi.spyOn(NeutralStorageService.prototype, "deletePrefix").mockResolvedValue(1);
     try {
       const acts = createWorkspacePurgeActivities({
@@ -330,7 +364,7 @@ describe("Wave 4 S3: site-builder decoupling, neutral utilities, and SITE_BUILDE
         sellerDocumentsStorage: { bucket: "seller-docs", deletePrefix: vi.fn(async () => 2) },
         dataExportStorage: { bucket: "seller-docs", delete: vi.fn() },
       });
-      expect(init).not.toHaveBeenCalled();
+      expect(prepare).not.toHaveBeenCalled();
 
       const counts = await acts.purgeWorkspaceStorage({
         workspaceId: "ws-1",
@@ -338,6 +372,7 @@ describe("Wave 4 S3: site-builder decoupling, neutral utilities, and SITE_BUILDE
         legacyReleasePrefixes: ["sites/site-1/releases/legacy"],
         personalObjects: [],
       });
+      expect(prepare).toHaveBeenCalledExactlyOnceWith(false);
       expect(counts.siteBuilder).toBe(3);
       expect(deletePrefix.mock.calls).toEqual([
         ["ws/ws-1/"],
@@ -345,33 +380,41 @@ describe("Wave 4 S3: site-builder decoupling, neutral utilities, and SITE_BUILDE
         ["sites/site-1/releases/legacy/"],
       ]);
     } finally {
-      init.mockRestore();
-      assertReady.mockRestore();
+      prepare.mockRestore();
       deletePrefix.mockRestore();
     }
   });
 
-  it("requires retained site storage before the purge workflow can delete database rows", async () => {
-    const init = vi.spyOn(NeutralStorageService.prototype, "onModuleInit").mockResolvedValue();
-    const assertReady = vi.spyOn(NeutralStorageService.prototype, "assertReady").mockImplementation(() => {
-      throw new Error("OBJECT_STORAGE_CREDENTIALS_REQUIRED");
-    });
+  it.each([
+    { name: "NoSuchBucket", status: 404, prefixes: ["sites/old-site/releases/legacy/"] },
+    { name: "AccessDenied", status: 403, prefixes: [] },
+    { name: "NotFound", status: 404, prefixes: [] },
+  ])("stops before purging database records when $name cannot rule out retained objects", async ({ name, status, prefixes }) => {
+    vi.stubEnv("S3_ACCESS_KEY", "test-access-key");
+    vi.stubEnv("S3_SECRET_KEY", "test-secret-key");
+    const send = vi.spyOn(S3Client.prototype, "send").mockRejectedValue(
+      new S3ServiceException({
+        name,
+        $fault: "client",
+        $metadata: { httpStatusCode: status },
+      }),
+    );
     try {
       const acts = createWorkspacePurgeActivities({
         prisma: {
           withWorkspace: async () => [{
             site_ids: [],
-            legacy_release_prefixes: ["sites/old-site/releases/legacy/"],
+            legacy_release_prefixes: prefixes,
           }],
         } as never,
         personalArtifactCleanupPort: { eraseFinalObject: vi.fn() },
       });
       await expect(
         acts.snapshotWorkspacePurgeTargets({ workspaceId: "ws-1" }),
-      ).rejects.toThrow("OBJECT_STORAGE_CREDENTIALS_REQUIRED");
+      ).rejects.toThrow("OBJECT_STORAGE_VALIDATION_UNAVAILABLE");
     } finally {
-      init.mockRestore();
-      assertReady.mockRestore();
+      send.mockRestore();
+      vi.unstubAllEnvs();
     }
   });
 

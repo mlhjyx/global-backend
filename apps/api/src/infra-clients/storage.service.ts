@@ -15,6 +15,7 @@ import {
   ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
+  S3ServiceException,
   type LifecycleRule,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -106,7 +107,17 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
     return this.asRuntimeComponentStatus();
   }
 
-  private async refreshReadiness(): Promise<void> {
+  /**
+   * A workspace with no retained site references can skip an unprovisioned
+   * bucket. An existing bucket can still contain workspace-prefixed objects.
+   */
+  async prepareForWorkspacePurge(allowMissingBucket: boolean): Promise<boolean> {
+    if ((await this.refreshReadiness(allowMissingBucket)) === 'missing-bucket') return false;
+    this.assertReady();
+    return true;
+  }
+
+  private async refreshReadiness(allowMissingBucket = false): Promise<void | 'missing-bucket'> {
     if (!process.env.S3_ACCESS_KEY || !process.env.S3_SECRET_KEY) {
       this.failReadiness('OBJECT_STORAGE_CREDENTIALS_REQUIRED');
       return;
@@ -115,6 +126,18 @@ export class StorageService implements OnModuleInit, OnModuleDestroy {
       await this.ensureVariantAttemptLifecycle();
       this.readiness = Object.freeze({ status: 'ready' });
     } catch (error) {
+      if (
+        allowMissingBucket &&
+        error instanceof S3ServiceException &&
+        error.name === 'NoSuchBucket' &&
+        error.$metadata.httpStatusCode === 404
+      ) {
+        this.readiness = Object.freeze({
+          status: 'not_ready',
+          code: 'OBJECT_STORAGE_VALIDATION_UNAVAILABLE',
+        });
+        return 'missing-bucket';
+      }
       this.failReadiness(
         error instanceof StorageLifecycleContractError
           ? 'OBJECT_STORAGE_LIFECYCLE_INVALID'

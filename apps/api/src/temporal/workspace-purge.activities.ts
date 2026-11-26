@@ -162,18 +162,16 @@ export function createWorkspacePurgeActivities(deps: WorkspacePurgeActivityDeps)
     legacyReleasePrefixes: readonly string[];
   }): Promise<Pick<StorageService, 'deletePrefix'> | undefined> {
     if (deps.siteBuilderStorage) return deps.siteBuilderStorage;
+    const hasSiteTargets = targets.siteIds.length > 0 || targets.legacyReleasePrefixes.length > 0;
     if (
-      targets.siteIds.length === 0 &&
-      targets.legacyReleasePrefixes.length === 0 &&
+      !hasSiteTargets &&
       !process.env.S3_ACCESS_KEY &&
       !process.env.S3_SECRET_KEY
     ) {
       return undefined;
     }
     const storage = new StorageService();
-    await storage.onModuleInit();
-    storage.assertReady();
-    return storage;
+    return (await storage.prepareForWorkspacePurge(!hasSiteTargets)) ? storage : undefined;
   }
 
   return {
@@ -244,7 +242,7 @@ export function createWorkspacePurgeActivities(deps: WorkspacePurgeActivityDeps)
         legacyReleasePrefixes: row?.legacy_release_prefixes ?? [],
         exportObjectKeys: row?.export_object_keys ?? [],
       };
-      // Verify access before removing database rows that locate retained objects.
+      // Validate the bucket lifecycle before removing rows that locate retained objects.
       await siteStorageForPurge(targets);
       return targets;
     },
