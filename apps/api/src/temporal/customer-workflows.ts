@@ -24,3 +24,5 @@ export { assetObjectCleanupWorkflow } from "./asset-cleanup.workflow";
 export { measurementRollupWorkflow } from "./measurement.workflow";
 export { domainResolutionWorkflow } from "./domain-resolution.workflow";
 export { recallAuditWorkflow } from "./recall-audit.workflow";
+export { workspacePurgeWorkflow } from "./workspace-purge.workflow";
+export { dataExportWorkflow } from "./data-export.workflow";

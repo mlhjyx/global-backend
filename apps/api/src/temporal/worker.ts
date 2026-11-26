@@ -89,6 +89,8 @@ import { SiteBuildCostLedger } from "../site-builder/site-build-cost-ledger";
 import { createSiteBuildProviderWireDatabaseFromEnv } from "../site-builder/site-build-provider-wire.database";
 import { SiteReleaseService } from "../site-builder/site-release.service";
 import { createSiteReleaseMaintenanceActivities } from "./site-release-maintenance.activities";
+import { createWorkspacePurgeActivities } from "./workspace-purge.activities";
+import { createDataExportActivities } from "./data-export.activities";
 import { StorageQualityArtifactSink } from "../site-builder/quality/quality-artifact-sink";
 import { DeterministicQualityService } from "../site-builder/quality/deterministic-quality.service";
 import { ClosedRepairService } from "../site-builder/quality/closed-repair.service";
@@ -739,6 +741,8 @@ async function main(): Promise<void> {
         ownerDb: workerOpsDb,
         storage: siteBuilderStorage,
       }),
+      ...createWorkspacePurgeActivities({ prisma, siteBuilderStorage, personalArtifactCleanupPort: personalArtifactCleanupRuntime.port }),
+      ...createDataExportActivities({ prisma }),
     },
   }).catch(async () => {
     await connection.close().catch(() => undefined);

@@ -175,6 +175,11 @@
       "INSERT",
       "SELECT"
     ],
+    "data_export_job": [
+      "INSERT",
+      "SELECT",
+      "UPDATE"
+    ],
     "data_provider": [
       "SELECT"
     ],
@@ -784,7 +789,11 @@
       "INSERT",
       "SELECT",
       "UPDATE"
-    ]
+    ],
+    "workspace_purge_receipt": [
+      "SELECT"
+    ],
+    "workspace_purge_tx_fence": []
   },
   "columns": {
     "agent_profile": {

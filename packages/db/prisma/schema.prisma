@@ -4960,3 +4960,63 @@ model ContactEnrichmentExecutionStep {
   @@index([workspaceId, executionId], map: "contact_enrichment_execution_step_workspace_execution_idx")
   @@map("contact_enrichment_execution_step")
 }
+
+/// 异步租户数据导出作业（MT-P1）：单空间隔离 + 24h TTL 过期。
+/// 导出文件落对象存储 ws/{workspace_id}/exports/{export_id}.{ext}，不存公网 URL。
+model DataExportJob {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String    @map("workspace_id") @db.Uuid
+  requestedBy String    @map("requested_by") @db.Uuid
+  scope       String    @db.VarChar(32)
+  format      String    @db.VarChar(16)
+  status      String    @default("pending") @db.VarChar(24)
+  objectKey   String?   @map("object_key") @db.VarChar(256)
+  contentType String?   @map("content_type") @db.VarChar(120)
+  filename    String?   @db.VarChar(255)
+  byteSize    BigInt?   @map("byte_size")
+  rowCount    Int?      @map("row_count")
+  errorCode   String?   @map("error_code") @db.VarChar(120)
+  expiresAt   DateTime? @map("expires_at") @db.Timestamptz(3)
+  completedAt DateTime? @map("completed_at") @db.Timestamptz(3)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([workspaceId, createdAt(sort: Desc), id(sort: Desc)], map: "data_export_job_workspace_created_id_idx")
+  @@index([status, expiresAt], map: "data_export_job_status_expires_idx")
+  @@map("data_export_job")
+}
+
+/// 整工作空间物理离网清理回执（MT-P1）：无 FK 指向 workspace，清理完成后仍保留非 PII 审计回执。
+model WorkspacePurgeReceipt {
+  id                         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId                String    @unique(map: "workspace_purge_receipt_workspace_id_key") @map("workspace_id") @db.Uuid
+  idempotencyKey             String    @map("idempotency_key") @db.VarChar(128)
+  status                     String    @default("PENDING") @db.VarChar(16)
+  requestedBy                String?   @map("requested_by") @db.Uuid
+  cleanupManifest            Json      @default("{}") @map("cleanup_manifest")
+  dbRowsDeleted              Json?     @map("db_rows_deleted")
+  minioObjectsDeleted        Json?     @map("minio_objects_deleted")
+  redisKeysDeleted           Int       @default(0) @map("redis_keys_deleted")
+  temporalWorkflowsCancelled Int       @default(0) @map("temporal_workflows_cancelled")
+  errorCode                  String?   @map("error_code") @db.VarChar(120)
+  ruleVersion                String    @default("workspace-purge/v1") @map("rule_version") @db.VarChar(64)
+  startedAt                  DateTime? @map("started_at") @db.Timestamptz(3)
+  completedAt                DateTime? @map("completed_at") @db.Timestamptz(3)
+  createdAt                  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                  DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("workspace_purge_receipt")
+}
+
+/// 整工作空间物理清理事务围栏（owner_only）：仅在 purge_workspace_tenant_data_v1 事务内持有
+/// (pid, xid, target_workspace_id, nonce)，供 5 组不可变触发器在整空间物理离网时精确放行 DELETE。
+model WorkspacePurgeTxFence {
+  pid               Int
+  xid               String
+  targetWorkspaceId String @map("target_workspace_id") @db.Uuid
+  nonce             String @db.Uuid
+
+  @@id([pid, xid, targetWorkspaceId], map: "workspace_purge_tx_fence_pkey")
+  @@map("workspace_purge_tx_fence")
+}
+

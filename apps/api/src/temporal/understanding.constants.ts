@@ -71,3 +71,5 @@ export const SELLER_DOCUMENT_PENDING_CLEANUP_WORKFLOW =
   'sellerDocumentPendingCleanupWorkflow';
 export const SELLER_DOCUMENT_PENDING_CLEANUP_SCHEDULE_ID =
   'seller-document-pending-cleanup';
+export const WORKSPACE_PURGE_WORKFLOW = 'workspacePurgeWorkflow';
+export const DATA_EXPORT_WORKFLOW = 'dataExportWorkflow';

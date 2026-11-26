@@ -1,5 +1,9 @@
 import { Readable } from 'node:stream';
-import { GetObjectCommand } from '@aws-sdk/client-s3';
+import {
+  DeleteObjectsCommand,
+  GetObjectCommand,
+  ListObjectsV2Command,
+} from '@aws-sdk/client-s3';
 import { describe, expect, it, vi } from 'vitest';
 import { SellerDocumentsStorage, isS3NotFoundError } from './seller-documents.storage';
 
@@ -65,5 +69,29 @@ describe('SellerDocumentsStorage（presign 公网端点与内网端点解耦）'
     expect(isS3NotFoundError({ $metadata: { httpStatusCode: 503 }, name: 'ServiceUnavailable' })).toBe(false);
     expect(isS3NotFoundError(new Error('ECONNREFUSED'))).toBe(false);
     expect(isS3NotFoundError(null)).toBe(false);
+  });
+
+  it('deletePrefix 分页列出并批量删除，校验非法前缀并拒绝部分错误', async () => {
+    const storage = new SellerDocumentsStorage({
+      S3_ENDPOINT: 'http://127.0.0.1:9000',
+      S3_REGION: 'us-east-1',
+      S3_FORCE_PATH_STYLE: 'true',
+      S3_ACCESS_KEY: 'test-access-key',
+      S3_SECRET_KEY: 'test-secret-key',
+    });
+    await expect(storage.deletePrefix('ws/w1')).rejects.toThrow('invalid object deletion prefix');
+    await expect(storage.deletePrefix('ws/../w1/')).rejects.toThrow('invalid object deletion prefix');
+
+    const send = vi
+      .fn()
+      .mockResolvedValueOnce({ Contents: [{ Key: 'ws/w1/a.pdf' }, { Key: 'ws/w1/b.pdf' }] })
+      .mockResolvedValueOnce({ Errors: [] })
+      .mockResolvedValueOnce({ Contents: [] });
+    (storage as unknown as { client: { send: typeof send } }).client = { send };
+
+    const deleted = await storage.deletePrefix('ws/w1/');
+    expect(deleted).toBe(2);
+    expect(send.mock.calls[0]?.[0]).toBeInstanceOf(ListObjectsV2Command);
+    expect(send.mock.calls[1]?.[0]).toBeInstanceOf(DeleteObjectsCommand);
   });
 });

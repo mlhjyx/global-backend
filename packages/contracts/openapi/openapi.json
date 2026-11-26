@@ -28677,6 +28677,402 @@
         ],
         "description": "只读查询当前工作空间的实体数量与存储用量全景：单次 withWorkspace(RLS) 事务内聚合 company_profile（未删）、seller_document（未删及配额上限）、icp_definition、discovery_run、canonical_company、canonical_contact、asset/asset_variant、site_release（未删），并经只读 SECURITY DEFINER RPC 汇总 generic_operation_artifact 计数与字节数。需要 acquisition:read。"
       }
+    },
+    "/api/v1/internal/workspaces/{id}/purge": {
+      "post": {
+        "operationId": "WorkspacePurgeInternalController_purge_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "description": "内部服务令牌（env WORKSPACE_PURGE_INTERNAL_SERVICE_TOKEN）",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequestWorkspacePurgeDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/WorkspacePurgeReceiptDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "缺少或无效的服务令牌"
+          },
+          "503": {
+            "description": "服务令牌未配置或 Temporal 暂不可用"
+          }
+        },
+        "summary": "服务身份触发整工作空间物理离网清理（异步 Temporal 编排，返回 202 回执）",
+        "tags": [
+          "Workspace"
+        ],
+        "description": "服务身份触发整工作空间物理离网清理（x-service-token 鉴权，无 loopback 限制）：经 begin_workspace_purge_v1 落非 PII 回执并幂等启动 Temporal workspacePurgeWorkflow，依次取消运行中工作流、物理清理 ~145 张租户表及 3 个私有 MinIO 桶与 Redis 限流键。"
+      },
+      "get": {
+        "operationId": "WorkspacePurgeInternalController_getPurgeReceipt_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "description": "内部服务令牌（env WORKSPACE_PURGE_INTERNAL_SERVICE_TOKEN）",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/WorkspacePurgeReceiptDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "缺少或无效的服务令牌"
+          },
+          "404": {
+            "description": "清理回执不存在"
+          }
+        },
+        "summary": "查询整工作空间物理清理回执状态（非 PII 审计回执）",
+        "tags": [
+          "Workspace"
+        ],
+        "description": "服务身份查询整工作空间物理清理回执状态（x-service-token 鉴权，withWorkspace RLS）：返回 PENDING / RUNNING / COMPLETED / FAILED 非 PII 审计计数与错误码；未触发返回 404。"
+      }
+    },
+    "/api/v1/data-exports": {
+      "post": {
+        "operationId": "DataExportsController_create_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDataExportDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/DataExportJobDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "并发导出任务数达到上限（DATA_EXPORT_IN_PROGRESS）"
+          },
+          "429": {
+            "description": "24 小时导出配额超限（DATA_EXPORT_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "提交异步租户数据导出任务（返回 202 + 任务 ID）",
+        "tags": [
+          "DataExports"
+        ],
+        "x-required-scopes": [
+          "acquisition:read",
+          "acquisition:export"
+        ],
+        "description": "提交异步租户数据导出任务（leads / companies / contacts / outreach / full_archive × csv / jsonl）：受每空间最多 2 个活跃任务（409 DATA_EXPORT_IN_PROGRESS）与 24 小时最多 10 次（429 DATA_EXPORT_RATE_LIMITED）限制，返回 202 与任务 ID。需要 acquisition:read 与 acquisition:export。"
+      },
+      "get": {
+        "operationId": "DataExportsController_list_v1",
+        "parameters": [
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "enum": [
+                "pending",
+                "processing",
+                "ready",
+                "failed",
+                "expired"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "page"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/DataExportJobDto"
+                      }
+                    },
+                    "page": {
+                      "type": "object",
+                      "required": [
+                        "next_cursor",
+                        "has_more"
+                      ],
+                      "properties": {
+                        "next_cursor": {
+                          "type": "string",
+                          "nullable": true,
+                          "description": "下一页游标；null = 没有更多"
+                        },
+                        "has_more": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "游标分页列出当前工作空间的异步数据导出任务",
+        "tags": [
+          "DataExports"
+        ],
+        "x-required-scopes": [
+          "acquisition:read",
+          "acquisition:export"
+        ],
+        "description": "游标分页列出当前工作空间的异步数据导出任务：支持 ?limit=（1–100，默认 20）、?cursor=（UUID）与 ?status= 过滤，按创建时间倒序返回。需要 acquisition:read 与 acquisition:export。"
+      }
+    },
+    "/api/v1/data-exports/{exportId}": {
+      "get": {
+        "operationId": "DataExportsController_get_v1",
+        "parameters": [
+          {
+            "name": "exportId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/DataExportJobDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "导出任务不存在或属其他 workspace"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "查询单个异步数据导出任务状态与元数据",
+        "tags": [
+          "DataExports"
+        ],
+        "x-required-scopes": [
+          "acquisition:read",
+          "acquisition:export"
+        ],
+        "description": "查询单个异步数据导出任务状态、文件名、字节数、行数与过期时间；跨租户不可见（RLS）。需要 acquisition:read 与 acquisition:export。"
+      }
+    },
+    "/api/v1/data-exports/{exportId}/download": {
+      "get": {
+        "operationId": "DataExportsController_download_v1",
+        "parameters": [
+          {
+            "name": "exportId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "导出文件字节流",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            },
+            "headers": {
+              "Content-Type": {
+                "description": "导出文件 MIME 类型",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Disposition": {
+                "description": "安全转义的附件文件名",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Length": {
+                "description": "文件字节数",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "导出任务不存在或对象缺失"
+          },
+          "409": {
+            "description": "导出任务尚未就绪（DATA_EXPORT_NOT_READY）"
+          },
+          "410": {
+            "description": "导出文件已过期（DATA_EXPORT_EXPIRED）"
+          },
+          "503": {
+            "description": "导出存储暂时不可用（DATA_EXPORT_STORAGE_UNAVAILABLE）"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "流式下载已就绪的数据导出文件（不暴露内网对象存储签名）",
+        "tags": [
+          "DataExports"
+        ],
+        "x-required-scopes": [
+          "acquisition:read",
+          "acquisition:export"
+        ],
+        "description": "经服务端鉴权代理流式下载已就绪的数据导出文件（CSV / JSONL / ZIP）：未就绪返回 409 DATA_EXPORT_NOT_READY，已过期返回 410 DATA_EXPORT_EXPIRED，绝不暴露内网对象存储签名 URL。需要 acquisition:read 与 acquisition:export。"
+      }
     }
   },
   "info": {
@@ -28757,6 +29153,10 @@
     {
       "name": "Compliance",
       "description": "数据主体删除请求（Art.17）"
+    },
+    {
+      "name": "DataExports",
+      "description": "异步租户数据导出：按域或全量打包 CSV / JSONL / ZIP 并流式下载"
     },
     {
       "name": "SiteBuilder",
@@ -33221,6 +33621,249 @@
           "siteReleases",
           "operationArtifacts"
         ]
+      },
+      "WorkspacePurgeReceiptDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "workspaceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "RUNNING",
+              "COMPLETED",
+              "FAILED"
+            ]
+          },
+          "requestedBy": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "cleanupManifest": {
+            "type": "object"
+          },
+          "dbRowsDeleted": {
+            "type": "object",
+            "nullable": true
+          },
+          "minioObjectsDeleted": {
+            "type": "object",
+            "nullable": true
+          },
+          "redisKeysDeleted": {
+            "type": "number"
+          },
+          "temporalWorkflowsCancelled": {
+            "type": "number"
+          },
+          "errorCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "ruleVersion": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "completedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "workspaceId",
+          "idempotencyKey",
+          "status",
+          "requestedBy",
+          "cleanupManifest",
+          "dbRowsDeleted",
+          "minioObjectsDeleted",
+          "redisKeysDeleted",
+          "temporalWorkflowsCancelled",
+          "errorCode",
+          "ruleVersion",
+          "startedAt",
+          "completedAt",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "RequestWorkspacePurgeDto": {
+        "type": "object",
+        "properties": {
+          "idempotencyKey": {
+            "type": "string",
+            "example": "purge-ws-20261126-001",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "requestedBy": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "campaignPlanJobIds": {
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "required": [
+          "idempotencyKey"
+        ]
+      },
+      "DataExportJobDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "workspaceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "requestedBy": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "leads",
+              "companies",
+              "contacts",
+              "outreach",
+              "full_archive"
+            ]
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "csv",
+              "jsonl"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "processing",
+              "ready",
+              "failed",
+              "expired"
+            ]
+          },
+          "contentType": {
+            "type": "string",
+            "nullable": true
+          },
+          "filename": {
+            "type": "string",
+            "nullable": true
+          },
+          "byteSize": {
+            "type": "number",
+            "nullable": true
+          },
+          "rowCount": {
+            "type": "number",
+            "nullable": true
+          },
+          "errorCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "completedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "workspaceId",
+          "requestedBy",
+          "scope",
+          "format",
+          "status",
+          "contentType",
+          "filename",
+          "byteSize",
+          "rowCount",
+          "errorCode",
+          "expiresAt",
+          "completedAt",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "CreateDataExportDto": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "leads",
+              "companies",
+              "contacts",
+              "outreach",
+              "full_archive"
+            ],
+            "example": "leads"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "csv",
+              "jsonl"
+            ],
+            "example": "csv"
+          }
+        },
+        "required": [
+          "scope",
+          "format"
+        ]
       }
     }
   },
@@ -33243,6 +33886,7 @@
         "Metrics",
         "Events",
         "Compliance",
+        "DataExports",
         "Skills",
         "Packs",
         "Agents"

@@ -363,6 +363,20 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
     '同步当前工作空间名称：trim 后长度须为 1–128（空串/超长返回 400 VALIDATION_ERROR），在 withWorkspace(RLS) 内执行幂等 upsert（支持尚未建档的懒创建空间），返回 200 { data: WorkspaceDto }。需要 acquisition:write。',
   'GET /api/v1/workspace/usage-summary':
     '只读查询当前工作空间的实体数量与存储用量全景：单次 withWorkspace(RLS) 事务内聚合 company_profile（未删）、seller_document（未删及配额上限）、icp_definition、discovery_run、canonical_company、canonical_contact、asset/asset_variant、site_release（未删），并经只读 SECURITY DEFINER RPC 汇总 generic_operation_artifact 计数与字节数。需要 acquisition:read。',
+  'POST /api/v1/internal/workspaces/{id}/purge':
+    '服务身份触发整工作空间物理离网清理（x-service-token 鉴权，无 loopback 限制）：经 begin_workspace_purge_v1 落非 PII 回执并幂等启动 Temporal workspacePurgeWorkflow，依次取消运行中工作流、物理清理 ~145 张租户表及 3 个私有 MinIO 桶与 Redis 限流键。',
+  'GET /api/v1/internal/workspaces/{id}/purge':
+    '服务身份查询整工作空间物理清理回执状态（x-service-token 鉴权，withWorkspace RLS）：返回 PENDING / RUNNING / COMPLETED / FAILED 非 PII 审计计数与错误码；未触发返回 404。',
+
+  // ── DataExports ───────────────────────────────────────────────────────────
+  'POST /api/v1/data-exports':
+    '提交异步租户数据导出任务（leads / companies / contacts / outreach / full_archive × csv / jsonl）：受每空间最多 2 个活跃任务（409 DATA_EXPORT_IN_PROGRESS）与 24 小时最多 10 次（429 DATA_EXPORT_RATE_LIMITED）限制，返回 202 与任务 ID。需要 acquisition:read 与 acquisition:export。',
+  'GET /api/v1/data-exports':
+    '游标分页列出当前工作空间的异步数据导出任务：支持 ?limit=（1–100，默认 20）、?cursor=（UUID）与 ?status= 过滤，按创建时间倒序返回。需要 acquisition:read 与 acquisition:export。',
+  'GET /api/v1/data-exports/{exportId}':
+    '查询单个异步数据导出任务状态、文件名、字节数、行数与过期时间；跨租户不可见（RLS）。需要 acquisition:read 与 acquisition:export。',
+  'GET /api/v1/data-exports/{exportId}/download':
+    '经服务端鉴权代理流式下载已就绪的数据导出文件（CSV / JSONL / ZIP）：未就绪返回 409 DATA_EXPORT_NOT_READY，已过期返回 410 DATA_EXPORT_EXPIRED，绝不暴露内网对象存储签名 URL。需要 acquisition:read 与 acquisition:export。',
 
   // ── Agents（AI 底座 · M2 步 9b）───────────────────────────────────────────
   'GET /api/v1/ops-agents':

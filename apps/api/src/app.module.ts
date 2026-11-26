@@ -51,6 +51,7 @@ import { PlatformTargetLookupModule } from './platform-authority/platform-target
 import { PlatformRevocationHttpModule } from './platform-authority/platform-revocation-http.module';
 import { CampaignPlanModule } from './campaign-plan/campaign-plan.module';
 import { WorkspaceModule } from './workspace/workspace.module';
+import { DataExportsModule } from './data-exports/data-exports.module';
 
 /**
  * Root module. Domain modules (company-knowledge, icp, data-hub, lead) are
@@ -99,6 +100,7 @@ import { WorkspaceModule } from './workspace/workspace.module';
     PacksModule,
     AgentsModule,
     WorkspaceModule,
+    DataExportsModule,
   ],
   controllers: [HealthController, WhoamiController],
   providers: [
