@@ -1,8 +1,12 @@
-# Copy fixed-source 影响治理
+# Copy fixed-source 影响治理（历史归档）
 
 > 文档 ID：`DOC-IMPL-COPY-FIXED-SOURCE-IMPACT-001`
-> 生命周期：`CURRENT`
-> 适用范围：Site Builder Copy Sonnet recovery active v22 binding、reviewed exact path-set successor 与共享源码演进边界
+> 生命周期：`RETIRED`
+> 生命周期依据：Site Builder Copy 线已冻结且持续处于 `NOT_AUTHORIZED / BLOCKED`；2026-11-26 S0-Backend 正式退役 `scripts/copy-fixed-source-impact.mjs` 强制指纹门禁与 CI 步骤，本文保留作为历史治理记录归档，不再作为现行合并门禁依据。
+> 适用范围：Site Builder Copy Sonnet recovery 历史 v22 binding 归档记录
+
+> [!NOTE]
+> **已退役说明（2026-11-26）**：强制指纹门禁脚本（`scripts/copy-fixed-source-impact*.mjs`）及对应 CI 检查已正式撤除。修改 `packages/db/prisma/schema.prisma`、`package.json`、`pnpm-lock.yaml` 等共享文件不再需要重签 `copy-runtime-eligibility.json` 或同步本页 SHA-256。历史回执 [copy-runtime-eligibility.json](../evidence/site-builder/copy-runtime-eligibility.json) 仅保留为静态归档证据；Copy 线仍维持冻结状态（`dispatch_authorization=NOT_AUTHORIZED`、`pilot_eligibility=BLOCKED`）。以下正文保留退役前快照供追溯。
 
 ## 1. 问题与当前信任根
 

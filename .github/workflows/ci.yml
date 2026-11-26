@@ -539,19 +539,6 @@ jobs:
         if: needs.renderer-visual-scope.outputs.run_code != 'false'
         run: pnpm --filter @global/site-builder-eval-runner test
 
-      - name: Evaluate Copy fixed-source impact
-        id: copy-impact
-        run: node scripts/copy-fixed-source-impact.mjs --github-output "$GITHUB_OUTPUT"
-
-      - name: Copy Sonnet recovery fixed-source rebuild（顺序隔离）
-        if: steps.copy-impact.outputs.status == 'CURRENT' && needs.renderer-visual-scope.outputs.run_code != 'false'
-        run: >-
-          COPY_SONNET_RECOVERY_MANIFEST_REBUILD_TEST=1
-          COPY_SONNET_RECOVERY_REBUILD_TEST=1
-          pnpm --filter @global/api exec vitest run
-          src/site-builder/eval/copy-sonnet-recovery-manifest-prep.spec.ts
-          src/site-builder/eval/copy-sonnet-recovery-runtime-binding-prep.spec.ts
-
       - name: Generate and verify API build attestation
         if: needs.renderer-visual-scope.outputs.run_code != 'false'
         shell: bash
