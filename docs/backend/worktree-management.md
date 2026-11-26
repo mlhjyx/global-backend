@@ -7,45 +7,29 @@
 
 ## 1. 固定布局与不变量
 
-```text
-/global/backend/                                  # 只承载 main
-/global/backend/.claude/worktrees/<topic>/        # worktree:new 创建的正式开发 worktree
-/global/backend/.claude/audits/                   # 本机只读审计产物，可选
-/global/backend/.codex/worktrees/<topic>/         # legacy：2026-11-04 前创建的在飞 worktree，只审计/清理，不再新建
-/global/backend/.codex/audits/                    # legacy 审计产物
-/global/wt/<topic>/                               # legacy，只审计，不再新建
-/root/.codex/worktrees/...                        # Codex App 管理，不作为正式持久施工目标
-```
+| 位置 | 用途 |
+| --- | --- |
+| `/global/backend` | 根 main，仅跟随主线和用于现场审计 |
+| `/global/.agy-worktrees/backend/<topic>` | xin 上的新任务隔离工作树 |
+| `/global/backend/.claude/worktrees/`、`/global/backend/.codex/worktrees/` | 既有任务注册；保留 owner 与未交付工作 |
+| `/global/wt/` | 历史现场，按 §3 审计 |
 
-- 当前开发主体为 Claude Code（2026-09-21 起接替 Codex）；Codex 只在 Claude Code 指派下执行边界明确的任务。2026-11-04 起默认约定为 `.claude/worktrees/<topic>` 与 `claude/<topic>`；`.codex/worktrees/<topic>` 与 `codex/<topic>` 只剩迁移前已在飞的 worktree，不再新建。遵循「一个任务一个 writer 一个 worktree」，每个逻辑改动一个分支和 PR。
-- 新 worktree 默认从刚 fetch 的 `origin/main` 创建；任务明确指定固定基线时，按[导航指南](../CODEX-NAVIGATION-GUIDE.md#51-inventory-and-create)从该精确 commit 创建并验证，不静默切换。不得把未核验的本地 `main` 当作远端当前基线。
-- `.claude/worktrees/`、`.claude/audits/` 与 legacy `.codex/worktrees/`、`.codex/audits/` 只保存本机运行态，不提交、不存密钥，也不承担备份职责。
-- `/global/backend` 不做功能修改；其现有未跟踪文件不得因创建或迁移 worktree 被覆盖。
-- 不手工移动 Git worktree。合法移动只能使用 `git worktree move`；合法删除只能在清理门满足后使用 `git worktree remove`。
+一个任务一个 writer、一个隔离工作树。选用已核验的精确 Git 提交；普通任务用远端 main，固定基线任务沿用其批准的提交。
 
 ## 2. 创建新 worktree
 
-使用仓库助手创建 `.claude/worktrees/` 约定下的 worktree：
+在 xin 先核对注册和任务 owner，再核验远端 main 返回的完整 SHA。确保对象已存在于本地，目标目录和分支由本任务独占。以下为建树示例：
 
 ```bash
 cd /global/backend
-pnpm worktree:new r4-b-min
+pnpm worktree:inventory
+git ls-remote origin refs/heads/main
+git cat-file -e '<verified-sha>^{commit}'
+git worktree add -b docs/<topic> /global/.agy-worktrees/backend/<topic> <verified-sha>
+git -C /global/.agy-worktrees/backend/<topic> status --short --branch
 ```
 
-助手固定执行以下护栏：
-
-1. topic 只允许小写字母、数字和连字符；
-2. 定位唯一的 `main` worktree，验证 `.claude/worktrees/` 已被父仓库忽略；
-3. `git fetch origin --prune` 后解析 `origin/main`；
-4. 目标目录、`claude/<topic>` 本地/远端分支或 worktree 登记已存在时 fail-closed，不复用、不覆盖；
-5. 使用参数数组调用 Git，不拼 shell 命令，不使用 `--force`；
-6. 创建后验证分支、HEAD 基线和 clean status。
-
-可先做不创建分支/worktree 的预检（仍会 fetch 并更新远端跟踪引用）：
-
-```bash
-pnpm worktree:new r4-b-min --dry-run
-```
+在新工作树复核 `HEAD`，按 [README](../../README.md#本地起步) 准备依赖和所需配置。仓内 `pnpm worktree:new` 固定使用 `.claude/worktrees/`，见 `scripts/create-worktree.mjs`；xin 上新任务使用上面的工作区路径。
 
 ### 2.1 规划、审计与实施的新鲜度门
 
@@ -62,26 +46,14 @@ git rev-list --count HEAD..origin/main
 
 ### 2.2 根 `main` 受控跟随
 
-`worktree:new` 保证新施工分支从刚 fetch 的 `origin/main` 创建，但它不会推进 `/global/backend` 的本地 `main`。远端 PR 合入后，用下列独立入口收口本地跟随：
+远端已经合入且本地同步获授权时，先确认只会快进且入站路径不覆盖本地文件。当前工作区允许的根同步命令为 `git pull --ff-only origin main`。遇到 ahead、分歧、未交付改动或路径冲突时保留现场。
 
 ```bash
 cd /global/backend
-node scripts/governance-main-worktree-sync.mjs status  # 只读；不 fetch，origin/main 标记为本地 cached ref
-node scripts/governance-main-worktree-sync.mjs apply   # fetch origin --prune，解析 origin/main 为精确 commit，过门后只执行 merge --ff-only <commit>
+node scripts/governance-main-worktree-sync.mjs status
 ```
 
-同步脚本的 `apply` 不要求根目录必须整体 clean：本地现场若与 `HEAD..<fetch 后解析出的 origin/main commit>` 的入站路径完全无交集，Git 对同一对 commit 干跑也证明可快进，则可以在不动这些文件的情况下跟随。工具在快进前后逐字节比较完整 status，确保 tracked deletion、untracked/ignored 文件和其他本地状态未被改写。
-
-同步脚本 `apply` 的调用目录也受机器门约束：只有当前目录的 realpath 等于 `/global/backend` 才能进入 fetch；从功能 worktree、临时 checkout 或其他路径调用会在任何 Git 命令前返回 `WRONG_CLI_CWD_HOLD`。Git 子进程同时清除调用环境继承的 `GIT_*` 仓库、worktree、index、对象库、配置与 transport 覆盖，只保留脚本设置的非交互提示门，避免外部环境把固定 root 重定向到另一现场。
-
-以下任一情况必须 HOLD，只报告不修复：
-
-- `/global/backend` 不是唯一绑定 `refs/heads/main` 的 root worktree，或处于 detached/locked/prunable 状态；
-- fetch 失败、`origin/main` 无法验证为 commit、本地 `main` ahead 或 diverged；
-- 入站路径与本地 tracked、untracked 或 ignored 路径冲突，或 `git read-tree -n -u -m <local commit> <target commit>` 不通过；
-- fast-forward 后 `HEAD != <target commit>`、当前 `origin/main != <target commit>`、ahead/behind 非 `0/0`，或本地 status 与操作前不同。
-
-该命令不读取 GitHub PR 状态，不 push、rebase、stash、reset、clean、checkout 或删分支/worktree。远端 PR/CI/review/用户合并授权与本地 root fast-forward 是两个分离的责任门。
+`status` 为只读查询，使用本地已缓存的远端跟踪引用。脚本保留仓内可审计的 `apply` 实现，用于其获授权的运行场合；在 xin 以工作区根同步规则为准。PR/CI/审查的证据另行确认。
 
 ## 3. legacy `/global/wt` 迁移判定
 
@@ -100,7 +72,7 @@ node scripts/governance-main-worktree-sync.mjs apply   # fetch origin --prune，
 ```bash
 git worktree move \
   /global/wt/<topic> \
-  /global/backend/.claude/worktrees/<topic>
+  /global/.agy-worktrees/backend/<topic>
 ```
 
 移动前后都要记录并比较：路径、分支、HEAD、`git status --short` 和 `git worktree list --porcelain`。迁移不授予删除分支、覆盖文件或清理旧现场的权限。
@@ -123,7 +95,7 @@ git worktree move \
 1. 冻结原路径，不继续写入，不先宣称内容丢失；
 2. 记录 `git worktree list --porcelain`、分支、HEAD、status、tracked diff、untracked manifest、字节数与 SHA-256；
 3. 核对 PR/远端、reflog/stash、Codex 任务 UI/rollout、附件与工具任务；
-4. 从最后可信 commit 在 `.claude/worktrees/<topic>-recovery` 创建隔离候选；
+4. 从最后可信 commit 在 `/global/.agy-worktrees/backend/<topic>-recovery` 创建隔离候选；
 5. 机械重放后做路径、hash、diff 三方对账；存在未解释反证时不得宣告恢复完成；
 6. 先交付隔离候选及 manifest/hash/diff 对账和验证证据；只有对应动作已获明确授权时才 checkpoint commit、push 或开 PR，缺少这些未请求的动作不阻断本地恢复交付。合入仍须独立 PR、检查、review 与用户合并授权。
 

@@ -9,6 +9,8 @@
 
 本表是跨产品域 Object ID、System of Record、社会属性和业务生命周期的唯一登记；Prisma、OpenAPI 和事件仍是机器实现真值。审批论证保留在 Git/PR，不再维护平行对象清单。
 
+历史对象设计和来源归属保留在本表。SaaS 对象的当前实现、运行与商机验收读 [SaaS 状态](https://github.com/mlhjyx/gain-saas/blob/main/docs/status/current.md)。
+
 ## 1. 登记规则
 
 - `SoR` 是唯一业务真相写入方，不等于页面所在产品域，也不等于缓存、投影或外部副本。

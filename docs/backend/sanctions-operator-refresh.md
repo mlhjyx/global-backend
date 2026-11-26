@@ -25,9 +25,9 @@ R4 冻结期间平台 schedule 保持暂停，`sanctionsRefreshWorkflow` 不运�
 
 在合入本命令之后的 main 上建一个 worktree（根 checkout 不装 `node_modules`），装依赖并链接 `.env`：
 
+按 [worktree 手册](worktree-management.md#2-创建新-worktree) 进入 `/global/.agy-worktrees/backend/sanctions-refresh`。真实拉取和写入按独立授权执行。
+
 ```bash
-cd /global/backend && pnpm worktree:new sanctions-refresh
-cd /global/backend/.claude/worktrees/sanctions-refresh
 gctl link-env "$PWD"
 pnpm install --frozen-lockfile --prefer-offline
 pnpm --filter @global/db generate

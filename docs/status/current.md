@@ -4,10 +4,24 @@
 > 生命周期：`CURRENT`
 > 状态：`CURRENT`
 > 当前事实来源：[产品范围](../product-scope.md)、[当前架构](../architecture/current.md)、[ADR registry](../adr/registry.md)、[发布路线](../status/release-plan.md)、[冲突与开放决策登记](../governance/conflict-register.md)，以及本页逐项注明的 Git/GitHub 回读与 xin `global_dev` 只读查询
-> 最后核验：2026-11-04T01:40Z（`origin/main@8b142f53`、运行镜像以 `local-config/global/runtime.compose.env` 的 `GLOBAL_BACKEND_IMAGE` 为准（核验时 `sha256:e2cfa8cc…`）、`global_dev` 只读计数；本页是人工核验的读数，不是 RuntimeEvidence；计数快照会漂移，引用前先重跑只读查询）。2026-11-11 更新 PRD4-D12 晋级 provenance 与 G7 裁决（计数快照不变）；2026-11-12 更新周报取消与 G1 证据表述（引擎保留、SaaS 已取消）。
+> 最后核验：2026-11-27（本页开头的源码与 xin 运行形态；历史计数与验收仍以原记录的时间为准）。
 > 写法：按 PRD 4.0 L2 §5 的四问填写——做了什么（四态：未做 / 可运行 / 已验证 / 已验收）、证据、谁验收、怎么回退。四态口径（PRD 4.0 L0 §9.3「4.0 新锁定」的 `D-029`，与待拍板项 `PRD4-D<n>` 不是同一编号序列）尚未逐条拍板，本页先按它组织。2026-09-20 核验的旧版正文见文末[历史](#历史2026-09-20-核验)。
 
 ## 一页结论
+
+| 事项 | 核验结论 | 来源 |
+| --- | --- | --- |
+| 已合入源码 | 企业资料分片与后续解析、共享绿色事实域、个人数据加密 v2、流式寻源旁路与终态事件、平台授权轻量模式、建站按开关加载 | [changelog 片段](../roadmap/changelog.d/) · [实现状态](implementation-matrix.md) |
+| 获客与渠道增量（截至 `792e07a6`） | 展会目录采用已审核企业记录，按版本与来源许可写入绿色事实层。Wave 1 增加联系人证据与接受拦截、富集结果读回、Worker 租约丢失后的停止轮询 | [渠道变更](../roadmap/changelog.d/2026-11-27-mainline-a-channel-synergy.md) · [Wave 1](../roadmap/changelog.d/2026-11-27-wave1-precision-intel.md) |
+| 验收覆盖 | 获客验收 F1–F12 接入实际源码的合成数据入口，F13–F15 保留设计自检。多租户、Temporal 与 SaaS 投影的运行串联和正式试点仍需核验 | [验收口径](../roadmap/changelog.d/2026-11-27-e2e-precision-intel.md) |
+| xin 运行观察（2026-11-27） | API 与 Worker 镜像 revision 为 `bd4f2f41`，API readiness HTTP 200。客户 Temporal 与平台 PostgreSQL Temporal 同时在运行 | 镜像 OCI revision、容器状态与本机 readiness 只读回读 |
+| 跨仓交付 | 流式寻源收尾发布 `DiscoveryRunCompleted`。SaaS 消费终态并保护已有终态，部署与客户验证见 [SaaS 状态](https://github.com/mlhjyx/gain-saas/blob/main/docs/status/current.md) | [终态回传变更](../roadmap/changelog.d/2026-11-27-fix-discovery-bypass-lease-and-completed-event.md) |
+| 尚待核验 | 近期获客及建站变更的制品采用、真实普通客户寻源与联系人证据、Temporal 单集群切换和平台 `internal_db` 采用 | [运行开关](../architecture/current.md#运行模式与开关) · [待验证台账](pending-verification.md) |
+
+RL1 试点范围、G0–G7 定义和退出条件见 [发布路线](release-plan.md)。下面保留此前验收和决策记录，业务计数须按实际使用环境和口径重新核验。
+
+<details>
+<summary>历史交付记录与 2026-11-04 至 11-12 读数</summary>
 
 当前 Release 是 **RL1 线索试点**：一个 ICP（德国 / DACH 工业泵进口商与分销商）、一个国家、一个品类，Managed 周报交付，目标是拿到第一个人工 QGO 判断并记下每条线索的成本。产品负责人 2026-10-10 批准按 PRD 4.0 开发（「同意，继续，需要闭环，按照 prd 中的需求进行开发实施」）。
 
@@ -38,9 +52,11 @@
 
 身份分工（2026-11-02 核实）：产品登录/身份与 **R4 平台权威**都在 **gain-saas**——`AUTH_ISSUER`/`AUTH_JWKS_URI` = `https://127.0.0.1:18446`；机器 token / capability / Temporal 运行时 JWKS 指向 gain-saas mTLS 端点 `https://172.20.0.1:18447/…`；GrowthOS 九容器已于 2026-10-31 退役（卷保留作回退）。`CAPABILITY_MACHINE_ISSUER`/`TEMPORAL_MACHINE_ISSUER`/`PLATFORM_TECHNICAL_QUOTE_AUTH_ISSUER` 的字符串仍写作 `…:18444/…` 是**故意**的：引擎逐字节比对 `iss`，gain-saas 按同一字符串签发。
 
+</details>
+
 ## 2. 历史验收 run 记录（2026-10-08 → 10-13，11 次全部 FAILED）
 
-> 下表是当时的失败归因，保留作证据；**当前计数以「一页结论」的 2026-11-04 快照为准**，本表不复写计数。
+> 下表是当时的失败归因，保留作证据；**计数保留为「一页结论」的 2026-11-04 历史快照**，本表不复写计数。
 
 | 卖方 | run | 启动（UTC） | 倒在 | 直接原因 | 修复 |
 | --- | --- | --- | --- | --- | --- |
@@ -64,14 +80,14 @@
 
 PRD 4.0 待拍板项 D1–D19 的全量状态见[冲突与开放决策登记](../governance/conflict-register.md)；已生效的承重决定登记在 [ADR registry](../adr/registry.md) 的 `PRD4-` 一节。为避免与 Site Builder 线的 D9/D13 混淆，本页一律写 `PRD4-D<n>`。
 
-| 决定 | 当前事实 | 怎么回退 |
+| 决定 | 决议时的事实与后继 | 怎么回退 |
 | --- | --- | --- |
-| PRD4-D2 冻结 R4（2026-10-10，**2026-10-31 重开并当日完成迁移**） | 冻结期间不追加 R4 投入、4 个平台 schedule 保持 paused、每次换镜像仍续 7 天绑定。**2026-10-31 产品负责人重开**：唯一目的是把平台权威从 GrowthOS 迁到 gain-saas——当日完成，GrowthOS 九容器退役（卷保留）。撤销投递链现状：gain-saas 签发 → 后端接收（RS256 JWS）→ fence 提交 → ACK 验签已用真实 committed Grant 实测通过（[证据](../evidence/2026-11-01-platform-admission-v2-and-revocation-fence.md)）；自动触发已接线并在 dev 开启，绑定撤销 → 自动请求 → 真实 Grant → fence → ACK → 受审计重开全链实测（[live 证据](../evidence/2026-11-01-platform-revocation-autotrigger-live.md)），`BLOCKED_PENDING_BACKEND_4A4` 不再成立 | 重开只恢复「迁移」这一项投入；平台运行准入的写入者授权缺口（L4-G23）已于 2026-11-01 随准入 v2 上线闭合；恢复平台 schedule（unpause）仍是产品负责人的单独决定 |
+| PRD4-D2 冻结 R4（2026-10-10，**2026-10-31 重开并当日完成迁移**） | 冻结期间不追加 R4 投入、4 个平台 schedule 保持 paused、每次换镜像仍续 7 天绑定。**2026-10-31 产品负责人重开**：唯一目的是把平台权威从 GrowthOS 迁到 gain-saas——当日完成，GrowthOS 九容器退役（卷保留）。撤销投递链现状：gain-saas 签发 → 后端接收（RS256 JWS）→ fence 提交 → ACK 验签已用真实 committed Grant 实测通过（[证据](../evidence/2026-11-01-platform-admission-v2-and-revocation-fence.md)）；自动触发曾在 dev 验证窗口开启，绑定撤销 → 自动请求 → 真实 Grant → fence → ACK → 受审计重开全链实测（[live 证据](../evidence/2026-11-01-platform-revocation-autotrigger-live.md)），`BLOCKED_PENDING_BACKEND_4A4` 不再成立 | 重开只恢复「迁移」这一项投入；平台运行准入的写入者授权缺口（L4-G23）已于 2026-11-01 随准入 v2 上线闭合；恢复平台 schedule（unpause）仍是产品负责人的单独决定 |
 | PRD4-D3 客户写入准入与 platform Worker 就绪解耦（2026-10-10） | #627 已合并，2026-10-11 上线：客户写入按客户依赖集合判定，platform Worker 恰为 `PLATFORM_WORKER_NOT_READY` 时不再关闭客户写入；`/health/ready` 的整体口径不变 | 换回 #627 之前的镜像 |
 | PRD4-D9 制裁名单与职能邮箱（2026-10-10，部分拍板） | 制裁名单走运营刷新（#629，不经平台 schedule），三个源 ENABLED（OFAC SDN、OFAC Consolidated、EU FSF，约 1.2 万条实体）；职能邮箱按 BI-14 做公司级（#630；`company_contact` 现已 ENABLED 并在 run 内产出公司级路径）。LIA 时机未定（D6 页面待排期） | `sanctions_source` 置 DISABLED |
 | PRD4-D14 模型供应（2026-10-11） | #633：11 个获客任务照旧请求 pro 档，上游换成 Flash 档时也接受，trace 与账本如实记为 Flash；建站等其他任务仍只认 pro。xin 已打开 `MODEL_IDENTITY_SUBSTITUTES`。官方备用上游未接 | 关掉 `MODEL_IDENTITY_SUBSTITUTES` |
 | PRD4-D16 个人数据路径保持现状（2026-10-11） | `decision_maker`、`companies_house`、`inpi_rne`、`smtp_self` 保持 ENABLED，展会 Algolia 来源保留，产品负责人风险自担；验收 run 存下个人数据不再停止，改为如实计数并注明来源。个人数据三张表已有真实行：`canonical_contact` 80、`contact_point` 61、`company_contact_point` 268 | 把相应 `data_provider` 置 DISABLED |
-| OWNER-DECISION-2026-11-05 渠道记录 PII 明文延后（2026-11-05） | 渠道抓取记录 `source_channel_record` 的联系人字段明文存储（列注释 `PII_PENDING_ENCRYPTION`）；列级加密、Q25 访问审计、保留期与 Art.17 擦除按该决定延后。**复评日期 2027-01-31**，owner 产品负责人；到期未启动四件套须在冲突登记重新拍板 | 无需回退（列不变）；启动加密时按迁移改造并补 DSR 覆盖 |
+| OWNER-DECISION-2026-11-05 渠道记录 PII 明文延后（2026-11-05） | 渠道抓取记录 `source_channel_record` 的联系人字段明文存储（列注释 `PII_PENDING_ENCRYPTION`）；列级加密、Q25 访问审计、保留期与 Art.17 擦除按该决定延后。**后继**：2026-11-26 主线已合入渠道联系人列加密，当前实现见[数据平面](../architecture/current.md#3-数据平面与最小权限)；存量覆盖与 DSR 验证单独核对 | 无需回退（列不变）；启动加密时按迁移改造并补 DSR 覆盖 |
 | 联系人线 D1–D8（2026-10-31 / 11-01 拍板） | M1–M4 已上线（run 内接线、社媒三层降级、邮箱补全双闸、gain-saas 决策人卡片）；M5 Golden Set 未开始；`email_guess` 2026-11-02 按 D3 重开、待验证。权威设计稿[§十一](../superpowers/plans/2026-10-31-contact-discovery.md) 是这条线唯一总文档 | 置回对应 provider DISABLED |
 | 2026-11-02 操作决定 | ① trade_fair 零结果根因=注册表只覆盖钣金展会；拍板「planner 按注册表裁剪」（PR #739，Docker 会话执行）；② `email_guess` 重开（D3 已于 11-01 批准）；③「已执行方案可重跑」立项，并入发布线的任务/重试工作流（Phase 4）；④ new-api 的 gemini 上游 5 并发是寻源慢的根因，待产品负责人提供新密钥/渠道后扩容；⑤ natfrp 穿透保持现状（产品负责人决定，不限制不关闭） | ①②置回开关；③不移交则忽略 |
 
@@ -83,7 +99,9 @@ PRD 4.0 待拍板项 D1–D19 的全量状态见[冲突与开放决策登记](..
 
 ## 5. 下一步与需要的决定
 
-按分阶段验收推进（2026-11-02 产品负责人批准）：
+当前验收优先复核正常客户寻源、SaaS 终态投影、钱包结算和跨租户边界。每次环境切换分别记录迁移与回退证据，试点与正式发布走现行晋级门。
+
+以下为 2026-11-02 的分阶段验收记录，近期实现见上方当前核验与[实现状态](implementation-matrix.md)。
 
 1. **Phase 0 已完成**：本页 11-02 基线、`docs/modules/*` 与实现矩阵（#735）、`docs/status/release-plan.md` 承接迁移与历史文档定位（#741）。
 2. **Phase 1 已上线并验收（2026-11-03）**：租户/工作空间合同、注册引导向导与门禁、引擎卖家事实字段（#743 + gain-saas #32/#33/#34，带迁移发布）。
@@ -95,7 +113,7 @@ PRD 4.0 待拍板项 D1–D19 的全量状态见[冲突与开放决策登记](..
 ## 6. 不变的边界与工程门
 
 - 源码合入、单测或 CI 通过不等于运行采用；xin 的运行观察不是 RuntimeEvidence，也不产生可信 Release Bundle。
-- Billing/Credits 保持 `DEFERRED / NOT_IMPLEMENTED`；`cap_microusd` 是一次执行的技术安全上界，不是客户余额。正常产品请求的费用权威是 SaaS 签发的 Budget Grant，与开发者 ad-hoc 调用授权保持分离。
+- 预付积分钱包的商用账本、界面和验收归 SaaS；引擎的技术预算与供应商成本记录见[运行模式与开关](../architecture/current.md#运行模式与开关)。开发者临时调用另依任务授权。
 - 当前非运行时模型候选合同仍为 `site-builder-model-candidate-baseline/2026-08-07-v3`，详见[生成页](../site-builder/model-candidate-baseline.md)；它不等于 active route、质量证明或真实 dispatch 授权。
 - 受控触达已建成（M2 步 11，2026-11-08 验收），但**发送默认关闭**：生产发送需产品负责人开启，且真实域名与 SPF/DKIM/DMARC 实检待提供（D1②）。RL1 试点本身不做任何发送。
 - `PILOT`/`GA` 晋级门：PRD4-D12 于 2026-11-11 拍板为**产品负责人 SSH 签名回执**（`external_provenance.status=OWNER_SIGNED`，verifier=`PRODUCT_OWNER_SSH_SIGNATURE`），回执绑定 bundle 摘要/commit/证据集/机器 check 结论/审查记录，验证器离线验签；`EXTERNAL_UNVERIFIED` 仍阻断、自证 `VERIFIED` 仍拒绝，RuntimeEvidence 与 Release Bundle 仍是晋级条件。首个真实 `PILOT` 仍需相应 PASS RuntimeEvidence 与产品负责人的签名授权。

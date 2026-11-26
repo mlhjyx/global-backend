@@ -7,6 +7,8 @@
 > 模块技术方案：[technical.md](technical.md)
 > 项目进度与验收记录：[当前状态](../../status/current.md)、[实现状态矩阵](../../status/implementation-matrix.md)
 
+> 下文保留模块的历史引导设计。注册、邀请和工作台的现行入口以 [SaaS 状态](https://github.com/mlhjyx/gain-saas/blob/main/docs/status/current.md)为准。
+
 ## 文档信息
 
 | 项目 | 内容 |

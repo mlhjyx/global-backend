@@ -1,5 +1,7 @@
 # 平台权威轻量化（`PLATFORM_AUTHORITY_MODE=internal_db`）与网关/容器瘦身操作手册
 
+> 生命周期：`GUIDE`
+> 适用口径：主线已实现的可选模式，部署采用以[当前状态](../status/current.md)与运维窗口读回为准。
 > 最后核验：2026-11-26
 
 ## 1. 概述
@@ -38,11 +40,11 @@ PLATFORM_SCHEDULE_CONFIG_INTERNAL_SERVICE_TOKEN=<32字节以上随机内部服�
 
 内部控制面（如 `gain-saas` 运营台）通过 `x-service-token` 访问：
 
-- 只读查询：`GET /internal/platform-schedules`
+- 只读查询：`GET /api/v1/internal/platform-schedules`
 - 启停切换（写入 DB 并输出结构化 `[platform-schedule-config-audit]` 审计日志）：
 
 ```bash
-curl -sS -X PATCH "http://127.0.0.1:3000/internal/platform-schedules/sanctions-refresh" \
+curl -sS -X PATCH "http://127.0.0.1:3000/api/v1/internal/platform-schedules/sanctions-refresh" \
   -H "Content-Type: application/json" \
   -H "x-service-token: ${PLATFORM_SCHEDULE_CONFIG_INTERNAL_SERVICE_TOKEN}" \
   -d '{"enabled":false,"updatedBy":"ops-admin","reason":"maintenance pause"}'
@@ -50,7 +52,7 @@ curl -sS -X PATCH "http://127.0.0.1:3000/internal/platform-schedules/sanctions-r
 
 ### 2.4 回退到 R4 模式
 
-将 `PLATFORM_AUTHORITY_MODE` 切回 `r4`（或删除该环境变量）并重启 API 与 `platform-worker`，即可恢复原有 R4 能力校验与 RS256 平台 Grant 链路。
+先确认目标发布窗口获批，R4 的绑定未过期并与制品相符、签发端和 JWKS 可用、平台机器身份与 Temporal 依赖在位。按保留的 R4 配置回退 SaaS、API 与平台 Worker，复核 readiness、授权证据和调度开关。调度恢复另行确认。
 
 ## 3. 关闭 `new-api` 读回探针
 

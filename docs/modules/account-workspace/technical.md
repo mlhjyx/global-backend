@@ -5,6 +5,7 @@
 > 生命周期依据：承接已批准方案 D1/D2/D10/D12；实现事实以代码与 status 为准。
 > 模块产品说明：[product.md](product.md)
 > 当前状态：[../../status/current.md](../../status/current.md)
+> 登录、注册、成员关系和租户权限由 SaaS 维护。当前引导与工作空间规则见 [SaaS 状态](https://github.com/mlhjyx/gain-saas/blob/main/docs/status/current.md)，下文的引导方案和 API 草案保留设计出处。
 
 ## 1. 变更历史
 

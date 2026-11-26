@@ -5,7 +5,7 @@
 - **买家智能与机会资格后端**：多源发现 → 身份解析 → 证据/权利 → 意向信号 → 决策人与邮箱验证 → 六维评分 → `LeadQualifiedPackage`。边界止于交付包（ADR-001）；身份/Campaign/触达/QGO/归因归外部 SaaS。
 - **Site Builder 独立站建设子系统**：注册引导 → 资料/素材/KB → 有界 AI Task + Temporal 固定 DAG → SiteSpec → Astro 静态站。Site Builder M1 已完成阶段收口；获客侧新增开发冻结已解除。下一项施工必须以当前状态、owner、合规/成本门和验收证据重新选择，不能从历史路线自动继承授权。
 
-当前源码中 `site_builder.copy` 的 active route 为 `claude-sonnet-5` / Anthropic Messages（`anthropic-messages`）/ `medium` / no fallback；只有 `SITE_BUILDER_MODEL_ROLLBACK_COPY=true` 才改走 `deepseek-v4-pro → glm-5.2` / `low`。此处描述的是 source-level route，不证明当前进程已采用该提交，也不证明生产部署、fresh RuntimeEvidence 或 Release Bundle。精确提交、在途事项和下一门只看 [当前状态](docs/status/current.md)，历史过程只看 [changelog](docs/roadmap/changelog.md) 与 evidence。
+先从 [项目文档门户](docs/README.md) 选择任务。源码接线、模型策略和运行开关见 [当前架构](docs/architecture/current.md)，部署与验收证据见 [当前状态](docs/status/current.md)。
 
 ## 文档入口（单一事实源体系）
 
@@ -24,7 +24,7 @@
 
 ## 技术栈（as-built）
 
-NestJS/Nx 模块化单体（`apps/api`，含 Temporal worker 入口）· Astro 站点渲染器（`apps/site-renderer`）· Prisma + PostgreSQL(+pgvector) 多租户 RLS · Redis · Temporal · MinIO · Docling · BGE-M3/Ollama · **new-api 模型中转站**（单一 OpenAI 兼容端点；非 LiteLLM）· Transactional Outbox · ToolBroker/source_policy/field_evidence/suppression。OPA 未上（确定性 PolicyPort 过渡）。API 门户：Scalar `/api/portal`，OpenAPI 由代码生成（`packages/contracts/openapi/openapi.json` 为唯一 REST 真值）。
+NestJS/Nx 模块化单体（`apps/api`，含 Temporal worker 入口）· Astro 站点渲染器（`apps/site-renderer`）· Prisma + PostgreSQL(+pgvector) 多租户 RLS · Redis · Temporal · MinIO · Docling · BGE-M3/Ollama · **new-api 模型中转站**（统一网络出口；按任务合同使用对应原生协议）· Transactional Outbox · ToolBroker/source_policy/field_evidence/suppression。OPA 未上（确定性 PolicyPort 过渡）。API 门户：Scalar `/api/portal`，OpenAPI 由代码生成（`packages/contracts/openapi/openapi.json` 为唯一 REST 真值）。
 
 ## 目录结构（as-built）
 
@@ -43,9 +43,9 @@ docker-compose.yml   10 服务：PG/Redis/new-api/openox-video-compat/crawl4ai/M
 
 宿主是 xin（原生 Ubuntu 26.04），WSL 已于 2026-09-23 停用，xin 是唯一开发与运行机器。本机起停服务、密钥位置与已知陷阱以 `/global/CLAUDE.md` 为准；其中的工作区工具 `gctl`（`/global/local-config/bin/gctl`）封装了下面各档所需的 launcher 与 `--env-file` 注入 —— **裸跑 `docker compose -p global up -d` 会因缺少必需变量失败**。
 
-工具链：Node 22、pnpm 9.15.9（由 `package.json` 的 `packageManager` 锁定，`corepack enable` 即可）、Docker（xin 原生 dockerd，global 容器位于 `default` context；root 的 currentContext 指向空的 Docker Desktop，工作区工具固定使用 `DOCKER_CONTEXT=default`），与 CI 一致。
+工具链：Node 22、pnpm 9.15.9（由 `package.json` 的 `packageManager` 锁定，`corepack enable` 即可）、Docker（本机工具用 `DOCKER_CONTEXT=default`），与 CI 一致。
 
-功能施工遵循「一个任务一个 writer 一个 worktree」：`pnpm worktree:new <topic>` 在 `/global/backend/.claude/worktrees/<topic>` 创建 `claude/<topic>`；`.codex/worktrees/` 只剩迁移前的在飞 worktree。新 worktree 没有被 gitignore 的 `.env`：本机用 `gctl link-env <worktree>` 链接根 checkout 的 `apps/api/.env` 与 `packages/db/.env`；全新克隆则从两处 `.env.example` 复制后修改。依赖装在 worktree 内：
+在 xin 开发时，先按 [worktree 手册](docs/backend/worktree-management.md) 创建 `/global/.agy-worktrees/backend/<topic>` 下的隔离工作树。下面的数据库与 API 构建步骤只在任务需要时执行。通过 `gctl link-env` 准备本机已授权的开发配置；新克隆参照仓内 `.env.example`。
 
 ```bash
 gctl link-env "$PWD"
@@ -63,11 +63,11 @@ pnpm --filter @global/api build          # 部分单测加载编译产物（apps
 | --- | --- | --- | --- |
 | 单测 | 日常 TDD | `APP_DATABASE_URL= pnpm --filter @global/api test` | 无 |
 | 源码热重载 | 开发 API 端点 | `gctl up core` 后 `pnpm api:dev` | postgres · redis · minio · temporal |
-| managed runtime | RuntimeEvidence / UAT / 三方旅程 | `gctl up all` | 全部（含模型网关与 `gain-saas` 平台权威） |
+| managed runtime | RuntimeEvidence / UAT / 三方旅程 | `gctl up all` | 全部（依当前运行模式） |
 
 - **单测**：`APP_DATABASE_URL` 一旦可见（含 Prisma 自动加载的 `packages/db/.env`），PostgreSQL JSONB 字节门等少量只读集成用例就会连库；库不在时它们失败而不是跳过。零容器跑时显式置空，`gctl up core` 后直接跑即可多覆盖这部分。计数以本次命令输出为准，不在 README 固化。
 - **源码热重载**：`start:dev` 是 `nest start --watch`，交互门户在 `/api/portal`。源码运行不持有 runtime lease，`/api/v1/health/ready` 为 503、outbox relay 报 admission closed 是设计如此；读写接口可正常调试。
-- **Worker 不从源码跑**（它在启动时幂等 seed 参考数据并 ensure 平台 Temporal Schedule，清单见 `apps/api/src/temporal/ensure-schedules.ts`）：`apps/api/src/runtime/` 对 `test` 以外的所有模式（含 `development`）强制 `BUILD_ATTESTATION_REQUIRED`，源码 `pnpm --filter @global/api worker` 会停在该门。Worker 与 managed API 只跑已发布镜像（`infra/backend-runtime.compose.yml`，镜像按 digest 钉住）。
+- **常规 Worker 使用受证制品**（平台目录初始化和调度以[当前运行架构](docs/architecture/current.md#运行模式与开关)及实际启动配置为准）：`apps/api/src/runtime/` 对 `test` 以外的所有模式（含 `development`）强制 `BUILD_ATTESTATION_REQUIRED`，源码 `pnpm --filter @global/api worker` 会停在该门。除已登记的[开发快速通道](docs/backend/dev-fast-lane.md)外，Worker 与 managed API 使用已发布镜像（`infra/backend-runtime.compose.yml`，镜像按 digest 钉住）。
 - Temporal 由容器 `global-temporal-dev` 提供，定义在仓外 `/global/local-config/global/infra.local.yaml`，不在仓库 `docker-compose.yml` 中；旧 `temporal-dev.service` 已 disable 并停止。核心基础设施容器（`postgres`/`redis`/`minio`/`temporal`）与 API/Worker 的 `restart` 策略为 `unless-stopped`，其余按需容器为 `no`；宿主重启后按 `/global/local-config/RUNBOOK.md` §8 顺序核验恢复。
 
 首次建库（全新数据卷）：
@@ -76,9 +76,9 @@ pnpm --filter @global/api build          # 部分单测加载编译产物（apps
 gctl up core
 pnpm --filter @global/db exec prisma migrate deploy        # 读 packages/db/.env 的 DATABASE_URL
 pnpm --filter @global/api build && (cd apps/api && node scripts/seed-taxonomy.mjs)   # dotenv 读 apps/api/.env
-# jurisdiction_policy / source_policy / sanctions 由 worker 启动时幂等 seed；参考数据不从任何旧库导入
+# 平台目录初始化按部署入口核对，见 apps/api/package.json 的 seed:platform-catalogs
 ```
 
 > 从旧的目录推导项目 `global-backend` 迁移时，先按 [Compose 项目名迁移 runbook](docs/backend/compose-project-migration.md) 核对标签、卷并备份；不要直接 `docker compose down -v`。
 
-Provider/采集/富集类改动**必须真实数据实测**（`cd apps/api && node --import tsx scripts/verify-*.mts`，无 sandbox）。团队流程（PR/CI/审查/合并）见 [CONTRIBUTING.md](CONTRIBUTING.md) 与 [AGENTS.md §5 / §9](AGENTS.md)。
+Provider/采集/富集类改动交付真实验证证据，调用前核对数据、成本与独立授权（`cd apps/api && node --import tsx scripts/verify-*.mts`，无 sandbox）。团队流程（PR/CI/审查/合并）见 [CONTRIBUTING.md](CONTRIBUTING.md) 与 [AGENTS.md §5 / §9](AGENTS.md)。
