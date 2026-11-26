@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import { assertPiiKeyConfigured } from "../../compliance/pii-crypto";
+import { isLegacyExecutionBudgetBypass } from "../../execution-budget/legacy-execution-budget-mode";
+import { createBypassContactEnrichmentSafetyExecutor } from "./contact-enrichment-bypass-executor";
 import { genericArtifactStorageConfig } from "../../durable-results/artifact/generic-operation-artifact.storage-config";
 import { GenericOperationArtifactService } from "../../durable-results/artifact/generic-operation-artifact.service";
 import { GenericOperationArtifactRepository } from "../../durable-results/artifact/generic-operation-artifact.repository";
@@ -693,11 +695,13 @@ export function createContactEnrichmentSafetyRuntime(deps: ContactEnrichmentSafe
 
 export interface ManagedContactEnrichmentSafety {
   readonly broker: ExecutionBroker;
-  readonly service?: import('./contact-enrichment-safety.service').ContactEnrichmentSafetyService;
+  readonly service?: SafetyResultsPort;
   readonly unavailableReason?: string;
 }
-type SafetyResultsPort = Pick<import('./contact-enrichment-safety.service').ContactEnrichmentSafetyService,
+export type SafetyResultsPort = Pick<import('./contact-enrichment-safety.service').ContactEnrichmentSafetyService,
   'executeHttp' | 'executeRun' | 'listEnrichmentExecutions' | 'readEnrichmentExecution' | 'recoverEnrichmentExecution' | 'listEnrichmentQualityFacts' | 'readEnrichmentQualityFacts'>;
+export { createBypassContactEnrichmentSafetyExecutor };
+
 /** Explicit fail-closed executor: no Grant verify/consume, no broker, no legacy lane. */
 export function createFailClosedSafetyExecutor(reasonCode: string): SafetyResultsPort {
   const notAdmitted = (companyId: string) => ({ companyId, tier: 'B' as const, attempted: 0, costMicrousd: 0, deadlineHit: false, results: [], admission: 'NOT_ADMITTED' as const, reasonCode, qualityCoverage: 'PREREQUISITE_ONLY' as const });
@@ -776,7 +780,16 @@ export async function createManagedContactEnrichmentSafety(input: {
   try {
     broker = input.buildBroker(ports);
   } catch {
-    return { broker: input.buildBroker(undefined), unavailableReason: 'GOVERNANCE_PENDING' };
+    broker = input.buildBroker(undefined);
+    if (!isLegacyExecutionBudgetBypass(env)) {
+      return { broker, unavailableReason: 'GOVERNANCE_PENDING' };
+    }
+  }
+  if (isLegacyExecutionBudgetBypass(env)) {
+    return {
+      broker,
+      service: createBypassContactEnrichmentSafetyExecutor({ prisma, env, broker }),
+    };
   }
   if (!ports || !artifacts) return { broker, unavailableReason: 'ARTIFACT_UNAVAILABLE' };
   try {

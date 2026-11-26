@@ -43,7 +43,7 @@ import { SiteBuildCostLedger } from "../site-builder/site-build-cost-ledger";
 import { createSiteBuildProviderWireDatabaseFromEnv } from "../site-builder/site-build-provider-wire.database";
 import { startLangfuseRuntimeTelemetry } from "../model-runtime";
 import { assertMigrationRevision } from "../runtime/runtime-process-lease";
-import { PostgresBudgetStore } from "../tools/budget-store";
+import { createWorkspaceBudgetStore } from "../execution-budget/legacy-execution-budget-mode";
 import {
   checkGenericArtifactStorageReadiness,
   checkModelGatewayReadiness,
@@ -196,7 +196,7 @@ export async function runDevFastLaneWorker(
   const costLedger = new SiteBuildCostLedger(prisma, {
     providerWireDatabase,
   });
-  const budgetStore = new PostgresBudgetStore(prisma);
+  const budgetStore = createWorkspaceBudgetStore(prisma);
 
   const registry = new ModelProviderRegistry();
   const gatewayProvider = buildGatewayProvider();

@@ -1,21 +1,34 @@
+import { createHash, randomUUID } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
 import { assertCandidateGrantAllocated } from '../runtime/development-candidate-budget';
 import type { Prisma } from '@prisma/client';
 import type { RequestContext } from '../auth/request-context';
 import { ExecutionBudgetAuthorityRepository } from './execution-budget-authority.repository';
 import {
+  assertAuthorityPurposeShape,
   ExecutionBudgetGrantError,
   type ExecutionBudgetPurpose,
   type VerifiedExecutionBudgetAuthority,
 } from './execution-budget-authority.types';
-import { ExecutionBudgetGrantVerifier } from './execution-budget-grant.verifier';
+import {
+  EXECUTION_BUDGET_GRANT_AUDIENCE,
+  ExecutionBudgetGrantVerifier,
+} from './execution-budget-grant.verifier';
 import {
   isAllowedWorkspaceAccountKey,
   type ExecutionBudgetBinding,
 } from './execution-budget-binding';
+import {
+  bypassTechnicalCapMicrousdForPurpose,
+  isLegacyExecutionBudgetBypass,
+} from './legacy-execution-budget-mode';
 export type { ExecutionBudgetBinding } from './execution-budget-binding';
 
 const MAX_ACCOUNT_KEY_LENGTH = 200;
+const BYPASS_SYNTHETIC_ISSUER = 'urn:global-backend:legacy-budget-bypass' as const;
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 
 export interface WorkspaceExecutionBudgetScope {
   readonly purpose: ExecutionBudgetPurpose;
@@ -134,6 +147,47 @@ export class ExecutionBudgetAuthorityService {
   async verifyWorkspaceGrant(
     input: WorkspaceExecutionBudgetGrantInput,
   ): Promise<VerifiedExecutionBudgetAuthority> {
+    if (isLegacyExecutionBudgetBypass()) {
+      const workspaceId = input.identity.workspaceId;
+      const { purpose, subjectType, subjectId, requestSha256 } = input.scope;
+      if (
+        !UUID_PATTERN.test(workspaceId) ||
+        !SHA256_PATTERN.test(requestSha256)
+      ) {
+        throw new ExecutionBudgetGrantError(
+          'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH',
+        );
+      }
+      const nowSeconds = Math.floor(Date.now() / 1_000);
+      const jti = randomUUID();
+      const synthetic: VerifiedExecutionBudgetAuthority = Object.freeze({
+        schemaVersion: 'execution-budget-grant/v1',
+        authorityKind: 'WORKSPACE_GRANT',
+        issuer: BYPASS_SYNTHETIC_ISSUER,
+        audience: EXECUTION_BUDGET_GRANT_AUDIENCE,
+        jti,
+        purpose,
+        workspaceId,
+        subjectType,
+        subjectId,
+        requestSha256,
+        scheduleId: null,
+        currency: 'USD',
+        unit: 'microusd',
+        capMicrousd: bypassTechnicalCapMicrousdForPurpose(purpose),
+        capPerRunMicrousd: null,
+        campaignCapMicrousd: null,
+        maxRuns: null,
+        tokenSha256: createHash('sha256')
+          .update(`bypass:${jti}:${workspaceId}:${requestSha256}`)
+          .digest('hex'),
+        issuedAt: nowSeconds,
+        notBefore: nowSeconds,
+        expiresAt: nowSeconds + 240,
+      });
+      assertAuthorityPurposeShape(synthetic);
+      return exactVerifiedAuthority(synthetic);
+    }
     return exactVerifiedAuthority(
       await this.verifier.verify(input.compactJws, {
         authorityKind: 'WORKSPACE_GRANT',
@@ -163,8 +217,11 @@ export class ExecutionBudgetAuthorityService {
     authority: VerifiedExecutionBudgetAuthority,
   ): Promise<ExecutionBudgetBinding> {
     const exact = exactVerifiedAuthority(authority);
-    await assertCandidateGrantAllocated(exact);
     const { accountKey } = workspaceBindingIdentity(exact);
+    if (isLegacyExecutionBudgetBypass()) {
+      return executionBudgetBinding(exact, randomUUID(), false, accountKey);
+    }
+    await assertCandidateGrantAllocated(exact);
     const consumed = await this.repository.consumeWorkspaceAndOpen(
       exact,
       accountKey,
@@ -182,8 +239,11 @@ export class ExecutionBudgetAuthorityService {
     transaction: Prisma.TransactionClient,
   ): Promise<ExecutionBudgetBinding> {
     const exact = exactVerifiedAuthority(authority);
-    await assertCandidateGrantAllocated(exact);
     const { accountKey } = workspaceBindingIdentity(exact);
+    if (isLegacyExecutionBudgetBypass()) {
+      return executionBudgetBinding(exact, randomUUID(), false, accountKey);
+    }
+    await assertCandidateGrantAllocated(exact);
     const consumed =
       await this.repository.consumeWorkspaceAndOpenInTransaction(
         transaction,

@@ -8,6 +8,7 @@ import type {
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 import type { BudgetAccountAuthorization } from '../tools/budget-store';
 import { ExecutionControlError } from '../execution-budget/execution-control-error';
+import { isLegacyExecutionBudgetBypass } from '../execution-budget/legacy-execution-budget-mode';
 import {
   DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
   declaresDiscoveryCompanyLineage,
@@ -90,7 +91,9 @@ export function buildGovernedDiscoveryQueryExecutionPlan(input: Readonly<{
   adapters: readonly CompanyDiscoveryAdapter[];
   settled: readonly SettledProviderExecution[];
 }>): GovernedDiscoveryQueryExecutionPlan {
-  if (!input.lineageEnabled) return Object.freeze({ mode: 'legacy' });
+  if (!input.lineageEnabled || isLegacyExecutionBudgetBypass()) {
+    return Object.freeze({ mode: 'legacy' });
+  }
   const selectedProviders = input.adapters.map((adapter) => ({
     providerKey: adapter.key,
     lineageSchema: declaresDiscoveryCompanyLineage(adapter)

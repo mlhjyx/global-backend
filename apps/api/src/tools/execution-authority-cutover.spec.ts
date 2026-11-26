@@ -91,7 +91,7 @@ describe('Task 6 execution authority cutover', () => {
     expect(artifactService).toContain('subjectRef');
     expect(broker).toContain('GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_HOLD');
     expect(policy.cutoverFence).toBe('TASK_6_AUTHORITY_BOUND_TYPED_EXECUTION_ARTIFACT_HOLD');
-    expect(policy.physicalExecutionWiring?.status).toBe('PARTIAL_HOLD');
+    expect(policy.physicalExecutionWiring?.status).toBe('REVIEW_ONLY');
     expect(policy.artifactPhysicalExecution).toMatchObject({
       status: 'PER_CALL_SUBJECT_BINDING',
       deniedBeforeWire: true,

@@ -1075,15 +1075,6 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/model-gateway/router-model-gateway.ts#settleCachedStructured": {
-      "file": "apps/api/src/model-gateway/router-model-gateway.ts",
-      "name": "settleCachedStructured",
-      "line": 275,
-      "complexity": 24,
-      "owner": "P6-CI-10",
-      "expiresAt": "2027-01-31",
-      "reason": "存量高复杂度函数（棘轮：只许降低）"
-    },
     "apps/api/src/model-gateway/router-model-gateway.ts#<anonymous>#19": {
       "file": "apps/api/src/model-gateway/router-model-gateway.ts",
       "name": "<anonymous>",

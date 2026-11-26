@@ -2,24 +2,12 @@
   "schemaVersion": "execution-authority-policy/v2",
   "cutoverFence": "TASK_6_AUTHORITY_BOUND_TYPED_EXECUTION_ARTIFACT_HOLD",
   "physicalExecutionWiring": {
-    "status": "PARTIAL_HOLD",
+    "status": "REVIEW_ONLY",
     "protectedFiles": [
-      {
-        "path": "apps/api/src/tools/tool-broker.ts",
-        "sha256": "b09d3ca2d6b2d1a4342557d9ab6c3b88d4d16a4873df1271f7c1ba50cf567a77"
-      },
-      {
-        "path": "apps/api/src/model-gateway/router-model-gateway.ts",
-        "sha256": "3dd700172e89e35cfe78fb34fa6a73ca701e1e2cbb4eeb1a6db6e0a6de3231af"
-      },
-      {
-        "path": "apps/api/src/tools/tool-broker.factory.ts",
-        "sha256": "6bedfe377f6ab1b4a833877b6315e0263d0a1b88ad066b654e4dea58f30eeb3f"
-      },
-      {
-        "path": "apps/api/src/model-gateway/model-gateway.module.ts",
-        "sha256": "29772a82fba11b871fecfa396cb610df7e460d1c7b4c65c3ac0a6bdbcd3c2e04"
-      }
+      "apps/api/src/tools/tool-broker.ts",
+      "apps/api/src/model-gateway/router-model-gateway.ts",
+      "apps/api/src/tools/tool-broker.factory.ts",
+      "apps/api/src/model-gateway/model-gateway.module.ts"
     ]
   },
   "artifactPhysicalExecution": {

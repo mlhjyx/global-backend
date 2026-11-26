@@ -137,6 +137,14 @@ import {
 } from "./model-identity-substitutes";
 import { boundedModelUsage } from "./model-usage-boundary";
 import { assertPlatformEgressFenceAvailable } from "../platform-authority/platform-egress-fence";
+import type { LegacyExecutionBudgetMode } from "../execution-budget/legacy-execution-budget-mode";
+import {
+  buildCachedStructuredOperationKey,
+  executeWorkspaceBypassModelCall,
+  isWorkspaceModelBudgetBypass,
+  recordCachedStructuredTrace,
+  resolveModelTaskTimeoutMs,
+} from "./router-model-gateway-bypass";
 
 type FrozenSettlementContext = NonNullable<
   ReturnType<SiteBuildCostReconciliationCatalog["resolveContext"]>
@@ -256,6 +264,9 @@ export class RouterModelGateway extends ModelGateway {
   /** Strict startup snapshots required by every new paid physical wire. */
   settlementDerivationKeyring?: SettlementDerivationKeyring;
   settlementReadbackResolver?: NewApiRequestBoundSettlementResolver;
+  legacyBudgetMode?: LegacyExecutionBudgetMode;
+  maxBypassModelCallsPerAccount?: number;
+  private readonly bypassCallCounts = new Map<string, number>();
   /**
    * Deployment-approved substitute identities (owner decision D14), read once
    * here so a malformed MODEL_IDENTITY_SUBSTITUTES stops startup. Empty by
@@ -288,24 +299,15 @@ export class RouterModelGateway extends ModelGateway {
   ): Promise<ModelResult<T>> {
     assertNoCallerModelIdentitySubstitutes(context);
     const accountKey = context.runId ?? context.workspaceId;
-    const operationKey = paidOperationKey([
-      accountKey,
-      "model-cache",
-      "generateStructured",
-      input.task,
-      input.model ?? "",
-      context.correlationId ?? "",
-      input.prompt ?? "",
-      input.system ?? "",
-      input.schema ? JSON.stringify(input.schema) : "",
-    ]);
+    const operationKey = buildCachedStructuredOperationKey(input, context, accountKey);
     const cachedResult: ModelResult<T> = {
-      data: cached.data,
-      provider: "llm-cache",
-      model: cached.model,
-      usage: { inputTokens: 0, outputTokens: 0 },
-      callCount: 0,
+      data: cached.data, provider: "llm-cache", model: cached.model,
+      usage: { inputTokens: 0, outputTokens: 0 }, callCount: 0,
     };
+    if (isWorkspaceModelBudgetBypass(context, this.legacyBudgetMode)) {
+      recordCachedStructuredTrace(this.trace, input, context, cached.model);
+      return cachedResult;
+    }
     const reservation = await this.budgetStore.reserve({
       workspaceId: context.workspaceId,
       accountKey,
@@ -391,21 +393,7 @@ export class RouterModelGateway extends ModelGateway {
     const returned = settled?.receipt
       ? { ...cachedResult, durableReceipt: settled.receipt }
       : cachedResult;
-    this.trace?.record({
-      workspaceId: context.workspaceId,
-      task: input.task,
-      op: "generateStructured",
-      provider: "llm-cache",
-      model: cached.model,
-      status: "OK",
-      latencyMs: 0,
-      inputTokens: 0,
-      outputTokens: 0,
-      costUsd: 0,
-      correlationId: context.correlationId,
-      runId: context.runId,
-      modelPolicy: context.modelPolicy,
-    });
+    recordCachedStructuredTrace(this.trace, input, context, cached.model);
     if (returned.durableReceipt) {
       context.onDurableReceipt?.(input.task, returned.durableReceipt);
     }
@@ -745,7 +733,11 @@ export class RouterModelGateway extends ModelGateway {
       input.model,
     );
     const registeredTask = (await import("../ai-tasks/task-registry")).getTask(input.task);
-    const taskSignal = withTaskTimeoutSignal(input.signal, registeredTask?.timeoutMs);
+    const bypassBudget = isWorkspaceModelBudgetBypass(ctx, this.legacyBudgetMode);
+    const taskSignal = withTaskTimeoutSignal(
+      input.signal,
+      resolveModelTaskTimeoutMs(registeredTask?.timeoutMs, bypassBudget),
+    );
     const baseCents =
       input.maxCostCents ??
       registeredTask?.maxCostCents ??
@@ -777,6 +769,15 @@ export class RouterModelGateway extends ModelGateway {
         ? { ...ctx, modelIdentitySubstitutes: substitutes }
         : ctx;
     const accountKey = ctx.runId ?? ctx.workspaceId;
+    if (bypassBudget) {
+      return executeWorkspaceBypassModelCall({
+        op, input, ctx, callCtx, taskMaxOutputTokens: registeredTask?.maxOutputTokens,
+        taskSignal, accountKey, provider: chain[0]!, substitutes, call, trace: this.trace,
+        counts: this.bypassCallCounts, maxCalls: this.maxBypassModelCallsPerAccount,
+        assertExternalActionAuthorized: (c) => this.assertExternalActionAuthorized(c),
+        wrapSubstituteObserver: observingSubstituteAnswers, buildSubstitution: modelSubstitution,
+      });
+    }
     const operationKey = modelBudgetOperationKey(op, input, ctx);
     let reservation;
     try {

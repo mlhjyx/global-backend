@@ -4,6 +4,8 @@ import { assertCandidateToolExecutionAllowed } from "../runtime/development-cand
 import { assertPlatformEgressPaidContext, assertPlatformEgressReservation, createPlatformEgressOperation } from "../platform-authority/platform-egress-operation";
 import { createPlatformToolWireDispatcher } from "../platform-authority/platform-tool-wire-dispatcher";
 import { ExecutionControlError } from "../execution-budget/execution-control-error";
+import type { LegacyExecutionBudgetMode } from "../execution-budget/legacy-execution-budget-mode";
+import { enforceBypassToolCallLimit, isWorkspaceToolBudgetBypass } from "./tool-broker-bypass";
 import {
   ExecutionBroker,
   ExternalToolActionDeniedError,
@@ -144,6 +146,8 @@ export interface BrokerDeps {
   paidLedger?: SiteBuildCostLedger;
   /** G3 subject-bound artifact execution. Absent → subject-bound calls stay held. */
   artifactExecution?: ArtifactExecutionPort;
+  legacyBudgetMode?: LegacyExecutionBudgetMode;
+  maxBypassToolCallsPerAccount?: number;
 }
 
 export interface ToolTrace {
@@ -164,6 +168,7 @@ export class ToolBroker implements ExecutionBroker {
   private readonly budget: BudgetStore;
   private readonly limiter: RateLimitStore;
   private readonly deps: BrokerDeps;
+  private readonly bypassCallCounts = new Map<string, number>();
   private readonly projectionRegistry = registerContactEmailVerificationProjections(registerSourceResultProjections(
     registerCatalogResultProjections(new TypedProjectionRegistry()),
   ));
@@ -373,6 +378,7 @@ export class ToolBroker implements ExecutionBroker {
     // 3) 预算 reserve（reserve-then-settle）。R4-B paidCost uses the Site Builder
     // ledger; every other product caller uses the injected durable BudgetStore.
     const runId = ctx.runId ?? ctx.workspaceId;
+    const bypassWorkspaceBudget = isWorkspaceToolBudgetBypass(ctx, this.deps.legacyBudgetMode);
     let reservation: BudgetReservation | undefined;
     let budgetOperationKey: string | undefined;
     let paidScope: PaidOperationReservation | undefined;
@@ -435,6 +441,12 @@ export class ToolBroker implements ExecutionBroker {
           `paid tool operation replayed ${paidDecision.status}: ${paidDecision.errorCode ?? "recorded_failure"}`,
         );
       }
+    } else if (bypassWorkspaceBudget) {
+      enforceBypassToolCallLimit({
+        counts: this.bypassCallCounts, workspaceId: ctx.workspaceId, accountKey: runId,
+        maxCalls: this.deps.maxBypassToolCallsPerAccount,
+        onLimitExceeded: (reason) => this.trace(ctx, tool, "DENIED", reason, 0, now() - started),
+      });
     } else {
       try {
         budgetOperationKey = paidOperationKey([
@@ -536,15 +548,15 @@ export class ToolBroker implements ExecutionBroker {
       }
     }
     let artifactSubject: ArtifactSubjectRef | undefined;
-    if (!ctx.paidCost && reservation && subjectBoundArtifactSchema(tool) && !transientScope) {
+    if (!ctx.paidCost && (reservation || bypassWorkspaceBudget) && subjectBoundArtifactSchema(tool) && !transientScope) {
       const precheck = this.artifactPrecheck(tool, ctx);
       if ("reason" in precheck) {
-        if (!reservation.replay) await this.budget.release(reservation);
+        if (reservation && !reservation.replay) await this.budget.release(reservation);
         this.trace(ctx, tool, "DENIED", precheck.reason, 0, now() - started);
         throw new ToolPolicyDenied(toolId, precheck.reason);
       }
       artifactSubject = precheck.subjectRef;
-      if (reservation.replay) {
+      if (reservation?.replay) {
         // No wire: admit and read the settled artifact now. A fresh physical
         // call is admitted below, after the limiter, immediately before execute().
         await this.admitArtifactSubjectOrDeny(tool, ctx, reservation, artifactSubject, started);
@@ -587,7 +599,7 @@ export class ToolBroker implements ExecutionBroker {
     try {
       // G3: the subject rights check (tombstone/SUPPRESSED) is linearized here,
       // after limiter and crawl-delay waits, so a DSR committed meanwhile wins.
-      if (artifactSubject && reservation) {
+      if (artifactSubject && (reservation || bypassWorkspaceBudget)) {
         await this.admitArtifactSubjectOrDeny(tool, ctx, reservation, artifactSubject, started);
       }
       // Acquisition suppression is linearized at the last common Tool wire
@@ -1013,11 +1025,11 @@ export class ToolBroker implements ExecutionBroker {
     }
   }
 
-  /** RLS subject admission; on denial releases a fresh reservation and throws. */
+  /** RLS subject admission; on denial releases a fresh reservation (if any) and throws. */
   private async admitArtifactSubjectOrDeny<I, O>(
     tool: Tool<I, O>,
     ctx: ToolContext,
-    reservation: BudgetReservation,
+    reservation: BudgetReservation | undefined,
     subjectRef: ArtifactSubjectRef,
     started: number,
   ): Promise<void> {
@@ -1034,11 +1046,11 @@ export class ToolBroker implements ExecutionBroker {
           ? null
           : `GENERIC_OPERATION_ARTIFACT_${admission.reason}`;
     } catch (error) {
-      if (!reservation.replay) await this.budget.release(reservation);
+      if (reservation && !reservation.replay) await this.budget.release(reservation);
       throw error;
     }
     if (reason === null) return;
-    if (!reservation.replay) await this.budget.release(reservation);
+    if (reservation && !reservation.replay) await this.budget.release(reservation);
     this.trace(ctx, tool as Tool, "DENIED", reason, 0, now() - started);
     throw new ToolPolicyDenied(tool.id, reason);
   }
@@ -1100,15 +1112,9 @@ export class ToolBroker implements ExecutionBroker {
 
   private notIncurredMeasurement(): PaidCostMeasurement {
     return {
-      basis: "not_incurred",
-      budgetChargeMicrousd: 0,
-      reportedCostMicrousd: null,
-      calculatedCostMicrousd: null,
-      estimatedCostMicrousd: null,
-      inputTokens: null,
-      outputTokens: null,
-      callCount: 1,
-      meta: { reason: "execution_not_started" },
+      basis: "not_incurred", budgetChargeMicrousd: 0, reportedCostMicrousd: null,
+      calculatedCostMicrousd: null, estimatedCostMicrousd: null, inputTokens: null,
+      outputTokens: null, callCount: 1, meta: { reason: "execution_not_started" },
     };
   }
 
@@ -1120,30 +1126,18 @@ export class ToolBroker implements ExecutionBroker {
       decision = await this.deps.paidLedger!.settleOperation(input);
     } catch (error) {
       if (error instanceof PaidOperationUnknownError) throw error;
-      throw new PaidOperationUnknownError(
-        input.scope.operationKey,
-        "SETTLEMENT_ACK_UNKNOWN",
-      );
+      throw new PaidOperationUnknownError(input.scope.operationKey, "SETTLEMENT_ACK_UNKNOWN");
     }
     if (decision !== "SETTLED") {
-      throw new PaidOperationUnknownError(
-        input.scope.operationKey,
-        `SETTLEMENT_${decision}`,
-      );
+      throw new PaidOperationUnknownError(input.scope.operationKey, `SETTLEMENT_${decision}`);
     }
   }
 
   private unknownMeasurement(reservationMicrousd: number): PaidCostMeasurement {
     return {
-      basis: "unknown",
-      budgetChargeMicrousd: reservationMicrousd,
-      reportedCostMicrousd: null,
-      calculatedCostMicrousd: null,
-      estimatedCostMicrousd: null,
-      inputTokens: null,
-      outputTokens: null,
-      callCount: 1,
-      meta: { reason: "tool_failed_after_execution_started" },
+      basis: "unknown", budgetChargeMicrousd: reservationMicrousd, reportedCostMicrousd: null,
+      calculatedCostMicrousd: null, estimatedCostMicrousd: null, inputTokens: null,
+      outputTokens: null, callCount: 1, meta: { reason: "tool_failed_after_execution_started" },
     };
   }
 
