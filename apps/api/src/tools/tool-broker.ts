@@ -4,12 +4,8 @@ import { assertCandidateToolExecutionAllowed } from "../runtime/development-cand
 import { assertPlatformEgressPaidContext, assertPlatformEgressReservation, createPlatformEgressOperation } from "../platform-authority/platform-egress-operation";
 import { createPlatformToolWireDispatcher } from "../platform-authority/platform-tool-wire-dispatcher";
 import { ExecutionControlError } from "../execution-budget/execution-control-error";
-import {
-  assertStatelessTaskCallBudget,
-  resolveLegacyExecutionBudgetMode,
-  TechnicalTaskLimitExceededError,
-  type LegacyExecutionBudgetMode,
-} from "../execution-budget/legacy-execution-budget-mode";
+import type { LegacyExecutionBudgetMode } from "../execution-budget/legacy-execution-budget-mode";
+import { enforceBypassToolCallLimit, isWorkspaceToolBudgetBypass } from "./tool-broker-bypass";
 import {
   ExecutionBroker,
   ExternalToolActionDeniedError,
@@ -150,9 +146,7 @@ export interface BrokerDeps {
   paidLedger?: SiteBuildCostLedger;
   /** G3 subject-bound artifact execution. Absent → subject-bound calls stay held. */
   artifactExecution?: ArtifactExecutionPort;
-  /** Optional explicit override for LEGACY_EXECUTION_BUDGET_MODE (default reads process.env). */
   legacyBudgetMode?: LegacyExecutionBudgetMode;
-  /** Optional override for stateless per-task tool call ceiling in bypass mode (tests). */
   maxBypassToolCallsPerAccount?: number;
 }
 
@@ -260,25 +254,6 @@ export class ToolBroker implements ExecutionBroker {
     return (process.env.SOURCE_COMPLIANCE_GATE ?? "").trim().toLowerCase() === "enforce"
       ? "enforce"
       : "off";
-  }
-
-  private legacyBudgetMode(): LegacyExecutionBudgetMode {
-    return this.deps.legacyBudgetMode ?? resolveLegacyExecutionBudgetMode();
-  }
-
-  private recordBypassToolCall(workspaceId: string, accountKey: string): void {
-    const key = `${workspaceId}\0${accountKey}`;
-    const next = (this.bypassCallCounts.get(key) ?? 0) + 1;
-    assertStatelessTaskCallBudget(
-      "tool",
-      next,
-      this.deps.maxBypassToolCallsPerAccount,
-    );
-    if (!this.bypassCallCounts.has(key) && this.bypassCallCounts.size >= 2_048) {
-      const oldest = this.bypassCallCounts.keys().next().value;
-      if (oldest !== undefined) this.bypassCallCounts.delete(oldest);
-    }
-    this.bypassCallCounts.set(key, next);
   }
 
   /**
@@ -401,15 +376,9 @@ export class ToolBroker implements ExecutionBroker {
     await this.assertSourceCompliance(tool, ctx, now, started);
 
     // 3) 预算 reserve（reserve-then-settle）。R4-B paidCost uses the Site Builder
-    // ledger; every other product caller uses the injected durable BudgetStore,
-    // unless LEGACY_EXECUTION_BUDGET_MODE=bypass is enabled for workspace calls
-    // (pure stateless per-task technical hard limit + existing rate limiter).
+    // ledger; every other product caller uses the injected durable BudgetStore.
     const runId = ctx.runId ?? ctx.workspaceId;
-    const bypassWorkspaceBudget =
-      !ctx.paidCost &&
-      !ctx.platformEgress &&
-      ctx.workspaceId !== "platform" &&
-      this.legacyBudgetMode() === "bypass";
+    const bypassWorkspaceBudget = isWorkspaceToolBudgetBypass(ctx, this.deps.legacyBudgetMode);
     let reservation: BudgetReservation | undefined;
     let budgetOperationKey: string | undefined;
     let paidScope: PaidOperationReservation | undefined;
@@ -473,21 +442,11 @@ export class ToolBroker implements ExecutionBroker {
         );
       }
     } else if (bypassWorkspaceBudget) {
-      try {
-        this.recordBypassToolCall(ctx.workspaceId, runId);
-      } catch (err) {
-        if (err instanceof TechnicalTaskLimitExceededError) {
-          this.trace(
-            ctx,
-            tool,
-            "DENIED",
-            `technical limit exceeded: ${err.message.slice(0, 150)}`,
-            0,
-            now() - started,
-          );
-        }
-        throw err;
-      }
+      enforceBypassToolCallLimit({
+        counts: this.bypassCallCounts, workspaceId: ctx.workspaceId, accountKey: runId,
+        maxCalls: this.deps.maxBypassToolCallsPerAccount,
+        onLimitExceeded: (reason) => this.trace(ctx, tool, "DENIED", reason, 0, now() - started),
+      });
     } else {
       try {
         budgetOperationKey = paidOperationKey([
@@ -589,12 +548,7 @@ export class ToolBroker implements ExecutionBroker {
       }
     }
     let artifactSubject: ArtifactSubjectRef | undefined;
-    if (
-      !ctx.paidCost &&
-      (reservation || bypassWorkspaceBudget) &&
-      subjectBoundArtifactSchema(tool) &&
-      !transientScope
-    ) {
+    if (!ctx.paidCost && (reservation || bypassWorkspaceBudget) && subjectBoundArtifactSchema(tool) && !transientScope) {
       const precheck = this.artifactPrecheck(tool, ctx);
       if ("reason" in precheck) {
         if (reservation && !reservation.replay) await this.budget.release(reservation);
@@ -1158,15 +1112,9 @@ export class ToolBroker implements ExecutionBroker {
 
   private notIncurredMeasurement(): PaidCostMeasurement {
     return {
-      basis: "not_incurred",
-      budgetChargeMicrousd: 0,
-      reportedCostMicrousd: null,
-      calculatedCostMicrousd: null,
-      estimatedCostMicrousd: null,
-      inputTokens: null,
-      outputTokens: null,
-      callCount: 1,
-      meta: { reason: "execution_not_started" },
+      basis: "not_incurred", budgetChargeMicrousd: 0, reportedCostMicrousd: null,
+      calculatedCostMicrousd: null, estimatedCostMicrousd: null, inputTokens: null,
+      outputTokens: null, callCount: 1, meta: { reason: "execution_not_started" },
     };
   }
 
@@ -1178,30 +1126,18 @@ export class ToolBroker implements ExecutionBroker {
       decision = await this.deps.paidLedger!.settleOperation(input);
     } catch (error) {
       if (error instanceof PaidOperationUnknownError) throw error;
-      throw new PaidOperationUnknownError(
-        input.scope.operationKey,
-        "SETTLEMENT_ACK_UNKNOWN",
-      );
+      throw new PaidOperationUnknownError(input.scope.operationKey, "SETTLEMENT_ACK_UNKNOWN");
     }
     if (decision !== "SETTLED") {
-      throw new PaidOperationUnknownError(
-        input.scope.operationKey,
-        `SETTLEMENT_${decision}`,
-      );
+      throw new PaidOperationUnknownError(input.scope.operationKey, `SETTLEMENT_${decision}`);
     }
   }
 
   private unknownMeasurement(reservationMicrousd: number): PaidCostMeasurement {
     return {
-      basis: "unknown",
-      budgetChargeMicrousd: reservationMicrousd,
-      reportedCostMicrousd: null,
-      calculatedCostMicrousd: null,
-      estimatedCostMicrousd: null,
-      inputTokens: null,
-      outputTokens: null,
-      callCount: 1,
-      meta: { reason: "tool_failed_after_execution_started" },
+      basis: "unknown", budgetChargeMicrousd: reservationMicrousd, reportedCostMicrousd: null,
+      calculatedCostMicrousd: null, estimatedCostMicrousd: null, inputTokens: null,
+      outputTokens: null, callCount: 1, meta: { reason: "tool_failed_after_execution_started" },
     };
   }
 

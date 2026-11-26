@@ -137,14 +137,14 @@ import {
 } from "./model-identity-substitutes";
 import { boundedModelUsage } from "./model-usage-boundary";
 import { assertPlatformEgressFenceAvailable } from "../platform-authority/platform-egress-fence";
+import type { LegacyExecutionBudgetMode } from "../execution-budget/legacy-execution-budget-mode";
 import {
-  assertStatelessModelCallLimits,
-  assertStatelessTaskCallBudget,
-  resolveLegacyExecutionBudgetMode,
-  STATELESS_TASK_HARD_LIMITS,
-  TechnicalTaskLimitExceededError,
-  type LegacyExecutionBudgetMode,
-} from "../execution-budget/legacy-execution-budget-mode";
+  buildCachedStructuredOperationKey,
+  executeWorkspaceBypassModelCall,
+  isWorkspaceModelBudgetBypass,
+  recordCachedStructuredTrace,
+  resolveModelTaskTimeoutMs,
+} from "./router-model-gateway-bypass";
 
 type FrozenSettlementContext = NonNullable<
   ReturnType<SiteBuildCostReconciliationCatalog["resolveContext"]>
@@ -264,9 +264,7 @@ export class RouterModelGateway extends ModelGateway {
   /** Strict startup snapshots required by every new paid physical wire. */
   settlementDerivationKeyring?: SettlementDerivationKeyring;
   settlementReadbackResolver?: NewApiRequestBoundSettlementResolver;
-  /** Optional explicit override for LEGACY_EXECUTION_BUDGET_MODE (default reads process.env). */
   legacyBudgetMode?: LegacyExecutionBudgetMode;
-  /** Optional override for stateless per-task model call ceiling in bypass mode (tests). */
   maxBypassModelCallsPerAccount?: number;
   private readonly bypassCallCounts = new Map<string, number>();
   /**
@@ -301,40 +299,13 @@ export class RouterModelGateway extends ModelGateway {
   ): Promise<ModelResult<T>> {
     assertNoCallerModelIdentitySubstitutes(context);
     const accountKey = context.runId ?? context.workspaceId;
-    const operationKey = paidOperationKey([
-      accountKey,
-      "model-cache",
-      "generateStructured",
-      input.task,
-      input.model ?? "",
-      context.correlationId ?? "",
-      input.prompt ?? "",
-      input.system ?? "",
-      input.schema ? JSON.stringify(input.schema) : "",
-    ]);
+    const operationKey = buildCachedStructuredOperationKey(input, context, accountKey);
     const cachedResult: ModelResult<T> = {
-      data: cached.data,
-      provider: "llm-cache",
-      model: cached.model,
-      usage: { inputTokens: 0, outputTokens: 0 },
-      callCount: 0,
+      data: cached.data, provider: "llm-cache", model: cached.model,
+      usage: { inputTokens: 0, outputTokens: 0 }, callCount: 0,
     };
-    if (this.isWorkspaceBudgetBypass(context)) {
-      this.trace?.record({
-        workspaceId: context.workspaceId,
-        task: input.task,
-        op: "generateStructured",
-        provider: "llm-cache",
-        model: cached.model,
-        status: "OK",
-        latencyMs: 0,
-        inputTokens: 0,
-        outputTokens: 0,
-        costUsd: 0,
-        correlationId: context.correlationId,
-        runId: context.runId,
-        modelPolicy: context.modelPolicy,
-      });
+    if (isWorkspaceModelBudgetBypass(context, this.legacyBudgetMode)) {
+      recordCachedStructuredTrace(this.trace, input, context, cached.model);
       return cachedResult;
     }
     const reservation = await this.budgetStore.reserve({
@@ -422,21 +393,7 @@ export class RouterModelGateway extends ModelGateway {
     const returned = settled?.receipt
       ? { ...cachedResult, durableReceipt: settled.receipt }
       : cachedResult;
-    this.trace?.record({
-      workspaceId: context.workspaceId,
-      task: input.task,
-      op: "generateStructured",
-      provider: "llm-cache",
-      model: cached.model,
-      status: "OK",
-      latencyMs: 0,
-      inputTokens: 0,
-      outputTokens: 0,
-      costUsd: 0,
-      correlationId: context.correlationId,
-      runId: context.runId,
-      modelPolicy: context.modelPolicy,
-    });
+    recordCachedStructuredTrace(this.trace, input, context, cached.model);
     if (returned.durableReceipt) {
       context.onDurableReceipt?.(input.task, returned.durableReceipt);
     }
@@ -776,11 +733,10 @@ export class RouterModelGateway extends ModelGateway {
       input.model,
     );
     const registeredTask = (await import("../ai-tasks/task-registry")).getTask(input.task);
-    const bypassBudget = this.isWorkspaceBudgetBypass(ctx);
+    const bypassBudget = isWorkspaceModelBudgetBypass(ctx, this.legacyBudgetMode);
     const taskSignal = withTaskTimeoutSignal(
       input.signal,
-      registeredTask?.timeoutMs ??
-        (bypassBudget ? STATELESS_TASK_HARD_LIMITS.defaultModelTimeoutMs : undefined),
+      resolveModelTaskTimeoutMs(registeredTask?.timeoutMs, bypassBudget),
     );
     const baseCents =
       input.maxCostCents ??
@@ -814,106 +770,13 @@ export class RouterModelGateway extends ModelGateway {
         : ctx;
     const accountKey = ctx.runId ?? ctx.workspaceId;
     if (bypassBudget) {
-      try {
-        assertStatelessModelCallLimits({
-          taskId: input.task,
-          maxTokens: input.maxTokens,
-          taskMaxOutputTokens: registeredTask?.maxOutputTokens,
-        });
-        this.recordBypassModelCall(ctx.workspaceId, accountKey);
-      } catch (err) {
-        if (err instanceof TechnicalTaskLimitExceededError) {
-          this.trace?.record({
-            workspaceId: ctx.workspaceId,
-            task: input.task,
-            op,
-            provider: "technical-limit-gate",
-            model: input.model ?? "n/a",
-            status: "ERROR",
-            errorMessage: `technical limit exceeded (DENIED before call): ${err.message.slice(0, 300)}`,
-            latencyMs: 0,
-            correlationId: ctx.correlationId,
-            runId: ctx.runId,
-            modelPolicy: ctx.modelPolicy,
-          });
-        }
-        throw err;
-      }
-      const provider = chain[0]!;
-      const substituteAnswers = new Set<string>();
-      const dispatchProvider =
-        substitutes.length > 0
-          ? observingSubstituteAnswers(provider, substitutes, (model) =>
-              substituteAnswers.add(model),
-            )
-          : provider;
-      const started = Date.now();
-      try {
-        if (ctx.authorizeExternalAction) {
-          await this.assertExternalActionAuthorized(ctx);
-        }
-        const result = await call(dispatchProvider, callCtx, taskSignal);
-        const substitution = modelSubstitution(input.model, substituteAnswers);
-        this.trace?.record({
-          workspaceId: ctx.workspaceId,
-          task: input.task,
-          op,
-          provider: result.provider,
-          model: result.model,
-          ...(substitution ? { modelSubstitution: substitution } : {}),
-          ...(substitutes.length > 0 &&
-          result.modelResolutionSource === "requested_fallback"
-            ? { modelIdentityUnproven: true as const }
-            : {}),
-          status: "OK",
-          latencyMs: Date.now() - started,
-          inputTokens: result.usage?.inputTokens,
-          outputTokens: result.usage?.outputTokens,
-          costUsd: result.usage?.costUsd,
-          correlationId: ctx.correlationId,
-          runId: ctx.runId,
-          modelPolicy: ctx.modelPolicy,
-        });
-        return result;
-      } catch (err) {
-        const failedUsage =
-          err instanceof ProviderOutputError ? err.usage : undefined;
-        const failedModel =
-          err instanceof ProviderOutputError ? err.model : undefined;
-        const failedSubstitution = modelSubstitution(
-          input.model,
-          substituteAnswers,
-        );
-        this.trace?.record({
-          workspaceId: ctx.workspaceId,
-          task: input.task,
-          op,
-          provider: provider.id,
-          model:
-            failedModel !== undefined && substitutes.includes(failedModel)
-              ? failedModel
-              : (input.model ?? "unknown"),
-          ...(failedSubstitution
-            ? { modelSubstitution: failedSubstitution }
-            : {}),
-          status: "ERROR",
-          errorMessage:
-            err instanceof ProviderOutputError
-              ? `${err.name}:${err.reasonCode}`
-              : err instanceof ProviderHttpError
-                ? `${err.name}:HTTP_${err.status}`
-                : err instanceof Error
-                  ? err.name
-                  : "model call failed",
-          latencyMs: Date.now() - started,
-          inputTokens: failedUsage?.inputTokens,
-          outputTokens: failedUsage?.outputTokens,
-          correlationId: ctx.correlationId,
-          runId: ctx.runId,
-          modelPolicy: ctx.modelPolicy,
-        });
-        throw err;
-      }
+      return executeWorkspaceBypassModelCall({
+        op, input, ctx, callCtx, taskMaxOutputTokens: registeredTask?.maxOutputTokens,
+        taskSignal, accountKey, provider: chain[0]!, substitutes, call, trace: this.trace,
+        counts: this.bypassCallCounts, maxCalls: this.maxBypassModelCallsPerAccount,
+        assertExternalActionAuthorized: (c) => this.assertExternalActionAuthorized(c),
+        wrapSubstituteObserver: observingSubstituteAnswers, buildSubstitution: modelSubstitution,
+      });
     }
     const operationKey = modelBudgetOperationKey(op, input, ctx);
     let reservation;
@@ -1241,30 +1104,6 @@ export class RouterModelGateway extends ModelGateway {
       ctx.onDurableReceipt?.(input.task, returnedResult.durableReceipt);
     }
     return returnedResult;
-  }
-
-  private isWorkspaceBudgetBypass(ctx: AiContext): boolean {
-    if (ctx.paidCost || ctx.platformEgress || ctx.workspaceId === "platform") {
-      return false;
-    }
-    const effectiveMode =
-      this.legacyBudgetMode ?? resolveLegacyExecutionBudgetMode();
-    return effectiveMode === "bypass";
-  }
-
-  private recordBypassModelCall(workspaceId: string, accountKey: string): void {
-    const key = `${workspaceId}\0${accountKey}`;
-    const next = (this.bypassCallCounts.get(key) ?? 0) + 1;
-    assertStatelessTaskCallBudget(
-      "model",
-      next,
-      this.maxBypassModelCallsPerAccount,
-    );
-    if (!this.bypassCallCounts.has(key) && this.bypassCallCounts.size >= 2_048) {
-      const oldest = this.bypassCallCounts.keys().next().value;
-      if (oldest !== undefined) this.bypassCallCounts.delete(oldest);
-    }
-    this.bypassCallCounts.set(key, next);
   }
 
   /**
