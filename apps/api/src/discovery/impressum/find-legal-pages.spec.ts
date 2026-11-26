@@ -30,6 +30,22 @@ describe('rankLegalPageLinks（链接评分）', () => {
     expect(ranked).toEqual([]);
   });
 
+  it('includePrivacy=true 时可发现 informativa-privacy / datenschutz / JP 会社概要 页面', () => {
+    const ranked = rankLegalPageLinks(
+      [
+        'https://a.it/informativa-privacy',
+        'https://a.de/datenschutz',
+        'https://a.jp/%E4%BC%9A%E7%A4%BE%E6%A6%82%E8%A6%81',
+      ],
+      { includePrivacy: true },
+    );
+    expect(ranked.map((r) => [r.url, r.kind, r.score])).toEqual([
+      ['https://a.jp/%E4%BC%9A%E7%A4%BE%E6%A6%82%E8%A6%81', 'impressum', 100],
+      ['https://a.de/datenschutz', 'impressum', 70],
+      ['https://a.it/informativa-privacy', 'impressum', 70],
+    ]);
+  });
+
   it('同一路径的不同形态只留一条（带斜杠优先由调用方保证，此处按归一键去重）', () => {
     const ranked = rankLegalPageLinks(['https://a.de/impressum', 'https://a.de/impressum/']);
     expect(ranked).toHaveLength(1);

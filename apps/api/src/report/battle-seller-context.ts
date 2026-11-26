@@ -11,6 +11,7 @@
  *  3) 卖方入站页脚：复用 outreach-draft 口径汇总 `[sellerDisplayName, website, email, wa.me]`。
  */
 import type { Prisma } from '@prisma/client';
+import { isFreeWebmailDomain } from '../discovery/corporate-group-domains';
 import { filterOfferingNames } from '../discovery/offering-noise-filter';
 
 const CJK_RE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
@@ -18,6 +19,85 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
 const E164_RE = /^\+[1-9][0-9]{7,14}$/u;
 const UPPERCASE_ABBREVS = new Set(['pv', 'ev', 'ai', 'it', 'led', 'cnc', 'oem', 'odm', 'hjt', 'bess', 'ess', 'epc']);
 const PRODUCT_CLAIM_TYPES = new Set(['capability', 'certification', 'value_prop', 'param']);
+const EXTRA_CONSUMER_EMAIL_DOMAINS = new Set([
+  'sohu.com', '139.com', '189.cn', 'tom.com', 'mail.com', 'pm.me',
+  'tutanota.com', 'tuta.io', 'gmx.com', 'yahoo.co.in',
+]);
+
+const MIXED_OFFERING_GLOSSARY: ReadonlyArray<readonly [RegExp, string]> = [
+  [/高效/gu, ' High-Efficiency '],
+  [/异质结\s*[（(]\s*HJT\s*[)）]/giu, ' HJT '],
+  [/异质结/gu, ' HJT '],
+  [/光伏组件/gu, ' Solar PV Modules '],
+  [/太阳能芯片/gu, ' Solar Cells '],
+  [/电池片/gu, ' Solar Cells '],
+  [/组件/gu, ' Modules '],
+  [/光伏瓦/gu, ' Solar Tiles '],
+  [/光伏建材/gu, ' BIPV Building Materials '],
+  [/光储解决方案/gu, ' PV+ESS Solutions '],
+  [/储能微电网系统/gu, ' Energy Storage Microgrid System '],
+  [/储能系统/gu, ' Energy Storage System '],
+  [/微电网/gu, ' Microgrid '],
+  [/储能/gu, ' Energy Storage '],
+  [/解决方案/gu, ' Solutions '],
+  [/双面/gu, ' Bifacial '],
+  [/单晶/gu, ' Monocrystalline '],
+  [/多晶/gu, ' Polycrystalline '],
+  [/逆变器/gu, ' Inverter '],
+  [/锂电池/gu, ' Lithium Battery '],
+  [/工业机器人/gu, ' Industrial Robotics '],
+  [/自动化设备/gu, ' Automation Equipment '],
+  [/精密制造/gu, ' Precision Manufacturing '],
+  [/变频器/gu, ' Frequency Inverter '],
+  [/系统/gu, ' System '],
+  [/设备/gu, ' Equipment '],
+  [/产品/gu, ' Products '],
+  [/BIPV\s*BIPV/giu, 'BIPV'],
+];
+
+export function isConsumerFreemailEmail(email: string): boolean {
+  const cleaned = cleanText(email).toLowerCase();
+  if (!EMAIL_RE.test(cleaned)) return false;
+  const domain = cleaned.split('@')[1] ?? '';
+  return isFreeWebmailDomain(domain) || EXTRA_CONSUMER_EMAIL_DOMAINS.has(domain);
+}
+
+export function translateMixedOfferingText(raw: string): string | null {
+  let text = cleanText(raw);
+  if (!text) return null;
+  if (isNonCjkMeaningful(text)) return text;
+  // Normalize common full-width punctuation before glossary substitution.
+  text = text
+    .replace(/[（]/gu, '(')
+    .replace(/[）]/gu, ')')
+    .replace(/[／]/gu, '/')
+    .replace(/[，、]/gu, ', ');
+  for (const [pattern, replacement] of MIXED_OFFERING_GLOSSARY) {
+    text = text.replace(pattern, replacement);
+  }
+  // Strip any residual CJK characters and empty brackets, normalize spacing/slashes.
+  const stripped = text
+    .replace(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]+/gu, ' ')
+    .replace(/\(\s*\)/gu, ' ')
+    .replace(/\s*\/\s*/gu, ' / ')
+    .replace(/\s+/gu, ' ')
+    .replace(/^[\s/,.;:-]+|[\s/,.;:-]+$/gu, '')
+    .trim();
+  // Deduplicate adjacent identical tokens (e.g. "BIPV BIPV" or "HJT HJT").
+  const deduped = stripped.replace(/\b([A-Za-z0-9+_-]+)(?:\s+\1\b)+/giu, '$1');
+  if (deduped.length < 3 || !/[A-Za-z]{2,}/u.test(deduped) || CJK_RE.test(deduped)) {
+    return null;
+  }
+  return deduped;
+}
+
+export function extractMixedLanguageProductSummary(offering: BattleSellerOfferingLike): string | null {
+  const fromName = translateMixedOfferingText(offering.name);
+  if (fromName) return fromName;
+  const fromDesc = translateMixedOfferingText(cleanText(offering.description));
+  if (fromDesc) return fromDesc.slice(0, 100);
+  return null;
+}
 
 export interface BattleSellerProfileLike {
   readonly name: string;
@@ -181,8 +261,18 @@ function pickForeignProductSummary(input: {
     .filter(isNonCjkMeaningful);
   if (valueProps.length > 0) return valueProps.slice(0, 2).join('; ').slice(0, 140);
 
+  const filteredSet = new Set(filteredNames.map(cleanText));
+  const translatedMixed = input.offerings
+    .filter((item) => filteredSet.has(cleanText(item.name)))
+    .map(extractMixedLanguageProductSummary)
+    .filter((value): value is string => Boolean(value));
+  if (translatedMixed.length > 0) {
+    return [...new Set(translatedMixed)].slice(0, 3).join(', ').slice(0, 140);
+  }
+
   const latinSummary = cleanText(input.seller?.summary);
   if (isNonCjkMeaningful(latinSummary)) return latinSummary.slice(0, 140);
+
   const latinIndustry = cleanText(input.seller?.industry);
   if (isNonCjkMeaningful(latinIndustry)) return latinIndustry.slice(0, 140);
 
@@ -203,16 +293,19 @@ function buildSellerInboundFooter(
   const website = normalizeWebsiteUrl(seller?.website);
   const publicContacts = Array.isArray(seller?.publicContacts) ? seller.publicContacts : [];
 
+  const isCorporateEmail = (raw: string): boolean =>
+    EMAIL_RE.test(raw) && !isConsumerFreemailEmail(raw);
+
   const publicEmail = publicContacts
     .map((entry) => asRecord(entry))
-    .find((entry) => cleanText(entry.type) === 'email' && EMAIL_RE.test(cleanText(entry.value)));
+    .find((entry) => cleanText(entry.type) === 'email' && isCorporateEmail(cleanText(entry.value)));
   const businessEmail = cleanText(seller?.businessEmail);
   const siteEmail = (Array.isArray(siteContact.publicEmails) ? siteContact.publicEmails : [])
     .map(cleanText)
-    .find((value) => EMAIL_RE.test(value));
+    .find(isCorporateEmail);
   const email =
     (publicEmail ? cleanText(publicEmail.value) : '') ||
-    (EMAIL_RE.test(businessEmail) ? businessEmail : '') ||
+    (isCorporateEmail(businessEmail) ? businessEmail : '') ||
     siteEmail ||
     null;
 

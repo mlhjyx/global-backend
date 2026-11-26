@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { loadBattleSellerContext, resolveBattleSellerContext } from './battle-seller-context';
+import {
+  isConsumerFreemailEmail,
+  loadBattleSellerContext,
+  resolveBattleSellerContext,
+  translateMixedOfferingText,
+} from './battle-seller-context';
 
 describe('battle-seller-context (#96-4 foreign seller name, product summary & inbound footer)', () => {
   it('prefers foreign site.name / site.profile.companyProfile / Latin fragment / brandized domain over Chinese company name', () => {
@@ -137,5 +142,83 @@ describe('battle-seller-context (#96-4 foreign seller name, product summary & in
       sellerProductSummary: 'Direct factory HJT bifacial modules 660-720W',
       sellerInboundFooter: 'Liansheng PV | https://liansheng-pv.com | sales@liansheng-pv.com | https://wa.me/8613800138000',
     });
+  });
+
+  it('F6: keeps product terms when summarizing mixed Chinese/English offerings', () => {
+    const offerings = [
+      'G12-0BB曙光星Pro 730-765W',
+      'G12-0BB晨光星PRO 530-565W',
+      '高效异质结（HJT）组件',
+      '异质结（HJT）电池片',
+      '异质结光伏瓦 / BIPV光伏建材',
+      '新示例G12-0BB太阳能芯片',
+      '曙光星PRO / 晨光星PRO异质结组件',
+      '储能微电网系统 / 光储解决方案',
+    ];
+    for (const name of offerings) {
+      const translated = translateMixedOfferingText(name);
+      expect(translated, name).toBeTruthy();
+      expect(translated, name).not.toMatch(/[\p{Script=Han}]/u);
+      expect(translated, name).not.toContain('industrial OEM/ODM products');
+    }
+
+    const summary = resolveBattleSellerContext({
+      seller: { name: '示例光伏', website: 'https://sunforge.example' },
+      offerings: offerings.map((name) => ({ name })),
+    }).sellerProductSummary;
+    expect(summary).toBeTruthy();
+    expect(summary).not.toMatch(/[\p{Script=Han}]/u);
+    expect(summary).toContain('730-765W');
+  });
+
+  it('F6: filters consumer freemail domains (qq.com, 163.com, gmail.com) from Column 19 sellerInboundFooter', () => {
+    expect(isConsumerFreemailEmail('fixture@qq.com')).toBe(true);
+    expect(isConsumerFreemailEmail('sales@163.com')).toBe(true);
+    expect(isConsumerFreemailEmail('founder@gmail.com')).toBe(true);
+    expect(isConsumerFreemailEmail('export@sunforge.example')).toBe(false);
+
+    const ctx = resolveBattleSellerContext({
+      seller: {
+        name: 'Sunforge PV',
+        website: 'https://www.sunforge.example',
+        businessEmail: 'fixture@qq.com',
+        publicContacts: [{ type: 'email', value: 'test@163.com' }],
+      },
+      site: {
+        name: 'Sunforge PV',
+        profile: {
+          contact: {
+            publicEmails: ['founder@gmail.com', 'export@sunforge.example'],
+          },
+        },
+      },
+    });
+    expect(ctx.sellerInboundFooter).toBe('Sunforge PV | https://www.sunforge.example | export@sunforge.example');
+
+    const onlyConsumer = resolveBattleSellerContext({
+      seller: {
+        name: 'Sunforge PV',
+        website: 'https://www.sunforge.example',
+        businessEmail: 'fixture@qq.com',
+      },
+    });
+    expect(onlyConsumer.sellerInboundFooter).toBe('Sunforge PV | https://www.sunforge.example');
+  });
+
+  it('keeps specific mixed-language products ahead of a generic industry label even with whitespace', () => {
+    const result = resolveBattleSellerContext({
+      seller: { name: 'Example Solar', industry: 'Manufacturing' },
+      offerings: [{ name: '  高效异质结（HJT）  组件  ' }],
+    });
+    expect(result.sellerProductSummary).toContain('HJT');
+    expect(result.sellerProductSummary).not.toMatch(/[\p{Script=Han}]/u);
+  });
+
+  it('keeps the specific offering ahead of a generic seller summary', () => {
+    const result = resolveBattleSellerContext({
+      seller: { name: 'Example Solar', summary: 'industrial OEM/ODM products', industry: 'Manufacturing' },
+      offerings: [{ name: '高效异质结（HJT）组件' }],
+    });
+    expect(result.sellerProductSummary).toContain('HJT Modules');
   });
 });

@@ -198,31 +198,35 @@ export async function startWorkerLeaseHeartbeat(input: {
   onLeaseLost?: () => void;
 }): Promise<WorkerLeaseHeartbeatHandle> {
   const intervalMs = input.intervalMs ?? 10_000;
-  await input.leases.heartbeat(
-    input.role ?? "WORKER",
-    "READY",
-    input.taskQueue,
-  );
+  const role = input.role ?? "WORKER";
+  if (!(await settlesWithin(input.leases.heartbeat(role, "READY", input.taskQueue)))) {
+    throw new Error("WORKER_READY_LEASE_UNAVAILABLE");
+  }
   let stopped = false;
-  const timer = setInterval(() => {
-    void input.leases
-      .heartbeat(input.role ?? "WORKER", "READY", input.taskQueue)
-      .catch(async () => {
-        if (stopped) return;
-        stopped = true;
-        clearInterval(timer);
-        input.onLeaseLost?.();
-        await input.leases
-          .heartbeat(input.role ?? "WORKER", "DRAINING", input.taskQueue)
-          .catch(() => undefined);
-        input.worker.shutdown();
-      });
-  }, intervalMs);
-  timer.unref();
+  let timer: ReturnType<typeof setTimeout>;
+  const schedule = (): void => {
+    timer = setTimeout(() => {
+      void tick();
+    }, intervalMs);
+    timer.unref();
+  };
+  const tick = async (): Promise<void> => {
+    const renewed = await settlesWithin(input.leases.heartbeat(role, "READY", input.taskQueue));
+    if (stopped) return;
+    if (renewed) {
+      schedule();
+      return;
+    }
+    stopped = true;
+    input.onLeaseLost?.();
+    input.worker.shutdown();
+    void input.leases.heartbeat(role, "DRAINING", input.taskQueue).catch(() => undefined);
+  };
+  schedule();
   return Object.freeze({
     stop(): void {
       stopped = true;
-      clearInterval(timer);
+      clearTimeout(timer);
     },
   });
 }

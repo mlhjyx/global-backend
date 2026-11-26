@@ -165,3 +165,22 @@ export function hasReachableCompanyChannel(
     (c) => REACHABLE_CHANNEL_KINDS.has(c.channel) && REACHABLE_STATUSES.has(c.status),
   );
 }
+
+/**
+ * 人工 accept 资格闸（F8）：禁止对 `fitVerdict === 'mismatch'` 或 `C1_MATERIAL` / `C2_ROLE`
+ * 明确 `fail` 的线索做推荐晋升（仍允许对 `unclear` `weak` 真买家做人工复核接受）。
+ */
+export function isLeadAcceptBlockedByFit(lead: {
+  fitVerdict?: string | null;
+  fitReasons?: unknown;
+}): boolean {
+  if (lead.fitVerdict === 'mismatch') return true;
+  if (!lead.fitReasons || typeof lead.fitReasons !== 'object' || Array.isArray(lead.fitReasons)) {
+    return false;
+  }
+  const reasons = lead.fitReasons as Record<string, unknown>;
+  return ['material', 'role'].some((key) => {
+    const value = reasons[key];
+    return typeof value === 'string' && /^fail\b/iu.test(value.trim());
+  });
+}

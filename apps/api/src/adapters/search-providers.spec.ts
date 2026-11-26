@@ -220,4 +220,71 @@ describe('search-providers adapters (Serper / Exa / Google Places)', () => {
       parseExaPeopleHit({ url: 'https://www.linkedin.com/in/paolo', author: 'Paolo Verdi' }),
     ).toEqual({ url: 'https://www.linkedin.com/in/paolo', title: 'Paolo Verdi' });
   });
+
+  it('serperSearch preserves snippet only when includeSnippet=true, and exaSearch requests contents.highlights in people mode', async () => {
+    const serperFetch = vi.fn(async () =>
+      jsonResponse({
+        organic: [
+          {
+            link: 'https://it.linkedin.com/in/kieran-nolan-bbb26167',
+            title: 'Kieran Nolan | LinkedIn',
+            snippet: 'Purchasing Manager at Tavia Energy S.r.l. since 2020-2026',
+          },
+        ],
+      }),
+    ) as unknown as typeof fetch;
+
+    const withSnippet = await serperSearch(
+      { query: 'site:linkedin.com/in "Tavia Energy"', includeSnippet: true },
+      { apiKey: 'test-serper-key', fetchImpl: serperFetch },
+    );
+    expect(withSnippet.hits).toEqual([
+      {
+        url: 'https://it.linkedin.com/in/kieran-nolan-bbb26167',
+        title: 'Kieran Nolan | LinkedIn',
+        snippet: 'Purchasing Manager at Tavia Energy S.r.l. since 2020-2026',
+      },
+    ]);
+
+    const exaFetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      const sent = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      expect(sent.contents).toEqual({ highlights: { maxCharacters: 720 } });
+      return jsonResponse({
+        results: [
+          {
+            url: 'https://it.linkedin.com/in/miralevinnovacrest',
+            title: 'Mira Levin | LinkedIn',
+            highlights: ['Novacrest S.r.l. — Responsabile Commerciale', 'Solar EPC Italy', 'H3', 'H4'],
+          },
+        ],
+      });
+    }) as unknown as typeof fetch;
+
+    const exaPeople = await exaSearch(
+      { query: 'Novacrest Srl', category: 'people', numResults: 5 },
+      { apiKey: 'test-exa-key', fetchImpl: exaFetch },
+    );
+    expect(exaPeople.hits).toEqual([
+      {
+        url: 'https://it.linkedin.com/in/miralevinnovacrest',
+        title: 'Mira Levin | LinkedIn',
+        highlights: ['Novacrest S.r.l. — Responsabile Commerciale', 'Solar EPC Italy', 'H3'],
+      },
+    ]);
+  });
+
+  it('does not promote unrequested Exa text, biographies or summaries to attribution evidence', () => {
+    expect(parseExaPeopleHit({
+      url: 'https://www.linkedin.com/in/lexi-novel',
+      title: 'Lexi Novel | LinkedIn',
+      text: 'Raw profile body with unrequested details',
+      summary: 'An unsolicited biography',
+      highlights: ['Purchasing Manager at Sunforge'],
+      entities: [{ properties: { bio: 'Full biography', summary: 'Entity summary' } }],
+    })).toEqual({
+      url: 'https://www.linkedin.com/in/lexi-novel',
+      title: 'Lexi Novel | LinkedIn',
+      highlights: ['Purchasing Manager at Sunforge'],
+    });
+  });
 });

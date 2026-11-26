@@ -131,6 +131,8 @@ import {
 import {
   WORKER_SHUTDOWN_OPTIONS,
   armWorkerExitDeadline,
+  armWorkerLeaseLossDeadline,
+  holdWorkerNotReadyBounded,
 } from "../runtime/worker-shutdown-policy";
 import { workerConcurrencyOptions } from "./worker-concurrency";
 import {
@@ -140,21 +142,15 @@ import {
 } from "../runtime/dev-fast-lane";
 import { runDevFastLaneWorker } from "./dev-fast-lane-worker";
 
-const WORKER_NOT_READY_LOG_INTERVAL_MS = 30_000;
-async function holdWorkerNotReady(
+function holdWorkerNotReady(
   code: string,
   leases?: RuntimeProcessLeaseService,
 ): Promise<never> {
-  console.error(
-    `[worker] not ready: ${code}; Temporal polling remains disabled`,
-  );
-  return new Promise<never>(() => {
-    setInterval(() => {
-      console.error(`[worker] still not ready: ${code}`);
-      void leases
-        ?.heartbeat("WORKER", "STARTING", UNDERSTANDING_TASK_QUEUE)
-        .catch(() => undefined);
-    }, WORKER_NOT_READY_LOG_INTERVAL_MS);
+  return holdWorkerNotReadyBounded({
+    code,
+    onTick: () => {
+      void leases?.heartbeat("WORKER", "STARTING", UNDERSTANDING_TASK_QUEUE).catch(() => undefined);
+    },
   });
 }
 
@@ -735,14 +731,19 @@ async function main(): Promise<void> {
       "[worker] duplicate or invalid shutdown request was contained",
     ),
   );
+  let exitCodeAfterDrain: 0 | 1 = 0;
+  let leaseLostExitDeadline: ReturnType<typeof armWorkerExitDeadline> | undefined;
   const readyHeartbeat = await startWorkerLeaseHeartbeat({
     leases: runtimeLeases,
     worker: workerShutdown,
     taskQueue: UNDERSTANDING_TASK_QUEUE,
-    onLeaseLost: () =>
+    onLeaseLost: () => {
+      exitCodeAfterDrain = 1;
+      leaseLostExitDeadline ??= armWorkerLeaseLossDeadline();
       console.error(
         "[worker] runtime lease lost; polling is shutting down and readiness is closed",
-      ),
+      );
+    },
   });
   const credentialFailure = createWorkerCredentialFailure({
     role: "WORKER",
@@ -788,7 +789,8 @@ async function main(): Promise<void> {
     // The worker has stopped polling. If anything below hangs, the process
     // must still exit so the container's restart policy re-enters the startup
     // gates instead of leaving a drained container alive (2026-11-05).
-    const exitDeadline = armWorkerExitDeadline();
+    const exitDeadline = armWorkerExitDeadline(undefined, undefined, exitCodeAfterDrain);
+    leaseLostExitDeadline?.clear();
     await controlledSignals.stop();
     stopCredentialBinding();
     machine.client.close();
@@ -807,6 +809,7 @@ async function main(): Promise<void> {
     await prisma.$disconnect().catch(() => undefined);
     exitDeadline.clear();
   }
+  if (exitCodeAfterDrain) process.exit(exitCodeAfterDrain);
 }
 
 main().catch(() => {

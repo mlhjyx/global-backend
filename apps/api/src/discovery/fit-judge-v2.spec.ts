@@ -152,17 +152,25 @@ describe('JUDGE_CONTRACT_MODE parsing', () => {
 describe('companyDomainEvidenceUrlPolicy', () => {
   const policy = companyDomainEvidenceUrlPolicy('www.Acme.Example');
 
-  it('allows the company domain and its subdomains only', () => {
+  it('allows the company domain and its subdomains only (including scheme-less company hostnames)', () => {
     expect(policy('https://acme.example/products').allowed).toBe(true);
     expect(policy('https://www.acme.example/impressum').allowed).toBe(true);
     expect(policy('https://shop.acme.example/p/1').allowed).toBe(true);
+    expect(policy('acme.example').allowed).toBe(true);
+    expect(policy('www.acme.example/products').allowed).toBe(true);
+    expect(policy('other.example/products').allowed).toBe(false);
     expect(policy('https://other.example/products').allowed).toBe(false);
     expect(policy('https://acme.example.evil.test/').allowed).toBe(false);
     expect(policy('not a url').allowed).toBe(false);
+    expect(policy('javascript:alert(1)').allowed).toBe(false);
   });
 
   it('denies every URL when the company has no domain (fail closed)', () => {
     expect(companyDomainEvidenceUrlPolicy(null)('https://acme.example/').allowed).toBe(false);
+  });
+
+  it('rejects a company evidence URL containing credentials', () => {
+    expect(policy('https://placeholder@acme.example/products').allowed).toBe(false);
   });
 });
 

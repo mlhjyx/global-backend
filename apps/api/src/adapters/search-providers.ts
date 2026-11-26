@@ -38,6 +38,8 @@ export interface SearchProviderDeps {
 export interface SearchProviderHit {
   url: string;
   title?: string;
+  snippet?: string;
+  highlights?: string[];
 }
 
 export interface SearchProviderResponse {
@@ -244,9 +246,10 @@ export interface SerperSearchInput {
   num?: number;
   gl?: string;
   hl?: string;
+  includeSnippet?: boolean;
 }
 
-/** Serper Google SERP 搜索：仅保留去噪后的 url + title。 */
+/** Serper Google SERP 搜索：默认仅保留去噪后的 url + title；个人搜人模式下可显式开启 snippet。 */
 export async function serperSearch(
   input: SerperSearchInput,
   deps: SearchProviderDeps = {},
@@ -279,11 +282,16 @@ export async function serperSearch(
     const url = sanitizeSearchProviderUrl((item as { link?: unknown }).link);
     if (!url) continue;
     const rawTitle = (item as { title?: unknown }).title;
-    hits.push(
-      typeof rawTitle === 'string' && rawTitle.trim().length > 0
-        ? { url, title: rawTitle.trim() }
-        : { url },
-    );
+    const rawSnippet =
+      input.includeSnippet === true ? (item as { snippet?: unknown }).snippet : undefined;
+    const title = typeof rawTitle === 'string' && rawTitle.trim().length > 0 ? rawTitle.trim() : undefined;
+    const snippet =
+      typeof rawSnippet === 'string' && rawSnippet.trim().length > 0 ? rawSnippet.trim() : undefined;
+    hits.push({
+      url,
+      ...(title !== undefined ? { title } : {}),
+      ...(snippet !== undefined ? { snippet } : {}),
+    });
   }
   return { hits, billed: true };
 }
@@ -349,6 +357,7 @@ export interface ExaSearchInput {
   excludeDomains?: readonly string[];
   includeDomains?: readonly string[];
   category?: 'company' | 'people';
+  includeHighlights?: boolean;
 }
 
 export interface ExaFindSimilarInput {
@@ -379,6 +388,15 @@ function isExaLibraryPersonUrl(url: string): boolean {
   } catch {
     return false;
   }
+}
+
+function extractExaPeopleHighlights(raw: unknown): string[] {
+  return Array.isArray(raw)
+    ? raw
+        .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+        .map((entry) => entry.trim())
+        .slice(0, 3)
+    : [];
 }
 
 /**
@@ -451,7 +469,12 @@ export function parseExaPeopleHit(item: unknown): SearchProviderHit | null {
     title = rawTitle || entityName || undefined;
   }
 
-  return title ? { url, title } : { url };
+  const highlights = extractExaPeopleHighlights(record.highlights);
+  return {
+    url,
+    ...(title ? { title } : {}),
+    ...(highlights.length > 0 ? { highlights } : {}),
+  };
 }
 
 function parseExaHits(bytes: Buffer, errorCode: string, peopleMode = false): SearchProviderHit[] {
@@ -479,7 +502,7 @@ function parseExaHits(bytes: Buffer, errorCode: string, peopleMode = false): Sea
   return hits;
 }
 
-/** Exa 神经语义搜索（支持 company / people；仅保留 url + title）。 */
+/** Exa 神经语义搜索。People 搜索额外请求有界的上下文片段。 */
 export async function exaSearch(
   input: ExaSearchInput,
   deps: SearchProviderDeps = {},
@@ -493,6 +516,9 @@ export async function exaSearch(
     type: 'auto',
   };
   if (input.category) body.category = input.category;
+  if (input.category === 'people' || input.includeHighlights === true) {
+    body.contents = { highlights: { maxCharacters: 720 } };
+  }
   if (input.includeDomains?.length) body.includeDomains = [...input.includeDomains].slice(0, 20);
   // Exa 官方 /search 在 category:"people" 下传 excludeDomains 直接报 HTTP 400，必须跳过。
   if (input.category !== 'people' && input.excludeDomains?.length) {

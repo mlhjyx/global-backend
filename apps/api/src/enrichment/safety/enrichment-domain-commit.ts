@@ -66,7 +66,7 @@ export interface EnrichmentDomainCommitStore {
   /** SQL adapter must lock original authority/account, suppression policy, head/steps and contact/points in that order. */
   lockAndLoad(tx: Prisma.TransactionClient, address: EnrichmentContactCommitAddress): Promise<LockedEnrichmentContactCommitState | null>;
   persist(tx: Prisma.TransactionClient, address: EnrichmentContactCommitAddress, decision: EnrichmentContactApplyDecision, references: readonly SettledEnrichmentStepReference[], quality?: ContactQualityFact | null): Promise<void>;
-  savePending(tx: Prisma.TransactionClient, address: EnrichmentContactCommitAddress, reason: "INPUT_CONFLICT" | "SUPPRESSED"): Promise<void>;
+  savePending(tx: Prisma.TransactionClient, address: EnrichmentContactCommitAddress, reason: "INPUT_CONFLICT" | "SUPPRESSED" | "RESULT_UNKNOWN"): Promise<void>;
   /** End-of-run transition only: RUNNING -> APPLY_PENDING; never changes terminal states. */
   finishAttempt?(address: Pick<EnrichmentContactCommitAddress, "workspaceId" | "companyId" | "executionId">): Promise<void>;
 }

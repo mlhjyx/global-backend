@@ -138,12 +138,24 @@ export function companyDomainEvidenceUrlPolicy(
     return () => ({ allowed: false, reason: 'company has no domain' });
   }
   return (url: string) => {
-    let host: string;
+    const trimmed = url.trim();
+    const withScheme =
+      /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?:\/[^\s]*)?$/iu.test(trimmed) &&
+      trimmed.includes('.') &&
+      !/\s/u.test(trimmed)
+        ? `https://${trimmed}`
+        : trimmed;
+    let parsed: URL;
     try {
-      host = new URL(url).hostname.trim().toLowerCase().replace(/\.$/u, '');
+      parsed = new URL(withScheme);
     } catch {
       return { allowed: false, reason: 'invalid evidence url' };
     }
+    if ((parsed.protocol !== 'http:' && parsed.protocol !== 'https:') ||
+      parsed.username || parsed.password) {
+      return { allowed: false, reason: 'invalid evidence url' };
+    }
+    const host = parsed.hostname.trim().toLowerCase().replace(/\.$/u, '');
     if (host === normalized || host.endsWith(`.${normalized}`)) {
       return { allowed: true };
     }

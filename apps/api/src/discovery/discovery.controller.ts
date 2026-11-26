@@ -41,6 +41,7 @@ import { LawfulBasisKind } from './provider-contract';
 import { SUPPRESSION_TYPES } from './suppression-value';
 import {
   ApiExecutionBudgetGrant,
+  asContactEnrichmentHttpBoundary,
   asExecutionBudgetHttpBoundary,
   ExecutionBudgetGrant,
 } from '../execution-budget/execution-budget-grant.decorator';
@@ -650,7 +651,9 @@ export class DiscoveryController {
   })
   @ApiExecutionBudgetGrant({
     additionalForbiddenCodes: ['CONTACT_ENRICH_LAWFUL_BASIS_REQUIRED'],
+    additionalConflictCodes: ['ENRICHMENT_HOLD', 'ENRICHMENT_INPUT_CONFLICT', 'ENRICHMENT_REDACTED', 'ENRICHMENT_CONTROL_MISMATCH'],
   })
+  @ApiResponse({ status: 400, description: 'VALIDATION_ERROR or ENRICHMENT_INVALID_PLAN' })
   @ApiBody({
     type: EnrichContactsDto,
     required: true,
@@ -668,7 +671,7 @@ export class DiscoveryController {
     @ExecutionBudgetGrant() compactJws?: string,
   ) {
     return envelope(
-      await asExecutionBudgetHttpBoundary(() =>
+      await asContactEnrichmentHttpBoundary(() =>
         this.contactEnrichment.enrichContacts(
           ctx,
           id,

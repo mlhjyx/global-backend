@@ -5,13 +5,16 @@ import { GlobalHttpExceptionFilter } from './http-exception.filter';
 import { PLATFORM_AUTHORITY_TARGET_LOOKUP_PATH } from '../platform-authority/platform-target-lookup.service';
 import { PLATFORM_TARGET_LOOKUP_HTTP_ERRORS } from '../platform-authority/platform-target-lookup.openapi';
 
-function responseHost(originalUrl: unknown = '/api/v1/example?token=canary') {
+function responseHost(
+  originalUrl: unknown = '/api/v1/example?token=canary',
+  extra: { method?: string; route?: { path: string }; headers?: Record<string, unknown> } = {},
+) {
   const response = { status: vi.fn(), json: vi.fn(), setHeader: vi.fn() };
   response.status.mockReturnValue(response);
   const host = {
     switchToHttp: () => ({
       getResponse: () => response,
-      getRequest: () => ({ originalUrl }),
+      getRequest: () => ({ originalUrl, ...extra }),
     }),
   } as unknown as ArgumentsHost;
   return { response, host };
@@ -50,21 +53,46 @@ describe('unknown HTTP exception diagnostics', () => {
     expect(response.status).toHaveBeenCalledWith(400);
     expect(response.json).toHaveBeenCalledWith({ error: { code: PLATFORM_TARGET_LOOKUP_HTTP_ERRORS.invalid.code, message: PLATFORM_TARGET_LOOKUP_HTTP_ERRORS.invalid.message } });
   });
-  it('emits only a fixed diagnostic for a secret-bearing stack and cause', () => {
+  it('emits redacted diagnostic frames for unknown 500s without leaking cause, email, tokens, or query strings', () => {
     const log = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
-    const { response, host } = responseHost();
-    const error = new Error('synthetic-token-canary', { cause: new Error('private-body-canary') });
+    const { response, host } = responseHost('/api/v1/example/raw-path-canary?token=canary', {
+      method: 'POST',
+      route: { path: '/api/v1/example/:exampleId' },
+      headers: { 'x-request-id': 'client-control-canary' },
+    });
+    const error = Object.assign(
+      new Error('raw-message-canary {"phone":"+1 202 555 0142"}', {
+        cause: new Error('private-body-canary'),
+      }),
+      { code: 'ECONNRESET' },
+    );
     new GlobalHttpExceptionFilter().catch(error, host);
-    expect(log.mock.calls).toEqual([[{ code: 'INTERNAL', status: 500, errorName: 'Error' }]]);
+    expect(log).toHaveBeenCalledTimes(1);
+    const logged = log.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(logged).toMatchObject({
+      code: 'INTERNAL',
+      status: 500,
+      errorName: 'Error',
+      path: '/api/v1/example/:exampleId',
+      method: 'POST',
+      errorCode: 'ECONNRESET',
+    });
+    expect(JSON.stringify(logged)).not.toMatch(/raw-message-canary|raw-path-canary|client-control-canary|555 0142/);
+    expect(JSON.stringify(logged)).not.toContain('private-body-canary');
+    expect(Array.isArray(logged.topFrames)).toBe(true);
+    expect(logged.topFrames).toEqual(expect.arrayContaining([
+      expect.stringMatching(/^common\/http-exception\.filter\.spec\.ts:\d+:\d+$/u),
+    ]));
+    expect((logged.topFrames as string[]).length).toBeLessThanOrEqual(5);
     expect(response.status).toHaveBeenCalledWith(500);
     expect(response.json).toHaveBeenCalledWith({ error: { code: 'INTERNAL', message: 'internal server error' } });
   });
 
-  it.each(['stack', 'toString'] as const)('does not inspect an untrusted %s accessor', (field) => {
+  it.each(['stack', 'toString', 'name', 'message'] as const)('does not inspect an untrusted %s accessor', (field) => {
     vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
     const { response, host } = responseHost();
     const read = vi.fn(() => { throw new Error('diagnostic accessor must not run'); });
-    const error = field === 'stack' ? new Error('canary') : {};
+    const error = new Error('canary');
     Object.defineProperty(error, field, { get: read });
     expect(() => new GlobalHttpExceptionFilter().catch(error, host)).not.toThrow();
     expect(read).not.toHaveBeenCalled();
@@ -106,7 +134,15 @@ describe('unknown HTTP exception diagnostics', () => {
     const log = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
     const { response, host } = responseHost(null);
     new GlobalHttpExceptionFilter().catch(failure, host);
-    expect(log.mock.calls).toEqual([[{ code: 'INTERNAL', status: 500, errorName: 'Unknown' }]]);
+    expect(log.mock.calls).toEqual([[{
+      code: 'INTERNAL',
+      status: 500,
+      errorName: 'Unknown',
+      path: null,
+      method: null,
+      errorCode: null,
+      topFrames: [],
+    }]]);
     expect(response.status).toHaveBeenCalledWith(500);
   });
 });
