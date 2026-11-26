@@ -20,30 +20,34 @@ import {
 } from "../model-gateway/model-usage-boundary";
 import { BRAND_PROFILE_MODEL1_PROMOTION_EVIDENCE } from "./agents/model-policy.registry";
 import type { SiteBuildProviderWireWorkspaceDatabase } from "./site-build-provider-wire.database";
+import {
+  legacyToolCostMeasurement,
+  paidOperationKey,
+  PaidCallDeniedError,
+  PaidOperationUnknownError,
+  type PaidCostBasis,
+  type PaidCostMeasurement,
+  type PaidOperationDecision,
+  type PaidOperationReservation,
+  type PaidOperationScope,
+} from "../common/paid-cost-ledger-contract";
+import type { PaidCostContext } from "../model-gateway/paid-cost-context";
+
+export {
+  legacyToolCostMeasurement,
+  paidOperationKey,
+  PaidCallDeniedError,
+  PaidOperationUnknownError,
+  type PaidCostBasis,
+  type PaidCostMeasurement,
+  type PaidOperationDecision,
+  type PaidOperationReservation,
+  type PaidOperationScope,
+  type PaidCostContext,
+};
 
 export const SITE_BUILD_COST_SUMMARY_VERSION =
   "site-builder-cost-summary/v2" as const;
-
-export type PaidCostBasis =
-  | "provider_reported"
-  | "token_pricing"
-  | "tool_reported"
-  | "legacy_estimate"
-  | "estimated_upper_bound"
-  | "unknown"
-  | "not_incurred";
-
-export interface PaidCostMeasurement {
-  basis: PaidCostBasis;
-  budgetChargeMicrousd: number;
-  reportedCostMicrousd: number | null;
-  calculatedCostMicrousd: number | null;
-  estimatedCostMicrousd: number | null;
-  inputTokens: number | null;
-  outputTokens: number | null;
-  callCount: number;
-  meta: Record<string, unknown>;
-}
 
 interface ModelMeasurementInput {
   taskId: string;
@@ -292,43 +296,6 @@ export function modelCostMeasurement(
 }
 
 /** Backward-compatible ToolResult.costCents is reserve guidance, not an invoice. */
-export function legacyToolCostMeasurement(
-  costCents: number,
-  reservationMicrousd: number,
-): PaidCostMeasurement {
-  if (!Number.isFinite(costCents) || costCents < 0) {
-    return {
-      basis: "unknown",
-      budgetChargeMicrousd: reservationMicrousd,
-      reportedCostMicrousd: null,
-      calculatedCostMicrousd: null,
-      estimatedCostMicrousd: null,
-      inputTokens: null,
-      outputTokens: null,
-      callCount: 1,
-      meta: { reason: "invalid_legacy_cost" },
-    };
-  }
-  const estimatedCostMicrousd = Math.round(costCents * 10_000);
-  return {
-    basis: "legacy_estimate",
-    budgetChargeMicrousd: Math.min(reservationMicrousd, estimatedCostMicrousd),
-    reportedCostMicrousd: null,
-    calculatedCostMicrousd: null,
-    estimatedCostMicrousd,
-    inputTokens: null,
-    outputTokens: null,
-    callCount: 1,
-    meta: { legacyCostCents: costCents },
-  };
-}
-
-export function paidOperationKey(parts: readonly string[]): string {
-  return createHash("sha256")
-    .update(parts.map((part) => `${part.length}:${part}`).join("|"), "utf8")
-    .digest("hex");
-}
-
 interface SummaryBudgetRow {
   capMicrousd: bigint;
   reservedMicrousd: bigint;
@@ -624,23 +591,6 @@ export function boundedReconciliationMeta(
   return canonical as Prisma.InputJsonObject;
 }
 
-export class PaidCallDeniedError extends Error {
-  constructor(public readonly decision: string) {
-    super(`paid call denied: ${decision}`);
-    this.name = "PaidCallDeniedError";
-  }
-}
-
-export class PaidOperationUnknownError extends Error {
-  constructor(
-    public readonly operationKey: string,
-    public readonly errorCode = "ACK_UNKNOWN",
-  ) {
-    super(`paid operation ${operationKey} has ambiguous acknowledgement`);
-    this.name = "PaidOperationUnknownError";
-  }
-}
-
 export class PaidTaskBusyError extends Error {
   constructor(public readonly taskId: string) {
     super(`paid task ${taskId} already has a live fenced attempt`);
@@ -654,56 +604,6 @@ export class PaidTaskFenceError extends Error {
     this.name = "PaidTaskFenceError";
   }
 }
-
-export interface PaidOperationScope {
-  workspaceId: string;
-  siteId: string;
-  buildRunId: string;
-  taskAttemptId?: string;
-  fenceToken?: string;
-}
-
-/** Stable logical namespace threaded through ModelGateway and ToolBroker. */
-export interface PaidCostContext {
-  siteId: string;
-  scopeKey: string;
-  taskAttemptId?: string;
-  fenceToken?: string;
-  /** Installed by RouterModelGateway only after the paid preflight succeeds. */
-  settlementPreflight?: PaidModelPreflightEvidence;
-  /** Preallocated before reserve; plaintext nonces remain transient. */
-  settlementWireIdentities?: readonly SettlementWireIdentity[];
-  /** Exactly one identity selected by the caller for the next physical send. */
-  settlementPhysicalWire?: PaidModelPhysicalWireRuntime;
-  /** Allocates attempt 2 only after attempt 1 was durably finalized exact. */
-  allocateSettlementRepairWire?: () => Promise<PaidModelPhysicalWireRuntime>;
-  /**
-   * Explicit domain persistence gate for model replay. The gateway never
-   * stores a raw provider result when this projection is absent.
-   */
-  durableReplayResult?: (
-    result: Record<string, unknown>,
-  ) => Record<string, unknown>;
-}
-
-export interface PaidOperationReservation extends PaidOperationScope {
-  operationKey: string;
-  kind: "model" | "tool";
-  taskId: string;
-  subject: string;
-  reservationMicrousd: number;
-  meta?: Record<string, unknown>;
-}
-
-export type PaidOperationDecision =
-  | { kind: "execute" }
-  | {
-      kind: "replay";
-      status: string;
-      result: Record<string, unknown> | null;
-      meta: Record<string, unknown> | null;
-      errorCode: string | null;
-    };
 
 export interface PaidModelWireReservationContext {
   wireIdentity: SettlementWireIdentity;

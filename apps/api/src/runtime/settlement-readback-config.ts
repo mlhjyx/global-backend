@@ -9,18 +9,25 @@
  * and validated, so a half-configured deployment keeps failing closed.
  */
 
+import { isSiteBuilderEnabled } from './site-builder-feature-flag';
+
 const SETTLEMENT_READBACK_CREDENTIAL_ENV =
   'MODEL_GATEWAY_SETTLEMENT_READBACK_CREDENTIAL';
 const SETTLEMENT_READBACK_ENABLED_ENV =
   'NEW_API_SETTLEMENT_READBACK_ENABLED';
 
 /**
- * True when the deployment asked for settlement readback and did not explicitly
- * disable it via `NEW_API_SETTLEMENT_READBACK_ENABLED=false|0|off|no`.
+ * True when Site Builder is enabled and the deployment asked for settlement
+ * readback without explicitly disabling it via
+ * `NEW_API_SETTLEMENT_READBACK_ENABLED=false|0|off|no` or
+ * `SITE_BUILDER_ENABLED=false|0|off|no`.
  */
 export function settlementReadbackConfigured(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
+  if (!isSiteBuilderEnabled(env)) {
+    return false;
+  }
   const flag = env[SETTLEMENT_READBACK_ENABLED_ENV]?.trim().toLowerCase();
   if (flag === 'false' || flag === '0' || flag === 'off' || flag === 'no') {
     return false;

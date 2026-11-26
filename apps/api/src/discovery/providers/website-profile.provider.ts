@@ -27,7 +27,7 @@ import {
 } from '../website-profile/contact-paths';
 import { hasConflictingRegisterNumbers, parseImpressum, type ImpressumRegister } from '../website-profile/impressum';
 import { classifyTradeRoleByRules } from '../website-profile/trade-role-rules';
-import { scrubPii, scrubPiiKeepingTaxIds } from '../../site-builder/agents/pii';
+import { scrubPii, scrubPiiKeepingTaxIds } from '../../common/pii-scrub';
 
 import {
   companyProjectPageUrl, PROJECT_PAGE_MAX_SPAN_CHARS, readProjectPageEvidence,

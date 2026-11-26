@@ -1,4 +1,4 @@
-import { scrubPiiKeepingTaxIds } from '../../site-builder/agents/pii';
+import { scrubPiiKeepingTaxIds } from '../../common/pii-scrub';
 
 /**
  * Page-text normalization for subject-bound crawl4ai.fetch artifacts

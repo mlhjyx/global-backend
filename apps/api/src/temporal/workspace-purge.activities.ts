@@ -4,7 +4,7 @@ import type { S3PersonalArtifactCleanupAdapter } from '../durable-results/artifa
 import type { PrismaService } from '../prisma/prisma.service';
 import { DataExportStorage } from '../data-exports/data-exports.storage';
 import { SellerDocumentsStorage } from '../seller-knowledge/seller-documents.storage';
-import type { StorageService } from '../site-builder/storage.service';
+import type { StorageService } from '../infra-clients/storage.service';
 import { purgeWorkspaceRedisKeys } from '../workspace/workspace-purge-redis';
 import type {
   WorkspacePurgePersonalObjectTarget,
@@ -22,7 +22,7 @@ import {
 
 export interface WorkspacePurgeActivityDeps {
   prisma: PrismaService;
-  siteBuilderStorage: Pick<StorageService, 'deletePrefix'>;
+  siteBuilderStorage?: Pick<StorageService, 'deletePrefix'>;
   personalArtifactCleanupPort: Pick<S3PersonalArtifactCleanupAdapter, 'eraseFinalObject'>;
   sellerDocumentsStorage?: Pick<SellerDocumentsStorage, 'deletePrefix'> & {
     readonly bucket?: string;
@@ -324,8 +324,10 @@ export function createWorkspacePurgeActivities(deps: WorkspacePurgeActivityDeps)
         if (normalized) siteBuilderPrefixes.add(normalized);
       }
       let siteBuilderDeleted = 0;
-      for (const prefix of siteBuilderPrefixes) {
-        siteBuilderDeleted += await deps.siteBuilderStorage.deletePrefix(prefix);
+      if (deps.siteBuilderStorage) {
+        for (const prefix of siteBuilderPrefixes) {
+          siteBuilderDeleted += await deps.siteBuilderStorage.deletePrefix(prefix);
+        }
       }
 
       let operationArtifactsDeleted = 0;

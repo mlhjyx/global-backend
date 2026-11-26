@@ -45,7 +45,7 @@ import { smtpRcptProbe, SENDER_DOMAIN } from "../adapters/smtp-probe";
 import {
   normalizeEvidenceText,
   sanitizeEvidenceUrl,
-} from "../site-builder/agents/evidence-ref";
+} from "../common/evidence-ref";
 
 const hash = (s: string): string =>
   createHash("sha256").update(s).digest("hex").slice(0, 24);

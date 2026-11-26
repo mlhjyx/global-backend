@@ -11,7 +11,7 @@ import { SellerDocumentsStorage } from './seller-documents.storage';
 import { TemporalSellerDocumentsIngestLauncher } from './temporal-seller-documents-launcher';
 import { SellerDocumentClaimsController } from './seller-document-claims.controller';
 import { SellerDocumentClaimsService } from './seller-document-claims.service';
-import { EmbeddingsClient } from '../site-builder/embeddings.client';
+import { EmbeddingsClient } from '../infra-clients/embeddings.client';
 
 @Module({
   controllers: [SellerCompanyDocumentsController, SellerDocumentsController, SellerDocumentClaimsController],

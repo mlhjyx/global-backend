@@ -46,8 +46,8 @@ import {
   PaidOperationUnknownError,
   type PaidCostMeasurement,
   type PaidOperationReservation,
-  type SiteBuildCostLedger,
-} from "../site-builder/site-build-cost-ledger";
+} from "../common/paid-cost-ledger-contract";
+import type { SiteBuildCostLedger } from "../site-builder/site-build-cost-ledger";
 import { assertPlatformEgressFenceAvailable } from "../platform-authority/platform-egress-fence";
 
 /**
