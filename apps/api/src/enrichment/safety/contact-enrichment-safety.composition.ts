@@ -383,6 +383,17 @@ export function createContactEnrichmentSafetyRuntime(deps: ContactEnrichmentSafe
     current.steps.filter((step) => step.contact_id === contactId && step.dispatch_phase !== 'REDACTED' && hasOriginalTicket(step) && step.budget_status !== 'RELEASED').map((step) => step.id);
   const contactHasActiveOriginal = (current: import('./enrichment-safety.contract').EnrichmentRuntimeExecutionRecord, contactId: string) =>
     current.steps.some((step) => step.contact_id === contactId && step.dispatch_phase !== 'REDACTED' && hasOriginalTicket(step) && step.budget_status !== 'RELEASED' && !closedOriginalStep(step));
+  const preserveUnknownContact = async (address: import('./enrichment-domain-commit').EnrichmentContactCommitAddress) => {
+    try {
+      await prisma.withWorkspace(address.workspaceId, (tx) =>
+        deps.store.savePending(tx, address, 'RESULT_UNKNOWN'),
+      );
+    } catch {
+      // The original paid operation is unresolved. Keep its plan for recovery.
+      throw new EnrichmentSafetyError('HOLD');
+    }
+    return unknownContactResult(address.contactId);
+  };
   type LoadedRecord = import('./enrichment-safety.contract').EnrichmentRuntimeExecutionRecord & { plan: NonNullable<import('./enrichment-safety.contract').EnrichmentRuntimeExecutionRecord['plan']> };
   type FinderMaterialized = Extract<import('./enrichment-safety.contract').EnrichmentDomainMaterializedResult, { phase: 'FINDER' }>;
   const executeFinderTarget = async (input: {
@@ -445,19 +456,8 @@ export function createContactEnrichmentSafetyRuntime(deps: ContactEnrichmentSafe
       if (!unresolvedOriginal && controlDenied) throw error;
       if (onFailure) await onFailure();
       if (unresolvedOriginal) {
-        try {
-          await prisma.withWorkspace(workspaceId, (tx) =>
-            deps.store.savePending(
-              tx,
-              { workspaceId, companyId, executionId, contactId: target.contactId },
-              'RESULT_UNKNOWN',
-            ),
-          );
-        } catch {
-          // The original paid operation is unresolved. Keep its plan for recovery.
-          throw new EnrichmentSafetyError('HOLD');
-        }
-        return { kind: 'decided', decision: unknownContactResult(target.contactId) };
+        const decision = await preserveUnknownContact({ workspaceId, companyId, executionId, contactId: target.contactId });
+        return { kind: 'decided', decision };
       }
       return {
         kind: 'decided',
@@ -528,7 +528,12 @@ export function createContactEnrichmentSafetyRuntime(deps: ContactEnrichmentSafe
       const current = await load();
       const required = requiredOriginalStepIds(current, contactId);
       const rows = required.map((id) => current.steps.find((step) => step.id === id)!).filter(Boolean);
-      if (rows.some((step) => !readyOriginalStep(step) && !closedOriginalStep(step))) throw new EnrichmentSafetyError('HOLD');
+      const unavailable = rows.filter((step) => !readyOriginalStep(step) && !closedOriginalStep(step));
+      if (unavailable.some((step) => step.phase !== 'FINDER' &&
+          (step.budget_status === 'RESERVED' || step.budget_status === 'RESULT_UNKNOWN'))) {
+        return preserveUnknownContact(address(contactId));
+      }
+      if (unavailable.length > 0) throw new EnrichmentSafetyError('HOLD');
       return committer.commitContact({ workspaceId, companyId, executionId: view.executionId, contactId }, required.length > 0 ? required : (preferredId ? [preferredId] : []), actorId);
     };
     const runVerificationCluster = async (target: import('./enrichment-safety.contract').ContactTargetSnapshot, finderId: string): Promise<string[]> => {
@@ -796,16 +801,22 @@ export async function createManagedContactEnrichmentSafety(input: {
       finderMaterializer: contactEmailFindMaterializer,
       finderMaterializers,
     });
+    const loadFinderContact = (workspaceId: string, companyId: string, contactId: string) =>
+      prisma.withWorkspace(workspaceId, (tx) => tx.canonicalContact.findFirst({
+        where: { id: contactId, workspaceId, companyId },
+        // The decrypted projection needs the tenant that owns the encrypted name.
+        select: { workspaceId: true, fullName: true, company: { select: { name: true, domain: true } } },
+      }));
     const loadWire = async (stepId: string, workspaceId: string, deriveOnly = false): Promise<ControlledEnrichmentWireInput> => {
       const row = await loadStepRowByStep(prisma, workspaceId, stepId);
       if (deriveOnly && row.phase === 'FINDER') {
-        const contact = await prisma.withWorkspace(workspaceId, (tx) => tx.canonicalContact.findFirst({ where: { id: row.contact_id!, companyId: row.company_id! }, select: { fullName: true, company: { select: { name: true, domain: true } } } }));
+        const contact = await loadFinderContact(workspaceId, row.company_id!, row.contact_id!);
         if (!contact || !contact.company?.domain) throw new EnrichmentSafetyError('HOLD');
         return { step: row as unknown as import('./enrichment-safety.contract').BoundEnrichmentStep, finder: { fullName: contact.fullName, domain: contact.company.domain, companyName: contact.company.name }, verification: null };
       }
       const step = parseBoundEnrichmentStepRow(row);
       if (step.phase === 'FINDER') {
-        const contact = await prisma.withWorkspace(workspaceId, (tx) => tx.canonicalContact.findFirst({ where: { id: step.contactId, companyId: step.companyId }, select: { fullName: true, company: { select: { name: true, domain: true } } } }));
+        const contact = await loadFinderContact(workspaceId, step.companyId, step.contactId);
         if (!contact || !contact.company?.domain) throw new EnrichmentSafetyError('HOLD');
         return { step, finder: { fullName: contact.fullName, domain: contact.company.domain, companyName: contact.company.name }, verification: null };
       }
