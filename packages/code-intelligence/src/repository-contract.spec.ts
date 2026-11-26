@@ -107,6 +107,7 @@ test("current repository keeps representative business and dynamic chains comple
         "CompanyProfileCreated",
         "DeletionRequested",
         "DiscoveryRunRequested",
+        "LeadRejudgeRequested",
         "PersonalArtifactCleanupRequested",
         "QualifyRequested",
         // S1a：内部 seller_document 清理命令（不复用公开 DeletionRequested）。

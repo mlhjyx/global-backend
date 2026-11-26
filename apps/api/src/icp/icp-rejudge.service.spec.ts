@@ -339,9 +339,16 @@ describe('IcpRejudgeService', () => {
       }),
     );
 
-    // Non-DTO rogue class instances must still be rejected fail-closed.
+    // Non-DTO rogue class instances and DTOs with unexpected keys must still be rejected fail-closed.
     await expect(
       harness.service.requestRejudge(CTX, ICP_ID, new Date() as never, 'jws-token'),
+    ).rejects.toMatchObject({ status: 400 });
+    const taintedDto = Object.assign(new RejudgeIcpLeadsDto(), {
+      attemptId: 'http-pipe-canary-tainted',
+      unexpectedKey: 'boom',
+    });
+    await expect(
+      harness.service.requestRejudge(CTX, ICP_ID, taintedDto, 'jws-token'),
     ).rejects.toMatchObject({ status: 400 });
   });
 });

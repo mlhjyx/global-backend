@@ -94,23 +94,43 @@ export class RejudgeIcpLeadsDto {
   companyIds?: string[];
 }
 
+const REJUDGE_DTO_KEYS = new Set([
+  'attemptId',
+  'maxCompanies',
+  'batchSize',
+  'refreshCorroboration',
+  'refreshWebsiteProfile',
+  'includeFresh',
+  'companyIds',
+]);
+
 /**
  * Global NestJS `ValidationPipe({ transform: true, whitelist: true })` converts
  * `@Body()` into a `RejudgeIcpLeadsDto` class instance. Convert only authentic
- * DTO instances to plain objects (omitting `undefined` keys) before handing to
- * the strict plain-object normalizer shared with the quote controller.
+ * DTO instances with whitelisted keys into static plain objects (omitting
+ * `undefined` keys) before handing to the strict plain-object normalizer shared
+ * with the quote controller.
  */
 export function toPlainRejudgeRequestBody(
   dto: RejudgeIcpLeadsDto | IcpRejudgeHttpRequestBody,
 ): IcpRejudgeHttpRequestBody {
-  if (dto instanceof RejudgeIcpLeadsDto) {
-    const plain: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(dto)) {
-      if (value !== undefined) plain[key] = value;
-    }
-    return plain as unknown as IcpRejudgeHttpRequestBody;
+  if (!(dto instanceof RejudgeIcpLeadsDto)) return dto;
+  if (Object.keys(dto).some((key) => !REJUDGE_DTO_KEYS.has(key))) {
+    return dto;
   }
-  return dto;
+  return {
+    ...(dto.attemptId !== undefined ? { attemptId: dto.attemptId } : {}),
+    ...(dto.maxCompanies !== undefined ? { maxCompanies: dto.maxCompanies } : {}),
+    ...(dto.batchSize !== undefined ? { batchSize: dto.batchSize } : {}),
+    ...(dto.refreshCorroboration !== undefined
+      ? { refreshCorroboration: dto.refreshCorroboration }
+      : {}),
+    ...(dto.refreshWebsiteProfile !== undefined
+      ? { refreshWebsiteProfile: dto.refreshWebsiteProfile }
+      : {}),
+    ...(dto.includeFresh !== undefined ? { includeFresh: dto.includeFresh } : {}),
+    ...(dto.companyIds !== undefined ? { companyIds: dto.companyIds } : {}),
+  } as IcpRejudgeHttpRequestBody;
 }
 
 export class RejudgeIcpLeadsResponseDto {
