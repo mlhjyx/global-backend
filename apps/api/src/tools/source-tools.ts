@@ -3,12 +3,9 @@ import { ExecutionControlError } from "../execution-budget/execution-control-err
 import { gunzipSync } from "node:zlib";
 import { CATALOG_RESULT_PROJECTION_SCHEMAS } from "../durable-results/catalog-result-projections";
 import { SOURCE_RESULT_PROJECTION_SCHEMAS } from "../durable-results/source-result-projections";
-import {
-  assertToolExternalActionAuthorized,
-  Tool,
-  ToolContext,
-} from "./tool-contract";
+import { assertToolExternalActionAuthorized, Tool, ToolContext } from "./tool-contract";
 import { ToolRegistry } from "./tool-registry";
+import { registerViesTools } from "./vies-tools";
 import { crawlHtml, CrawlHtmlResult } from "../adapters/web-crawler";
 import { isAllowedByRobots } from "../adapters/robots";
 import {
@@ -1298,5 +1295,5 @@ export function registerSourceTools(registry: ToolRegistry): ToolRegistry {
   registry.register(samgovSearchTool as Tool);
   registry.register(openCorporatesSearchTool as Tool);
   registry.register(sanctionsDownloadTool as Tool);
-  return registry;
+  return registerViesTools(registry);
 }

@@ -468,6 +468,47 @@
       ]
     },
     {
+      "key": "vies",
+      "status": "IMPLEMENTED",
+      "source_classes": [
+        "company_registry"
+      ],
+      "purpose": "Corroborate an EU company's VAT identifier against the official European Commission VIES REST registry as a T1 independent source (legal name, registered country, and optional registered city; street addresses stripped at projection and persistence).",
+      "taxonomy": [
+        "EU VAT ID",
+        "legal name",
+        "registered country",
+        "registered city"
+      ],
+      "license": {
+        "classification": "EU-REUSE-2011/833",
+        "note": "European Commission Reuse Notice 2011/833/EU (official public VAT validation API, zero cost, no API key). Raw street addresses are excluded from durable projections and canonical attributes; redacted member-state responses (e.g. DE/ES \"---\") fail closed."
+      },
+      "personal_data_class": "COMPANY_ONLY",
+      "default_enablement": "ENABLED",
+      "call_gates": [
+        "data_provider_status",
+        "source_policy",
+        "tool_broker",
+        "identity_match_threshold"
+      ],
+      "test_paths": [
+        "apps/api/src/discovery/providers/vies.provider.spec.ts",
+        "apps/api/src/adapters/vies.spec.ts",
+        "apps/api/src/tools/vies-tools.spec.ts"
+      ],
+      "evidence_refs": [
+        {
+          "kind": "TEST_ANCHOR",
+          "path": "apps/api/src/discovery/providers/vies.provider.spec.ts"
+        },
+        {
+          "kind": "TEST_ANCHOR",
+          "path": "apps/api/src/adapters/vies.spec.ts"
+        }
+      ]
+    },
+    {
       "key": "google_patents",
       "status": "PARTIAL",
       "source_classes": [

@@ -321,4 +321,19 @@ describe('buildLeadPackage', () => {
       provider: 'digital_footprint',
     });
   });
+
+  it('prefers VIES-verified vat_id over self-reported website_profile.vat_id in identifiers', () => {
+    const input = base();
+    const pkg = buildLeadPackage({
+      ...input,
+      company: {
+        ...input.company,
+        attributes: {
+          ...input.company.attributes,
+          vies: { vat_id: 'IT04553650989', verified_status: 'VALID' },
+        },
+      },
+    });
+    expect(pkg.identifiers.vat_id).toBe('IT04553650989');
+  });
 });

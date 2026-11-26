@@ -289,6 +289,7 @@ export function buildLeadPackage(input: LeadPackageInput): LeadPackage {
     .map((point) => Object.freeze({ kind: point.kind, url: point.value, status: point.status }));
 
   const gleif = record(attributes.gleif);
+  const vies = record(attributes.vies);
   const profileSourceUrl = text(profile.source_url);
   const { lei, fda_reg: fdaReg } = extractIdentifiers(attributes);
 
@@ -313,7 +314,7 @@ export function buildLeadPackage(input: LeadPackageInput): LeadPackage {
     registered_address: text(profile.registered_address),
     identifiers: Object.freeze({
       register_key: text(profile.register_key),
-      vat_id: text(profile.vat_id),
+      vat_id: text(vies.vat_id) ?? text(profile.vat_id),
       lei,
       fda_reg: fdaReg,
     }),

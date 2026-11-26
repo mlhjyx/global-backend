@@ -1,4 +1,5 @@
 import { types } from 'node:util';
+import { viesCheckResultProjection } from './vies-result-projection';
 import { ALL_CLAIM_PROPERTIES, ENTITY_PROPERTIES, STRING_PROPERTIES, WIKIDATA_COMPANY_KEYS } from './wikidata-entity-properties';
 import { normForMatch } from '../discovery/name-match';
 import { normalizePersonName } from '../discovery/person-name';
@@ -20,7 +21,7 @@ export const CATALOG_RESULT_TOOL_IDS = Object.freeze([
   'wikidata.entity', 'gleif.fetch', 'companies_house.search', 'inpi_rne.search',
   'google_patents.search', 'tradefair.algolia', 'mapyourshow.fetch',
   'deepseek.search', 'deepseek.fetch',
-  'serper.search', 'brave.search', 'exa.search', 'google_places.search',
+  'serper.search', 'brave.search', 'exa.search', 'google_places.search', 'vies.check',
 ] as const);
 export type CatalogResultToolId = (typeof CATALOG_RESULT_TOOL_IDS)[number];
 export const CATALOG_RESULT_PROJECTION_SCHEMAS = Object.freeze({
@@ -42,6 +43,7 @@ export const CATALOG_RESULT_PROJECTION_SCHEMAS = Object.freeze({
   'brave.search': 'brave-search/v1',
   'exa.search': 'exa-search/v1',
   'google_places.search': 'google-places-search/v1',
+  'vies.check': 'vies-check/v1',
 } satisfies Readonly<Record<CatalogResultToolId, TypedProjectionSchema>>);
 const TOOL_RESULT_KEYS = ['data', 'costCents', 'degraded'] as const;
 const TOOL_RESULT_WITH_PROVENANCE_KEYS = [...TOOL_RESULT_KEYS, 'provenance'] as const;
@@ -951,7 +953,7 @@ export const CATALOG_RESULT_PROJECTION_DEFINITIONS = Object.freeze([
   osmDefinition, wikidataEntityDefinition, gleifDefinition, companiesHouseDefinition,
   inpiDefinition, googlePatentsDefinition, tradeFairDefinition, mapYourShowDefinition,
   deepseekSearchDefinition, deepseekFetchDefinition,
-  serperSearchDefinition, braveSearchDefinition, exaSearchDefinition, googlePlacesSearchDefinition,
+  serperSearchDefinition, braveSearchDefinition, exaSearchDefinition, googlePlacesSearchDefinition, viesCheckResultProjection,
 ] as const);
 
 export function getCatalogResultProjectionSchema(toolId: string): TypedProjectionSchema {

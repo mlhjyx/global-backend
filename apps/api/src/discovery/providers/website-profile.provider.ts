@@ -37,12 +37,16 @@ import {
 export const WEBSITE_PROFILE_TASK = 'discovery.classify_trade_role' as const;
 /** data_provider kill switch and canonical attribute namespace. */
 export const WEBSITE_PROFILE_PROVIDER_KEY = 'website_profile' as const;
+/** Namespace bookkeeping marker stamped on website_profile commits (Batch 1.7B). */
+export const WEBSITE_PROFILE_PARSER_MARKER = '_parser_version' as const;
+export const WEBSITE_PROFILE_PARSER_VERSION = 'website-profile/v2' as const;
 /** crawl4ai.fetch text cap per page; a homepage this long may have been cut. */
 const PAGE_FETCH_MAX_CHARS = 40_000;
 const HOME_PROMPT_CHARS = 12_000;
 const IMPRESSUM_PROMPT_CHARS = 4_000;
 const RULES_CONFIDENCE = 0.7;
-const IMPRESSUM_LINK = /impressum|imprint|legal-notice|legal_notice/iu;
+const IMPRESSUM_LINK =
+  /impressum|imprint|legal-notice|legal_notice|informazioni-legali|note-legali|dati-societari|mentions-legales|aviso-legal|colofon|company-info/iu;
 /** Lines about people (management, owners, contacts) never become stored evidence. */
 const PERSON_MARKERS =
   /gesch(?:ä|ae)ftsf(?:ü|ue)hr|inhaber|ansprechpartner|vorstand|\b(?:herr|frau|mr|mrs|ms)\b\.?|\bdr\.\s/iu;
@@ -200,11 +204,19 @@ export class WebsiteProfileProvider {
       impressum = ''; // a missing Impressum page does not void the homepage profile
     }
 
-    const legalPageText = impressum || home;
+    const combinedLegalText = impressum ? `${impressum}\n${home}` : home;
     // A shared legal page with several HRB (or several HRA) numbers cannot
     // safely attach any one company's identity, role or project to this domain.
-    if (hasConflictingRegisterNumbers(legalPageText)) return null;
-    const identifiers = parseImpressum(legalPageText);
+    if (hasConflictingRegisterNumbers(combinedLegalText)) return null;
+    const parseHint = { domain: input.domain, countryHint: input.homeCountry };
+    const homeParsed = parseImpressum(home, parseHint);
+    const legalParsed = impressum ? parseImpressum(impressum, parseHint) : null;
+    const identifiers = {
+      legalName: legalParsed?.legalName ?? homeParsed.legalName,
+      register: legalParsed?.register ?? homeParsed.register,
+      vatId: legalParsed?.vatId ?? homeParsed.vatId,
+      registeredAddress: legalParsed?.registeredAddress ?? homeParsed.registeredAddress,
+    };
     const dictionary = matchCarriedBrands(home, input.homeCountry);
     const rules = classifyTradeRoleByRules(`${home}\n${impressum}`);
     const classified = rules.decisive

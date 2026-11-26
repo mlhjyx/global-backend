@@ -351,4 +351,63 @@ describe('DiscoveryProviderRegistry SourceClass governance', () => {
     expect(companySite).toHaveLength(1);
     expect(companySite[0]).not.toMatch(/\bkey:|\bclass:|\bstatus:/u);
   });
+
+  it('registers vies as an enrichment provider (never a discovery source) and seeds data_provider + ec.europa.eu source_policy', async () => {
+    const registry = new DiscoveryProviderRegistry();
+    expect(registry.companyDiscoverySources().map((source) => source.providerKey)).not.toContain('vies');
+
+    const routedEnrichment = await registry.routeEnrichment({
+      dataProvider: { findMany: async () => [{ key: 'gleif' }, { key: 'vies' }] },
+    } as never);
+    expect(routedEnrichment.map((adapter) => adapter.key)).toEqual(['gleif', 'vies']);
+
+    const providers: Array<{ where: unknown; update: unknown; create: Record<string, unknown> }> = [];
+    const policies: Array<{ where: unknown; update: unknown; create: Record<string, unknown> }> = [];
+    await registry.seed({
+      dataProvider: {
+        upsert: async (args: (typeof providers)[number]) => {
+          providers.push(args);
+          return args;
+        },
+      },
+      sourcePolicy: {
+        upsert: async (args: (typeof policies)[number]) => {
+          policies.push(args);
+          return args;
+        },
+      },
+    } as never);
+
+    expect(providers.filter((entry) => entry.create.key === 'vies')).toEqual([
+      {
+        where: { key: 'vies' },
+        update: {},
+        create: {
+          key: 'vies',
+          class: 'company_registry',
+          status: 'ENABLED',
+          costPerCallCents: 0,
+        },
+      },
+    ]);
+
+    expect(policies.filter((entry) => entry.create.domain === 'ec.europa.eu')).toEqual([
+      {
+        where: { domain: 'ec.europa.eu' },
+        update: {},
+        create: {
+          domain: 'ec.europa.eu',
+          sourceType: 'gov_registry',
+          accessMode: 'api',
+          reviewStatus: 'APPROVED',
+          robotsStatus: 'ALLOWS',
+          termsStatus: 'REVIEWED_OK',
+          personalData: false,
+          allowedPurpose: ['discovery', 'enrichment'],
+          retentionDays: 365,
+          notes: expect.stringContaining('vies.check'),
+        },
+      },
+    ]);
+  });
 });

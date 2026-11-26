@@ -28,6 +28,7 @@ import {
   ENRICH_COMPANY_CONCURRENCY,
   ENRICH_SOFT_DEADLINE_MS,
   MAX_GLEIF_FETCHES_PER_COMPANY,
+  MAX_VIES_CHECKS_PER_COMPANY,
   MAX_GOOGLE_PLACES_SEARCHES_PER_QUERY,
   MAX_PUBLIC_WEB_CONTACT_LINKED_PAGES,
   MAX_PUBLIC_WEB_DOMAINS_PER_QUERY,
@@ -60,6 +61,7 @@ import {
   MODEL_WEB_SEARCH_MAX_TOOL_CALLS,
 } from '../discovery/model-web-search/model-web-search';
 import { deepseekSearchTool } from '../tools/deepseek-tools';
+import { viesCheckTool } from '../tools/vies-tools';
 import {
   braveSearchTool,
   exaSearchTool,
@@ -279,6 +281,7 @@ function discoveryRunEnvelope(
       tool(contract(tradeFairAlgoliaTool), queries * TRADE_FAIRS.length),
       // One shared T1/T2 quota: Run2 before fit; legacy enrichRun after fit.
       tool(contract(gleifFetchTool), MAX_DISCOVERY_ENRICH_COMPANIES * MAX_GLEIF_FETCHES_PER_COMPANY),
+      tool(contract(viesCheckTool), MAX_DISCOVERY_ENRICH_COMPANIES * MAX_VIES_CHECKS_PER_COMPANY),
       tool(
         contract(wikidataEntityTool),
         MAX_DISCOVERY_ENRICH_COMPANIES * MAX_WIKIDATA_ENTITY_READS_PER_COMPANY,

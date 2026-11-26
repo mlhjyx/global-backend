@@ -337,6 +337,7 @@ describe('workspace execution technical envelope catalog', () => {
       ['companies_house.search', 66],
       ['tradefair.algolia', 66],
       ['gleif.fetch', 50 * 4],
+      ['vies.check', 50 * 1],
       ['wikidata.entity', 50 * 3],
       // digital footprint + structured harvest per signal company, and the contact page of
       // each profiled company (BI-14, at most one render each)
@@ -489,6 +490,7 @@ describe('DISCOVERY_UNCAPPED=on —— 报价按防爆安全界（余额是唯�
       ['companies_house.search', 66],
       ['tradefair.algolia', 66],
       ['gleif.fetch', 50 * 4],
+      ['vies.check', 50 * 1],
       ['wikidata.entity', 50 * 3],
       ['crawl4ai.render', 12 * 2 + 50 * 1],
       ['http.get', 12 * 15 + 12 * 8],

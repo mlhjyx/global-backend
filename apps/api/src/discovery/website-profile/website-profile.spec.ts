@@ -78,7 +78,7 @@ describe('parseImpressum (G3 5.4)', () => {
 });
 
 describe('artifact page text keeps company tax identifiers (G3 5.4)', () => {
-  it('redacts phones and emails but keeps a DE VAT id, and leaves Site Builder scrubbing unchanged', () => {
+  it('redacts phones and emails but keeps DE and labeled Italian P.IVA tax ids, and leaves Site Builder scrubbing unchanged', () => {
     const raw = 'Tel. +49 30 1234567, info@x.example, USt-IdNr.: DE136695976 / DE 136695976';
     const artifact = normalizeArtifactPageText(raw);
     expect(artifact).toContain('[redacted-phone]');
@@ -86,6 +86,13 @@ describe('artifact page text keeps company tax identifiers (G3 5.4)', () => {
     expect(artifact).toContain('DE136695976');
     expect(artifact).toContain('DE 136695976');
     expect(scrubPii(raw)).not.toContain('DE136695976');
+
+    const italian = 'Effe Energy S.r.l. - P.IVA e C.F. 04553650989 | Tel. +39 030 1234567 | info@effeenergy.it';
+    const italianArtifact = normalizeArtifactPageText(italian);
+    expect(italianArtifact).toContain('04553650989');
+    expect(italianArtifact).toContain('[redacted-phone]');
+    expect(italianArtifact).toContain('[redacted-email]');
+    expect(italianArtifact).not.toContain('030 1234567');
   });
 
   it('keeps pages far beyond the 20k evidence cap, bounded within the 300 kB artifact contract', () => {

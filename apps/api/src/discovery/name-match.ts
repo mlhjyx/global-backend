@@ -6,16 +6,21 @@ import { normalizeCompanyName } from './identity';
  * 纪律：一堆同前缀实体挤在同一分段、无突出者 → margin 小 → 调用方应弃（绝不贴错身份）。
  */
 
-/** 拼写全称法人形式词（缩写由 normalizeCompanyName 处理）：让 "Siemens AG"≡"Siemens Aktiengesellschaft"。 */
+/** 拼写全称法人形式词（缩写由 normalizeCompanyName 处理）：让 "Siemens AG"≡"Siemens Aktiengesellschaft" 与意大利 S.r.l./S.p.A. 归一对齐。 */
 const EXTRA_LEGAL_TOKENS = new Set([
   'aktiengesellschaft', 'kommanditgesellschaft', 'gesellschaft', 'mbh', 'kgaa',
   'mit', 'beschränkter', 'beschrankter', 'haftung', 'societas', 'europaea',
   'incorporated', 'corporation', 'und', 'and',
+  'srl', 'srls', 'spa', 'sas', 'snc', 'societa', 'società',
+  'responsabilita', 'responsabilità', 'limitata', 'azioni', 'unipersonale', 'semplificata',
 ]);
 
-/** 匹配专用归一：基础归一 + 剥拼写全称法人词（先 NFC 防组合变音符裂词）。 */
+const ITALIAN_LEGAL_FORMS_RE =
+  /\b(?:s\.?\s*r\.?\s*l\.?\s*s\.?|s\.?\s*r\.?\s*l\.?|s\.?\s*p\.?\s*a\.?|s\.?\s*a\.?\s*s\.?|s\.?\s*n\.?\s*c\.?|societ[aà]\s+(?:a\s+responsabilit[aà]\s+limitata|per\s+azioni))\b/giu;
+
+/** 匹配专用归一：基础归一 + 剥拼写全称与意大利法人词（先 NFC 防组合变音符裂词）。 */
 export function normForMatch(name: string): string {
-  return normalizeCompanyName(name.normalize('NFC'))
+  return normalizeCompanyName(name.normalize('NFC').replace(ITALIAN_LEGAL_FORMS_RE, ' '))
     .split(' ')
     .filter((t) => t && !EXTRA_LEGAL_TOKENS.has(t))
     .join(' ');

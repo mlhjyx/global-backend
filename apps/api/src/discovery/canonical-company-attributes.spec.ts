@@ -158,6 +158,13 @@ describe("CanonicalCompany derived-attribute sanitizer parity", () => {
       "structured_harvest.hiring_signal",
       "structured_harvest.site_sections",
       "structured_harvest.sitemap_url_count",
+      "vies.legal_name",
+      "vies.match_confidence",
+      "vies.registered_city",
+      "vies.registered_country",
+      "vies.request_date",
+      "vies.vat_id",
+      "vies.verified_status",
       "website_profile.carried_brands",
       "website_profile.carries_chinese_brand",
       "website_profile.carries_foreign_brand",
@@ -237,6 +244,42 @@ describe("CanonicalCompany derived-attribute sanitizer parity", () => {
     ).toEqual({ website_profile: { trade_role: "distributor" } });
     expect(sanitizeStored("website_profile.vat_id", "DE136695976")).toBe("DE136695976");
     expect(sanitizeStored("website_profile.vat_id", "DE136695977")).toBeUndefined();
+    expect(sanitizeStored("website_profile.vat_id", "IT04553650989")).toBe("IT04553650989");
+    expect(sanitizeStored("website_profile.vat_id", "IT00000000000")).toBeUndefined();
+  });
+
+  it("retains the vies namespace, validates vies.vat_id, strips raw address, and preserves bookkeeping markers", () => {
+    const vies = {
+      vat_id: "IT04553650989",
+      legal_name: "EFFE ENERGY SRL",
+      registered_country: "IT",
+      registered_city: "GUSSAGO",
+      verified_status: "VALID",
+      request_date: "2026-11-26",
+      match_confidence: 1,
+    };
+    expect(
+      sanitizeCanonicalCompanyAttributes({
+        vies: { ...vies, address: "VIA BENEDETTO CASTELLI 9/11" },
+        website_profile: {
+          trade_role: "distributor",
+          _parser_version: "website-profile/v2",
+          _vies_attempted: "v1-9f8a-21c4-b0e7-3d12",
+        },
+      }),
+    ).toEqual({
+      vies,
+      website_profile: {
+        trade_role: "distributor",
+        _parser_version: "website-profile/v2",
+        _vies_attempted: "v1-9f8a-21c4-b0e7-3d12",
+      },
+    });
+    expect(sanitizeStored("vies.vat_id", "IT04553650989")).toBe("IT04553650989");
+    expect(sanitizeStored("vies.vat_id", "IT04553650988")).toBeUndefined();
+    expect(sanitizeStored("vies.registered_country", "IT")).toBe("IT");
+    expect(sanitizeStored("vies.verified_status", "VALID")).toBe("VALID");
+    expect(sanitizeStored("vies.request_date", "2026-11-26")).toBe("2026-11-26");
   });
 
   it("keeps the website profile's source page only as a plain https URL (BI-14 / A4)", () => {

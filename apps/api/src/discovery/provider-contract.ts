@@ -291,6 +291,8 @@ export interface CompanyEnrichmentInput {
   domain?: string;
   country?: string;
   region?: string;
+  vatId?: string;
+  legalName?: string;
 }
 
 /**

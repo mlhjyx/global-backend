@@ -47,7 +47,7 @@ const ISO3_TO_ISO2: Readonly<Record<string, string>> = Object.freeze({
 const KNOWN_ISO2: ReadonlySet<string> = new Set([
   ...Object.values(ISO3_TO_ISO2),
   'SE', 'DK', 'FI', 'NO', 'BE', 'LU', 'CZ', 'SK', 'HU', 'RO', 'BG', 'GR', 'PT', 'IE',
-  'EE', 'LV', 'LT', 'SI', 'HR', 'RS', 'TR', 'UA', 'CA', 'MX', 'BR', 'AU', 'NZ', 'KR',
+  'CY', 'MT', 'EE', 'LV', 'LT', 'SI', 'HR', 'RS', 'TR', 'UA', 'CA', 'MX', 'BR', 'AU', 'NZ', 'KR',
   'SG', 'IL', 'AE', 'SA', 'ZA', 'EG', 'MA', 'TN', 'VN', 'TH', 'MY', 'ID', 'PH', 'PK',
   'BD', 'LK', 'TW', 'HK', 'AR', 'CL', 'CO', 'PE',
 ]);
@@ -75,10 +75,14 @@ const VAT_PREFIXES: Readonly<Record<string, string>> = Object.freeze({
   HU: 'HU',
   RO: 'RO',
   BG: 'BG',
+  CY: 'CY',
+  EL: 'GR',
   GR: 'GR',
+  MT: 'MT',
   PT: 'PT',
   IE: 'IE',
   GB: 'GB',
+  XI: 'GB',
   CN: 'CN',
   IN: 'IN',
   JP: 'JP',
@@ -116,7 +120,7 @@ export function normalizeCountryValue(raw: unknown): string | null {
 
 export interface CountryInference {
   iso: string;
-  source: 'vat_id' | 'gleif_registered_country';
+  source: 'vat_id' | 'gleif_registered_country' | 'vies_registered_country';
   /** 触发推断的原始值（vat_id 本身是登记信息，非个人数据；仅用于报告追溯）。 */
   evidence: string;
 }
@@ -134,7 +138,7 @@ function iso2FromVat(raw: string): string | null {
   return iso ?? null;
 }
 
-/** 仅用确定性证据推断 NULL 国家（gleif 注册国优先于 VAT 前缀，二者都是登记事实）。 */
+/** 仅用确定性证据推断 NULL 国家（gleif/vies 注册国优先于 VAT 前缀，均为登记事实）。 */
 export function inferCountryFromAttributes(attributes: unknown): CountryInference | null {
   const root = jsonObject(attributes);
   if (!root) return null;
@@ -144,8 +148,14 @@ export function inferCountryFromAttributes(attributes: unknown): CountryInferenc
     const iso = normalizeCountryValue(registered);
     if (iso) return { iso, source: 'gleif_registered_country', evidence: registered };
   }
+  const vies = jsonObject(root.vies);
+  const viesRegistered = vies?.registered_country;
+  if (typeof viesRegistered === 'string') {
+    const iso = normalizeCountryValue(viesRegistered);
+    if (iso) return { iso, source: 'vies_registered_country', evidence: viesRegistered };
+  }
   const profile = jsonObject(root.website_profile);
-  const vat = profile?.vat_id;
+  const vat = typeof vies?.vat_id === 'string' ? vies.vat_id : profile?.vat_id;
   if (typeof vat === 'string') {
     const iso = iso2FromVat(vat);
     if (iso) return { iso, source: 'vat_id', evidence: vat };

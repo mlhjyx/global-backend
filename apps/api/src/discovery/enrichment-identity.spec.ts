@@ -51,6 +51,16 @@ describe('independent enrichment identity scope', () => {
     expect(scopeIndependentEnrichment({ ...company, attributes })).toEqual({ wikidata: attributes.wikidata, other: attributes.other });
     expect(attributes.gleif.registered_country).toBe('FR');
   });
+  it('rejects a different registered country for vies even when company.country is null using ccTLD inference', () => {
+    expect(enrichmentIdentityConflicts({ country: null, domain: 'foo.it' }, 'vies', { registered_country: 'FR' })).toBe(true);
+    expect(enrichmentIdentityConflicts({ country: null, domain: 'foo.it' }, 'vies', { registered_country: 'IT' })).toBe(false);
+    expect(enrichmentIdentityConflicts({ country: null, domain: 'solarplace.net' }, 'vies', { registered_country: 'IT' })).toBe(false);
+    const attributes = { vies: { registered_country: 'FR' }, website_profile: { trade_role: 'distributor' } };
+    expect(scopeIndependentEnrichment({ country: null, domain: 'foo.it', attributes })).toEqual({
+      website_profile: { trade_role: 'distributor' },
+    });
+  });
+
   it('returns the same object when no scope change is needed', () => {
     const attributes = { gleif: { registered_country: 'DE' } };
     expect(scopeIndependentEnrichment({ ...company, attributes })).toBe(attributes);

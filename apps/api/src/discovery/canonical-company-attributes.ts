@@ -9,7 +9,8 @@ import {
 } from "./raw-source-provider-normalizer";
 import { sanitizeStructuredHarvestSiteSections } from "./structured-harvest-site-sections";
 import { readProjectPageEvidence } from "./website-profile/project-page-evidence";
-import { isValidGermanVat, isRegisteredAddressText } from "./website-profile/impressum";
+import { isValidEuVat } from "./website-profile/eu-vat";
+import { isRegisteredAddressText } from "./website-profile/impressum";
 
 const RETAINED_TOP_LEVEL_KEYS = new Set([
   "manufacturer_network",
@@ -47,6 +48,7 @@ const RETAINED_TOP_LEVEL_KEYS = new Set([
   "structured_harvest",
   "ted",
   "ted_buyer",
+  "vies",
   "website_profile",
   "wikidata",
   "wikidata_qid",
@@ -248,7 +250,8 @@ const semanticIdentifierContracts = new Map<
     "website_profile.register_key",
     { validate: (value) => /^de-hr[ab]:[a-z0-9]+(?:-[a-z0-9]+)*:\d{1,6}[a-z]{0,2}$/u.test(value) },
   ],
-  ["website_profile.vat_id", { validate: isValidGermanVat }],
+  ["website_profile.vat_id", { validate: isValidEuVat }],
+  ["vies.vat_id", { validate: isValidEuVat }],
   // L6: the company's registered postal address (never a person's address, never a contact detail).
   [
     "website_profile.registered_address",
@@ -290,6 +293,13 @@ const storedCompanyFieldAttributePaths = new Map<
   ["structured_harvest.hiring_signal", ["structured_harvest", "hiring_signal"]],
   ["structured_harvest.site_sections", ["structured_harvest", "site_sections"]],
   ["structured_harvest.sitemap_url_count", ["structured_harvest", "sitemap_url_count"]],
+  ["vies.legal_name", ["vies", "legal_name"]],
+  ["vies.match_confidence", ["vies", "match_confidence"]],
+  ["vies.registered_city", ["vies", "registered_city"]],
+  ["vies.registered_country", ["vies", "registered_country"]],
+  ["vies.request_date", ["vies", "request_date"]],
+  ["vies.vat_id", ["vies", "vat_id"]],
+  ["vies.verified_status", ["vies", "verified_status"]],
   ["website_profile.carried_brands", ["website_profile", "carried_brands"]],
   ["website_profile.carries_chinese_brand", ["website_profile", "carries_chinese_brand"]],
   ["website_profile.carries_foreign_brand", ["website_profile", "carries_foreign_brand"]],
@@ -365,6 +375,13 @@ export const STORED_COMPANY_FIELD_EVIDENCE_FIELDS = Object.freeze([
   "structured_harvest.hiring_signal",
   "structured_harvest.site_sections",
   "structured_harvest.sitemap_url_count",
+  "vies.legal_name",
+  "vies.match_confidence",
+  "vies.registered_city",
+  "vies.registered_country",
+  "vies.request_date",
+  "vies.vat_id",
+  "vies.verified_status",
   "website_profile.carried_brands",
   "website_profile.carries_chinese_brand",
   "website_profile.carries_foreign_brand",
@@ -425,6 +442,41 @@ function sanitizeManufacturerNamespace(value: unknown): unknown {
   return evidence ? {evidence} : undefined;
 }
 
+const BOOKKEEPING_MARKER_VALUE = /^[a-z0-9][a-z0-9_./-]{0,63}$/u;
+const ISO_DATE_VALUE = /^\d{4}-\d{2}-\d{2}$/u;
+
+function sanitizeSpecialPath(
+  path: readonly string[],
+  value: unknown,
+  state: SanitizeState,
+): { value: unknown } | null {
+  if (matchesPropertyPath(path, "structured_harvest", "site_sections")) {
+    const sections = sanitizeStructuredHarvestSiteSections(value);
+    state.remaining -= sections ? Object.keys(sections).length : 0;
+    return { value: state.remaining < 0 ? undefined : sections };
+  }
+  if (matchesPropertyPath(path, "website_profile", "project_evidence")) {
+    return { value: readProjectPageEvidence(value) };
+  }
+  if (matchesPropertyPath(path, "vies", "request_date")) {
+    return {
+      value: typeof value === "string" && ISO_DATE_VALUE.test(value) ? value : undefined,
+    };
+  }
+  if (
+    path.length === 2 &&
+    (path[1] === "_parser_version" || path[1] === "_vies_attempted")
+  ) {
+    return {
+      value:
+        typeof value === "string" && BOOKKEEPING_MARKER_VALUE.test(value)
+          ? value
+          : undefined,
+    };
+  }
+  return null;
+}
+
 function sanitizeValue(
   key: string,
   value: unknown,
@@ -440,16 +492,8 @@ function sanitizeValue(
   ) {
     return undefined;
   }
-  if (
-    matchesPropertyPath(path, "structured_harvest", "site_sections")
-  ) {
-    const sections = sanitizeStructuredHarvestSiteSections(value);
-    state.remaining -= sections ? Object.keys(sections).length : 0;
-    return state.remaining < 0 ? undefined : sections;
-  }
-  if (matchesPropertyPath(path, "website_profile", "project_evidence")) {
-    return readProjectPageEvidence(value);
-  }
+  const special = sanitizeSpecialPath(path, value, state);
+  if (special) return special.value;
   if (key === "products" || key === "keywords") {
     if (!Array.isArray(value)) return undefined;
     const predicate =

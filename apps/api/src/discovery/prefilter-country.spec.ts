@@ -76,5 +76,14 @@ describe('L1 deterministic pre-country inference (prefilter-country)', () => {
         attributes: { website_profile: { vat_id: 'DE123456789' } },
       }),
     ).toMatchObject({ iso: 'DE', source: 'vat_id' });
+
+    expect(
+      inferPrefilterCountry({
+        name: 'Solarplace',
+        domain: 'solarplace.net',
+        country: null,
+        attributes: { vies: { registered_country: 'IT', vat_id: 'IT03899910925' } },
+      }),
+    ).toMatchObject({ iso: 'IT', source: 'vies_registered_country' });
   });
 });

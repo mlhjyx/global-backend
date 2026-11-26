@@ -38,6 +38,8 @@ import {
   persistCompanyContactPoints,
 } from '../discovery/company-contact-points';
 import {
+  WEBSITE_PROFILE_PARSER_MARKER,
+  WEBSITE_PROFILE_PARSER_VERSION,
   WEBSITE_PROFILE_PROVIDER_KEY,
   WebsiteProfileProvider,
   type WebsiteProfile,
@@ -330,7 +332,7 @@ export function createRun2PipelineActivities(deps: {
       });
     },
 
-    /** 画像：官网首页 + Impressum → website_profile 命名空间（30 天 TTL，联系路径按开关）。 */
+    /** 画像：官网首页 + Impressum → website_profile 命名空间（30 天 TTL，联系路径按开关）；随后执行独立 T1/T2 核验（使新提 P.IVA 当轮即可进 VIES）。 */
     async profileCompanyOnce(args: CompanyPipelineActivityInput): Promise<{
       profiled: boolean;
       matched: boolean;
@@ -341,8 +343,10 @@ export function createRun2PipelineActivities(deps: {
         { stage: 'profiling', runId: args.runId, companyId: args.companyId },
         async (_activityCtx, checkpoint) => {
       const binding = await ensureRunBudget(args);
-      checkpoint('corroborate');
-      await corroborateCompanyBeforeFit(deps, args, binding);
+      const runCorroboration = async (): Promise<void> => {
+        checkpoint('corroborate');
+        await corroborateCompanyBeforeFit(deps, args, binding);
+      };
       checkpoint('setup');
       const setup = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const source = await tx.dataProvider.findUnique({
@@ -367,12 +371,16 @@ export function createRun2PipelineActivities(deps: {
           : undefined;
         return { contactPaths: contactSource?.status === 'ENABLED', icp, company, projectUrl };
       });
-      if (!setup?.company?.domain) return { profiled: false, matched: false, unclassified: false, reason: 'no_domain_or_provider' };
+      if (!setup?.company?.domain) {
+        await runCorroboration();
+        return { profiled: false, matched: false, unclassified: false, reason: 'no_domain_or_provider' };
+      }
       const nowMs = Date.now();
       const storedProfile = (setup.company.attributes as { website_profile?: { project_evidence?: unknown } } | null)?.website_profile;
       const sameProject = !setup.projectUrl ||
         readProjectPageEvidence(storedProfile?.project_evidence, setup.company.domain)?.source_url === setup.projectUrl;
       if (sameProject && websiteProfileFreshAndCurrent(setup.company.attributes, setup.contactPaths, nowMs)) {
+        await runCorroboration();
         return { profiled: false, matched: false, unclassified: false, reason: 'fresh' };
       }
       if (!(await mayUse(args.workspaceId, args.companyId))) {
@@ -387,7 +395,10 @@ export function createRun2PipelineActivities(deps: {
               runtimeTelemetry: deps.runtimeTelemetry,
             })
           : null);
-      if (!provider) return { profiled: false, matched: false, unclassified: false, reason: 'no_provider' };
+      if (!provider) {
+        await runCorroboration();
+        return { profiled: false, matched: false, unclassified: false, reason: 'no_provider' };
+      }
 
       const icpHomeCountry = targetCountryCodes({ filters: { country: setup.icp?.targetMarkets } })[0] ?? '';
       const homeCountry =
@@ -452,9 +463,12 @@ export function createRun2PipelineActivities(deps: {
                   companyId: args.companyId,
                   hits,
                   signalTimestamp: fetchedAt,
-                  ...(setup.contactPaths
-                    ? { namespaceMarkers: { [COMPANY_CONTACT_PARSER_MARKER]: COMPANY_CONTACT_PARSER_VERSION } }
-                    : {}),
+                  namespaceMarkers: {
+                    [WEBSITE_PROFILE_PARSER_MARKER]: WEBSITE_PROFILE_PARSER_VERSION,
+                    ...(setup.contactPaths
+                      ? { [COMPANY_CONTACT_PARSER_MARKER]: COMPANY_CONTACT_PARSER_VERSION }
+                      : {}),
+                  },
                 })
               : Promise.resolve(false),
           readback: async (transaction) => {
@@ -498,9 +512,11 @@ export function createRun2PipelineActivities(deps: {
         console.warn(
           `[profileCompanyOnce] soft-failed ${args.companyId} at commit: ${describeSoftFailure(error)}`,
         );
+        await runCorroboration();
         return { profiled: false, matched: false, unclassified: false, reason: 'persist_failed' };
       }
 
+      await runCorroboration();
       if (profile === null) {
         return {
           profiled: false,

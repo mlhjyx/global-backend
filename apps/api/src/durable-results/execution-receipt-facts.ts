@@ -18,6 +18,7 @@ export const RECEIPT_FACT_TOOL_IDS = Object.freeze([
   "http.get",
   "wikidata.entity",
   "gleif.fetch",
+  "vies.check",
   "ted.search",
   "openfda.search",
   "opencorporates.search",

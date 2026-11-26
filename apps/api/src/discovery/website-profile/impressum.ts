@@ -4,6 +4,14 @@
  * line; a sole-trader firm name (e.K.) is a personal name and is rejected.
  */
 
+import {
+  extractEuVat,
+  isValidGermanVat,
+  type ExtractEuVatOptions,
+} from './eu-vat';
+
+export { isValidGermanVat };
+
 export interface ImpressumRegister {
   readonly type: 'HRA' | 'HRB';
   readonly number: string;
@@ -32,7 +40,6 @@ const REGISTER_RE = /\bH\s?R\s?([AB])\b\s*(?:Nr\.?|-?Nummer)?\s*[:.]?\s*(\d{1,6}
 // "Amtsgericht München", "des Amtsgerichts München", "Registergericht: München",
 // "Registergericht: AG Köln"; a bare "Registergericht:" before "Amtsgericht …" defers to it.
 const COURT_RE = /(?:Amtsgerichts?|Registergericht):?\s+(?:AG\s+)?(?!Amtsgericht)([A-ZÄÖÜ][A-Za-zÄÖÜäöüß.-]*(?:[ -](?!H\s?R\s?[AB]\b)[A-ZÄÖÜ][A-Za-zÄÖÜäöüß.-]*)?(?:\s*\([^)\n]{1,40}\))?)/u;
-const VAT_RE = /\bDE\s?(\d{3})\s?(\d{3})\s?(\d{3})\b/gu;
 const CAPITAL_FORM_RE =
   /\b(?:GmbH\s*&\s*Co\.?\s*KG(?:aA)?|Gesellschaft\s+mit\s+beschr(?:ä|ae)nkter\s+Haftung|GmbH|gGmbH|AG|SE|KGaA|UG\s*\(haftungsbeschränkt\)|eG)(?![\p{L}\p{N}])/u;
 const NON_NAME_LINE_RE =
@@ -72,21 +79,6 @@ export function isRegisteredAddressText(value: string): boolean {
   return /[\p{L}]{3,}/u.test(before) && /\d/u.test(before);
 }
 
-/** German VAT id check digit (ISO 7064 MOD 11,10). */
-export function isValidGermanVat(value: string): boolean {
-  const match = /^DE(\d{9})$/u.exec(value);
-  if (!match) return false;
-  const digits = match[1]!.split('').map(Number);
-  let product = 10;
-  for (const digit of digits.slice(0, 8)) {
-    let sum = (digit + product) % 10;
-    if (sum === 0) sum = 10;
-    product = (2 * sum) % 11;
-  }
-  const check = (11 - product) % 10;
-  return check === digits[8];
-}
-
 function slug(value: string): string {
   return value
     .toLowerCase()
@@ -108,12 +100,8 @@ function parseRegister(text: string): ImpressumRegister | null {
   return { type, number, court, key };
 }
 
-function parseVat(text: string): string | null {
-  for (const match of text.matchAll(VAT_RE)) {
-    const candidate = `DE${match[1]}${match[2]}${match[3]}`;
-    if (isValidGermanVat(candidate)) return candidate;
-  }
-  return null;
+function parseVat(text: string, opts?: ExtractEuVatOptions): string | null {
+  return extractEuVat(text, opts) ?? null;
 }
 
 function cleanLine(line: string): string {
@@ -200,12 +188,12 @@ export function hasConflictingRegisterNumbers(text: string): boolean {
   return false;
 }
 
-export function parseImpressum(text: string): ParsedImpressum {
+export function parseImpressum(text: string, opts?: ExtractEuVatOptions): ParsedImpressum {
   const legalName = parseLegalName(text);
   return {
     legalName,
     register: parseRegister(text),
-    vatId: parseVat(text),
+    vatId: parseVat(text, opts),
     // A sole trader's address is a personal address: only store it with a company form.
     registeredAddress: legalName ? parseRegisteredAddress(text) : null,
   };
