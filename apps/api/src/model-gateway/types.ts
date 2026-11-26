@@ -2,7 +2,7 @@ import type { PlatformEgressOperation } from '../platform-authority/platform-egr
 import type { ModelExecutionTrace } from '@global/contracts';
 import type { TypedProjectionSchema } from '../durable-results/durable-result-strategy';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
-import type { PaidCostContext } from '../site-builder/site-build-cost-ledger';
+import type { PaidCostContext } from './paid-cost-context';
 import type { GatewaySettlementObservation } from './paid-model-settlement';
 
 /** Context threaded into every model call — for routing, tenancy, cost, trace. */

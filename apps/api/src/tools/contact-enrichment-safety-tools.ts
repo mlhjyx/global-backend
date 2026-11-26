@@ -1,4 +1,4 @@
-import { paidOperationKey } from "../site-builder/site-build-cost-ledger";
+import { paidOperationKey } from "../common/paid-cost-ledger-contract";
 import {
   createSmtpRcptProbeTool,
   type SmtpProbeInput,

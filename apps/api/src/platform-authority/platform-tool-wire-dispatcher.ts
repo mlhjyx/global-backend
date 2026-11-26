@@ -1,5 +1,5 @@
 import type { ToolContext } from "../tools/tool-contract";
-import { paidOperationKey } from "../site-builder/site-build-cost-ledger";
+import { paidOperationKey } from "../common/paid-cost-ledger-contract";
 import { ExecutionControlError } from "../execution-budget/execution-control-error";
 import { snapshotPlatformEgressOperation, type PlatformEgressOperation } from "./platform-egress-operation";
 import { PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1, type PlatformExecutionTechnicalRowV1 } from "./platform-execution-contract";

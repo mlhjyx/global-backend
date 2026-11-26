@@ -7,7 +7,7 @@ import {
 import { executeStructuredTaskWithRuntime } from '../../model-runtime/structured-task-runtime-bridge';
 import type { RuntimeTelemetry } from '../../model-runtime/types';
 import type { DurableExecutionReceipt } from '../../durable-results/durable-execution-receipt';
-import { scrubPiiKeepingTaxIds } from '../../site-builder/agents/pii';
+import { scrubPiiKeepingTaxIds } from '../../common/pii-scrub';
 import type { FitJudgment } from '../fit-judge';
 
 export const FIT_V3_RUBRIC_VERSION = 'fit-v3' as const;

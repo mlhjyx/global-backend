@@ -63,7 +63,7 @@ import {
 } from '../execution-envelope';
 import { isContactFreeText, isControlledBusinessTerm, isStableSafeHttpsUrl } from '../raw-source-provider-normalizer';
 import { COUNTRY_ISO, lookupCountryIso } from '../vocab';
-import { sanitizeEvidenceUrl } from '../../site-builder/agents/evidence-ref';
+import { sanitizeEvidenceUrl } from '../../common/evidence-ref';
 import {
   MAX_SEARCHES_PER_QUERY,
   isForeignCountryDomain,

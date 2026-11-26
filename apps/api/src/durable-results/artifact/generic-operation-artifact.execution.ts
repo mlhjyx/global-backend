@@ -5,7 +5,7 @@ import {
 } from "./materializers/contact-email-find.materializer";
 import { createHash } from "node:crypto";
 import type { Prisma } from "@prisma/client";
-import { sanitizeEvidenceUrl } from "../../site-builder/agents/evidence-ref";
+import { sanitizeEvidenceUrl } from "../../common/evidence-ref";
 import { normalizeArtifactPageText } from "./artifact-page-text";
 import type { BudgetReservation } from "../../tools/budget-store";
 import type {

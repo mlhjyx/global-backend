@@ -13,8 +13,8 @@ import { randomUUID } from 'node:crypto';
 import type { Readable } from 'node:stream';
 import { PrismaService } from '../prisma/prisma.service';
 import type { RequestContext } from '../auth/request-context';
-import { mimeMatchesSniffed, sniffMime } from '../site-builder/object-key';
-import { EmbeddingsClient } from '../site-builder/embeddings.client';
+import { mimeMatchesSniffed, sniffMime } from '../infra-clients/object-key';
+import { EmbeddingsClient } from '../infra-clients/embeddings.client';
 import {
   isS3NotFoundError,
   SELLER_DOCUMENT_MULTIPART_PART_SIZE,

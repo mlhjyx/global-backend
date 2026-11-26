@@ -86,6 +86,17 @@
       ]
     },
     {
+      "id": "site-builder.runtime-module-gate",
+      "category": "api-and-di",
+      "status": "DETERMINISTIC_TEST",
+      "extractor": null,
+      "accountableRole": "OWN-SITE-BE",
+      "assignee": "UNASSIGNED",
+      "patterns": [
+        "await import\\([\"']\\.\\./site-builder/site-builder\\.module[\"']\\)"
+      ]
+    },
+    {
       "id": "tool-broker.registration",
       "category": "external-execution",
       "status": "EXTRACTOR",

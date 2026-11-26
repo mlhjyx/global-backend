@@ -19,15 +19,17 @@ describe('R1 Release reconciliation wiring', () => {
   });
 
   it('is a scheduled cross-node activity but remains operator-disabled by default', async () => {
-    const [worker, schedules, workflow] = await Promise.all([
+    const [worker, siteBuilderRuntime, schedules, workflow] = await Promise.all([
       readFile(new URL('../temporal/worker.ts', import.meta.url), 'utf8'),
+      readFile(new URL('../temporal/site-builder-worker-runtime.ts', import.meta.url), 'utf8'),
       readFile(new URL('../temporal/sweep-scheduler.service.ts', import.meta.url), 'utf8'),
       readFile(
         new URL('../temporal/site-release-maintenance.workflow.ts', import.meta.url),
         'utf8',
       ),
     ]);
-    expect(worker).toContain('createSiteReleaseMaintenanceActivities');
+    expect(worker).toContain('loadSiteBuilderWorkerActivities');
+    expect(siteBuilderRuntime).toContain('createSiteReleaseMaintenanceActivities');
     expect(schedules).toContain('SITE_RELEASE_MAINTENANCE_SWEEP_SCHEDULE_ID');
     expect(workflow).toContain('siteReleaseMaintenanceSweepWorkflow');
   });

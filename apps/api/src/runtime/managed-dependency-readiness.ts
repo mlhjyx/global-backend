@@ -4,6 +4,7 @@ import {
   validateModelGatewayEndpoint,
 } from "../adapters/model-gateway-endpoint";
 import { settlementReadbackConfigured } from "./settlement-readback-config";
+import { isSiteBuilderEnabled } from "./site-builder-feature-flag";
 import { PrismaService } from "../prisma/prisma.service";
 import { S3Client } from "@aws-sdk/client-s3";
 import Redis from "ioredis";
@@ -567,6 +568,9 @@ export async function checkBrowserReadiness(
   env: NodeJS.ProcessEnv,
   probe: BrowserProbe = probeBrowserReadiness,
 ): Promise<RuntimeComponentStatus> {
+  if (!isSiteBuilderEnabled(env)) {
+    return { status: "ok" };
+  }
   const executable = env.CHROME_PATH?.trim() || "/usr/bin/chromium";
   if (!BROWSER_PATHS.has(executable)) {
     return { status: "failed", code: "BROWSER_RUNTIME_CONFIG_INVALID" };
@@ -591,7 +595,7 @@ export class ManagedDependencyReadinessContributors
   ) {}
 
   onModuleInit(): void {
-    this.unregister = Object.freeze([
+    const registrations: Array<() => void> = [
       this.registry.register("redis", () => checkRedisReadiness(process.env)),
       this.registry.register("auth_jwks", () =>
         checkAuthJwksReadiness(process.env),
@@ -605,24 +609,41 @@ export class ManagedDependencyReadinessContributors
       this.registry.register("model_gateway", () =>
         checkModelGatewayReadiness(process.env),
       ),
-      this.registry.register("site_builder_model_settlement_readback", () =>
-        checkSiteBuildSettlementReadbackReadiness(process.env),
-      ),
-      this.registry.register("browser", () =>
-        checkBrowserReadiness(process.env),
-      ),
-      this.registry.register("renderer", () => {
-        try {
-          rendererRuntimeIdentity(this.releaseIdentity.current());
-          return { status: "ok" } as const;
-        } catch {
-          return {
-            status: "not_proven",
-            code: "RENDERER_IDENTITY_NOT_PROVEN",
-          } as const;
-        }
-      }),
-    ]);
+    ];
+    if (isSiteBuilderEnabled(process.env)) {
+      registrations.push(
+        this.registry.register("site_builder_model_settlement_readback", () =>
+          checkSiteBuildSettlementReadbackReadiness(process.env),
+        ),
+        this.registry.register("browser", () =>
+          checkBrowserReadiness(process.env),
+        ),
+        this.registry.register("renderer", () => {
+          try {
+            rendererRuntimeIdentity(this.releaseIdentity.current());
+            return { status: "ok" } as const;
+          } catch {
+            return {
+              status: "not_proven",
+              code: "RENDERER_IDENTITY_NOT_PROVEN",
+            } as const;
+          }
+        }),
+      );
+    } else {
+      const disabledOk = () => ({ status: "ok" }) as const;
+      registrations.push(
+        this.registry.register("storage", disabledOk),
+        this.registry.register("budget_grant_verification", disabledOk),
+        this.registry.register(
+          "site_builder_model_settlement_readback",
+          disabledOk,
+        ),
+        this.registry.register("browser", disabledOk),
+        this.registry.register("renderer", disabledOk),
+      );
+    }
+    this.unregister = Object.freeze(registrations);
   }
 
   onModuleDestroy(): void {

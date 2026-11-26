@@ -1,5 +1,5 @@
 import { types as nodeUtilTypes } from "node:util";
-import { sanitizeEvidenceUrl } from "../../site-builder/agents/evidence-ref";
+import { sanitizeEvidenceUrl } from "../../common/evidence-ref";
 import { invalidGenericOperationArtifact } from "./artifact.types";
 import type { GenericOperationArtifactManifest } from "./artifact.types";
 

@@ -1,5 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
-import type { StorageService } from '../site-builder/storage.service';
+import type { StorageService } from '../infra-clients/storage.service';
 import { SiteReleaseMaintenanceService } from '../site-builder/site-release-maintenance.service';
 
 export function createSiteReleaseMaintenanceActivities(input: {

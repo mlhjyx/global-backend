@@ -34,7 +34,7 @@ import { ReportModule } from './report/report.module';
 import { EventsModule } from './events/events.module';
 import { ComplianceModule } from './compliance/compliance.module';
 import { SanctionsModule } from './sanctions/sanctions.module';
-import { SiteBuilderModule } from './site-builder/site-builder.module';
+import { SiteBuilderFeatureModule } from './runtime/site-builder-feature.module';
 import { SellerKnowledgeModule } from './seller-knowledge/seller-knowledge.module';
 import { MarketCandidatesModule } from './market-candidates/market-candidates.module';
 import { MarketCandidateGenerationModule } from './market-candidate-generation/market-candidate-generation.module';
@@ -94,7 +94,7 @@ import { DataExportsModule } from './data-exports/data-exports.module';
     EventsModule,
     ComplianceModule,
     SanctionsModule,
-    SiteBuilderModule,
+    SiteBuilderFeatureModule.register(),
     SellerKnowledgeModule,
     MarketCandidatesModule,
     MarketCandidateGenerationModule,

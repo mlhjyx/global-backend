@@ -48,7 +48,7 @@ import type { ExecutionBroker } from "../../tools/tool-contract";
 import type { ContactEnrichmentPreparationInput, ContactEnrichmentPreparation } from "./contact-enrichment-safety.service";
 import { resolveMx } from "node:dns/promises";
 import { parseArtifactReference } from "../../durable-results/artifact/artifact-reference.schema";
-import { paidOperationKey } from "../../site-builder/site-build-cost-ledger";
+import { paidOperationKey } from "../../common/paid-cost-ledger-contract";
 import { SmtpProbeProvider, mapSmtpProbeOutcome } from "../verification/smtp-probe.provider";
 import { TypedProjectionRegistry } from "../../durable-results/typed-projection.registry";
 import { registerContactEmailVerificationProjections } from "../../durable-results/contact-email-verification-projections";

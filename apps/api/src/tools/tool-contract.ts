@@ -9,7 +9,7 @@ import type { PlatformEgressOperation } from "../platform-authority/platform-egr
 import type { DurableResultStrategy } from "../durable-results/durable-result-strategy";
 import type { TransientResultScope } from "./transient-result-scope";
 import type { DurableExecutionReceipt } from "../durable-results/durable-execution-receipt";
-import type { PaidCostContext } from "../site-builder/site-build-cost-ledger";
+import type { PaidCostContext } from "../model-gateway/paid-cost-context";
 
 export type ToolCategory =
   | "search" // 元搜索（searxng）
