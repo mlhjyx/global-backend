@@ -2,6 +2,7 @@ import {
   ApplicationFailure,
   CancellationScope,
   isCancellation,
+  patched,
   proxyActivities,
 } from '@temporalio/workflow';
 import {
@@ -10,6 +11,7 @@ import {
 } from '../execution-budget/execution-budget-binding';
 import { isExecutionControlError } from '../execution-budget/execution-control-error';
 import { DISCOVERY_QUERY_RECEIPT_MODE } from '../discovery/discovery-query-receipt-contract';
+import { MAX_RUN_ENRICH_COMPANIES } from '../discovery/execution-envelope';
 import { describeDiscoveryRunFailure, type DiscoveryRunStage } from './discovery.run-failure';
 import {
   resolveStreamingWorkflowKnobs,
@@ -217,16 +219,20 @@ export async function discoveryStreamingWorkflow(input: DiscoveryStreamingInput)
       topKCap,
       selectedCount: topK.length,
     });
+    const managedContactEnrichment = patched('streaming-contact-enrichment-v1');
 
     for (let i = 0; i < topK.length; i += l2Concurrency) {
       const batch = topK.slice(i, i + l2Concurrency);
       const settled = await Promise.allSettled(
-        batch.map((candidate) =>
+        batch.map((candidate, offset) =>
           streamingActivities.enrichStreamingTopKCompany({
             ...authority,
             runId: input.runId,
             icpId: input.icpId,
             companyId: candidate.companyId,
+            ...(managedContactEnrichment && candidate.verdict === 'match' && i + offset < MAX_RUN_ENRICH_COMPANIES
+              ? { enrichmentSlot: i + offset }
+              : {}),
           }),
         ),
       );

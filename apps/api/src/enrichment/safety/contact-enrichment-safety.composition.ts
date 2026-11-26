@@ -62,6 +62,7 @@ import { GovernedEnrichmentInvoker } from "./governed-enrichment-invoker";
 import { EnrichmentDomainCommitter, parseEnrichmentContactApplyDecision, type EnrichmentContactApplyDecision } from "./enrichment-domain-commit";
 import { ContactEnrichmentSafetyService } from "./contact-enrichment-safety.service";
 import { buildContactEnrichmentQualityResult, encodeContactEnrichmentResultCursor } from "./contact-enrichment-results.dto";
+import { readStreamingContactEnrichmentResult } from './streaming-contact-enrichment-results';
 import { readEnrichmentResultSnapshot } from "./enrichment-result-snapshot";
 import { buildContactEnrichmentQualityFacts } from "./contact-enrichment-quality-facts.dto";
 import type { ContactQualityFact } from "./enrichment-quality-facts";
@@ -233,20 +234,27 @@ async function enrichmentResultsPage(
   build: (
     record: import('./enrichment-safety.contract').EnrichmentRuntimeExecutionRecord,
   ) => unknown,
+  includeStreaming = false,
 ) {
   const scope = { workspaceId: context.workspaceId, companyId };
   const heads = await listCompanyEnrichmentHeads(deps.database, scope, {
     limit: parsed.limit,
     cursor: parsed.cursor,
     businessRunId: parsed.businessRunId,
+    includeStreaming,
   });
   // Unknown/foreign/soft-deleted company: no legitimate empty page exists.
   if (heads === null) return null;
   const page = heads.slice(0, parsed.limit);
   const items: unknown[] = [];
   for (const head of page) {
-    const record = await deps.loadById(scope, head.id);
-    if (record) items.push(build(record));
+    if (head.streaming) {
+      const result = await readStreamingContactEnrichmentResult(deps.database, scope, { id: head.id });
+      if (result) items.push(result);
+    } else {
+      const record = await deps.loadById(scope, head.id);
+      if (record) items.push(build(record));
+    }
   }
   const hasMore = heads.length > parsed.limit;
   const last = page[page.length - 1];
@@ -279,15 +287,18 @@ export function listContactEnrichmentResults(
   companyId: string,
   parsed: import('./contact-enrichment-results.dto').ContactEnrichmentResultsQuery,
 ) {
-  return enrichmentResultsPage(deps, context, companyId, parsed, buildContactEnrichmentQualityResult);
+  return enrichmentResultsPage(deps, context, companyId, parsed, buildContactEnrichmentQualityResult, true);
 }
-export function readContactEnrichmentResult(
+export async function readContactEnrichmentResult(
   deps: ContactEnrichmentResultsAdapterDeps,
   context: { workspaceId: string },
   companyId: string,
   operationRef: string,
 ) {
-  return enrichmentResultByRef(deps, context, companyId, operationRef, buildContactEnrichmentQualityResult);
+  const existing = await enrichmentResultByRef(deps, context, companyId, operationRef, buildContactEnrichmentQualityResult);
+  return existing ?? readStreamingContactEnrichmentResult(
+    deps.database, { workspaceId: context.workspaceId, companyId }, { operationRef },
+  );
 }
 export function listContactEnrichmentQualityFacts(
   deps: ContactEnrichmentResultsAdapterDeps,
@@ -733,6 +744,8 @@ export function createContactEnrichmentSafetyRuntime(deps: ContactEnrichmentSafe
     prepare: deps.prepare,
     execution,
     results: {
+      readStreamingEnrichmentExecution: (context, companyId, operationRef) =>
+        readStreamingContactEnrichmentResult(prisma, { workspaceId: context.workspaceId, companyId }, { operationRef }),
       listEnrichmentExecutions: (context, companyId, parsed) =>
         listContactEnrichmentResults(resultsAdapters, context, companyId, parsed),
       readEnrichmentExecution: (context, companyId, operationRef) =>

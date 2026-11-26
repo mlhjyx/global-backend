@@ -22,6 +22,7 @@ interface Row {
   id: string;
   createdAt: string;
   businessRunId?: string;
+  streaming?: boolean;
 }
 
 function record(operationRef: string, createdAt: string): EnrichmentRuntimeExecutionRecord {
@@ -80,20 +81,33 @@ function world(config: { companyExists?: boolean; rows?: Row[]; records?: Readon
       const tx = {
         $queryRaw: vi.fn(async (...args: unknown[]) => {
           const text = textOf(args[0]);
+          const values = valuesOf(args[0], args.slice(1));
+          if (text.includes('WITH head AS')) {
+            const [workspace, company, id, operationRef] = values;
+            if (workspace !== W || company !== C || config.companyExists === false) return [];
+            const found = config.rows?.find((row) => row.streaming &&
+              (id !== null ? row.id === id : resultRef(row) === operationRef));
+            return found ? [{
+              run_id: found.businessRunId, operation_ref: resultRef(found), started_at: new Date(found.createdAt),
+              result_status: 'RATE_LIMITED', company_suppressed: false,
+              contact_id: null, attempt_refs: null, attempt_outcomes: null,
+            }] : [];
+          }
           if (text.includes('public.canonical_company')) return config.companyExists === false ? [] : [{ id: C }];
           if (!text.includes('public.contact_enrichment_execution e')) return [];
-          const values = valuesOf(args[0], args.slice(1));
-          // Bind order: workspace, company, businessRunId x2, cursor.createdAt x2, cursor.id, limit+1.
+          const combinesStreaming = text.includes('WITH page_scope AS');
+          const includesStreaming = combinesStreaming && values[5] === true;
           const businessRunId = values[2] ?? null;
-          const cursorAt = values[4] ?? null;
-          const cursorId = values[6] ?? null;
-          const limit = Number(values[7]) - 1;
+          const cursorAt = values[combinesStreaming ? 3 : 4] ?? null;
+          const cursorId = values[combinesStreaming ? 4 : 6] ?? null;
+          const limit = Number(values[combinesStreaming ? 6 : 7]) - 1;
           headQueries.push({
             cursor: cursorAt === null ? null : { createdAt: String(cursorAt), id: String(cursorId) },
             businessRunId,
             limit,
           });
           return (config.rows ?? [])
+            .filter((row) => includesStreaming || !row.streaming)
             .filter((row) => businessRunId === null || row.businessRunId === businessRunId)
             .filter(
               (row) =>
@@ -102,20 +116,24 @@ function world(config: { companyExists?: boolean; rows?: Row[]; records?: Readon
                   (row.createdAt === String(cursorAt) && row.id > String(cursorId))),
             )
             .slice(0, limit + 1)
-            .map((row) => ({ id: row.id, created_at: new Date(row.createdAt) }));
+            .map((row) => ({ id: row.id, created_at: new Date(row.createdAt), streaming: Boolean(row.streaming) }));
         }),
       };
       return work(tx);
     }),
   } as unknown as ContactEnrichmentResultsAdapterDeps['database'];
   const loadById = vi.fn(async (_scope: { workspaceId: string; companyId: string }, id: string) =>
-    config.records?.has(id) ? record('f'.repeat(60) + id.slice(-4), '2026-11-22T00:00:00.000Z') : null,
+    config.records?.has(id) ? record(resultRef({ id }), '2026-11-22T00:00:00.000Z') : null,
   );
   const loadByRef = vi.fn(async (_scope: { workspaceId: string; companyId: string }, ref: string) =>
     ref === 'a'.repeat(64) ? record(ref, '2026-11-22T00:00:00.000Z') : null,
   );
   const deps: ContactEnrichmentResultsAdapterDeps = { database, loadById, loadByRef };
   return { deps, scopes, headQueries, loadById, loadByRef };
+}
+
+function resultRef(row: Pick<Row, 'id' | 'streaming'>) {
+  return (row.streaming ? 'e' : 'f').repeat(60) + row.id.slice(-4);
 }
 
 describe('real enrichment result list/read adapters distinguish unknown companies from empty pages', () => {
@@ -187,6 +205,35 @@ describe('real enrichment result list/read adapters distinguish unknown companie
     expect(x.headQueries[0]).toEqual({ cursor: null, businessRunId: RUN_A, limit: 10 });
     expect(x.loadById).toHaveBeenCalledTimes(10);
     expect(x.loadById).toHaveBeenCalledWith({ workspaceId: W, companyId: C }, rows[0]!.id);
+  });
+  it('merges legacy and streaming results once per head across a shared millisecond and filters by run', async () => {
+    const boundaryTime = '2026-11-22T00:00:08.000Z';
+    const rows = Array.from({ length: 13 }, (_, index) => ({
+      ...head(index, RUN_A),
+      ...(index >= 8 && index <= 11 ? { createdAt: boundaryTime } : {}),
+      streaming: [2, 9, 10].includes(index),
+    }));
+    const excluded = { ...head(25, RUN_B), streaming: true };
+    const records = new Set(rows.filter((row) => !row.streaming).map((row) => row.id));
+    const x = world({ rows: [...rows, excluded], records });
+    const page1 = await listContactEnrichmentResults(x.deps, { workspaceId: W }, C, { ...parsed, businessRunId: RUN_A });
+    expect(page1?.items.map((item) => (item as { operationRef: string }).operationRef)).toEqual(rows.slice(0, 10).map(resultRef));
+    const cursor = decodeContactEnrichmentResultCursor(page1!.nextCursor!);
+    expect(cursor).toEqual({ id: rows[9]!.id, createdAt: boundaryTime });
+
+    const page2 = await listContactEnrichmentResults(x.deps, { workspaceId: W }, C, {
+      ...parsed, businessRunId: RUN_A, cursor,
+    });
+    expect(page2?.items.map((item) => (item as { operationRef: string }).operationRef)).toEqual(rows.slice(10).map(resultRef));
+    expect(page2).toMatchObject({ hasMore: false, nextCursor: null });
+    expect(x.loadById).not.toHaveBeenCalledWith({ workspaceId: W, companyId: C }, rows[9]!.id);
+
+    const detail = await readContactEnrichmentResult(x.deps, { workspaceId: W }, C, resultRef(rows[9]!));
+    expect(detail).toMatchObject({ operationRef: resultRef(rows[9]!), status: 'APPLY_PENDING', businessRunId: RUN_A });
+    expect(x.loadByRef).toHaveBeenCalledExactlyOnceWith({ workspaceId: W, companyId: C }, resultRef(rows[9]!));
+    const facts = await listContactEnrichmentQualityFacts(x.deps, { workspaceId: W }, C, { ...parsed, businessRunId: RUN_A });
+    expect(facts?.items).toHaveLength(10);
+    expect(facts).toMatchObject({ hasMore: false, nextCursor: null });
   });
   it('reads by exact operation ref through loadByRef and returns null when absent', async () => {
     const x = world({ companyExists: true });

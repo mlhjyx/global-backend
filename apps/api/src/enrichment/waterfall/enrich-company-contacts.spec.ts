@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { Prisma } from '@prisma/client';
 import type { EmailEnrichmentAdapter, FindEmailInput, FindEmailOutcome } from '../finders/email-enrichment-provider';
 import { enrichmentRequestHash } from '../finders/email-enrichment-provider';
 import type { EmailVerificationProvider, EmailVerificationProviderResult } from '../verification/email-verification-provider';
@@ -204,6 +205,63 @@ const INPUT = {
 };
 
 describe('enrichCompanyContacts：跳过与形状', () => {
+  it('surfaces a fresh finder rate limit even when the following finder misses', async () => {
+    const world = fakeWorld({ contacts: [{ id: CONTACT_1, fullName: 'Jürgen Müller' }] });
+    const hunter = finder('hunter', {
+      status: 'error', errorCode: 'rate_limited', retryable: true,
+      costMicrousd: 0, latencyMs: 5, detail: 'hunter_http_429',
+    });
+    const fallback = finder('prospeo', miss());
+
+    // An expired attempt can keep the unique key, so the fresh 429 can be
+    // observed even when it cannot be attributed through the existing row.
+    const expiredMiss = {
+      id: 'older-attempt', providerKey: 'hunter', requestHash: 'a'.repeat(64),
+      outcome: 'miss', errorCode: null, emailState: null, costMicrousd: 0n,
+      attemptedAt: new Date(NOW.getTime() - 2 * 86_400_000),
+    };
+    world.tx.contactEnrichmentAttempt.findUnique
+      .mockResolvedValueOnce(expiredMiss as never).mockResolvedValueOnce(expiredMiss as never);
+    world.tx.contactEnrichmentAttempt.create.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError('duplicate attempt', { code: 'P2002', clientVersion: 'test' }),
+    );
+    const runId = '00000000-0000-4000-8000-0000000000a1';
+    await expect(enrichCompanyContacts(depsFor(world, [hunter, fallback]), { ...INPUT, runId }))
+      .resolves.toMatchObject({ rateLimited: true, results: [{ contactId: CONTACT_1, status: 'not_found' }] });
+    expect(world.tx.contactEnrichmentAttempt.create).toHaveBeenNthCalledWith(1,
+      expect.objectContaining({ data: expect.objectContaining({ runId, errorCode: 'rate_limited' }) }),
+    );
+    expect(fallback.calls).toHaveLength(1);
+  });
+
+  it('does not report a rate limit for a reused error or a normal miss', async () => {
+    const world = fakeWorld({ contacts: [{ id: CONTACT_1, fullName: 'Jürgen Müller' }] });
+    const hunter = finder('hunter', miss());
+    const fallback = finder('prospeo', miss());
+    world.tx.contactEnrichmentAttempt.findUnique.mockImplementationOnce(async () => ({
+      id: 'older-attempt', providerKey: 'hunter', requestHash: 'a'.repeat(64),
+      outcome: 'error', errorCode: 'rate_limited', emailState: null, costMicrousd: 0n, attemptedAt: NOW,
+    } as never));
+
+    const result = await enrichCompanyContacts(depsFor(world, [hunter, fallback]), INPUT);
+    expect(result.rateLimited).toBeUndefined();
+    expect(hunter.calls).toHaveLength(0);
+    expect(fallback.calls).toHaveLength(1);
+  });
+
+  it('surfaces a verifier rate limit from the actual waterfall response', async () => {
+    const world = fakeWorld({ contacts: [{ id: CONTACT_1, fullName: 'Jürgen Müller' }] });
+    const hunter = finder('hunter', hit('j.muller@acme.example'));
+    const underlying = verifier('millionverifier', 'UNKNOWN');
+    const limited = { ...underlying, verify: vi.fn(async (input: Parameters<typeof underlying.verify>[0]) => ({
+      ...await underlying.verify(input), error: 'rate_limited', costMicrousd: 0,
+    })) };
+
+    await expect(enrichCompanyContacts(depsFor(world, [hunter], { verifiers: [limited] }), INPUT))
+      .resolves.toMatchObject({ rateLimited: true, results: [{ contactId: CONTACT_1, status: 'stored' }] });
+    expect(limited.verify).toHaveBeenCalledOnce();
+  });
+
   it('公司无域 → skipped=no_domain；无缺邮箱联系人 → skipped=no_contacts', async () => {
     const noDomain = fakeWorld({ domain: null });
     expect(

@@ -1728,10 +1728,17 @@ model DiscoveryCompanyJob {
   createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
+  /// Streaming L2 contact enrichment claim and durable readback in bypass mode.
+  contactEnrichmentOperationRef String?   @map("contact_enrichment_operation_ref") @db.VarChar(64)
+  contactEnrichmentStartedAt    DateTime? @map("contact_enrichment_started_at") @db.Timestamptz(3)
+  contactEnrichmentStatus       String?   @map("contact_enrichment_status") @db.VarChar(16)
+
   run DiscoveryRun @relation(fields: [workspaceId, runId], references: [workspaceId, id], onDelete: Cascade, onUpdate: Restrict, map: "discovery_company_job_run_fkey")
 
   @@unique([workspaceId, runId, canonicalCompanyId], map: "discovery_company_job_run_company_key")
+  @@unique([workspaceId, contactEnrichmentOperationRef], map: "dcj_contact_enrichment_operation_ref_key")
   @@index([workspaceId, runId, stage])
+  @@index([workspaceId, canonicalCompanyId, contactEnrichmentStartedAt, id], map: "dcj_contact_enrichment_list_idx")
   @@map("discovery_company_job")
 }
 

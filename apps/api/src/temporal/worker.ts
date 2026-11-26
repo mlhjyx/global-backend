@@ -658,7 +658,7 @@ async function main(): Promise<void> {
       }),
       // Run 2.0（M0④）：深挖单公司活动（画像/精判/信号/联系人 + job 状态写回）；Phase 2 方案 B 流式三段漏斗。
       ...createRun2PipelineActivities({ prisma, providers, gateway, broker, runtimeTelemetry: runtimeTelemetry.telemetry, budgetStore, skills: skillResolver, contactEnrichmentSafety: safetyComposition.service }),
-      ...createStreamingDiscoveryActivities({ prisma, providers, gateway, broker, runtimeTelemetry: runtimeTelemetry.telemetry, budgetStore }),
+      ...createStreamingDiscoveryActivities({ prisma, providers, gateway, broker, runtimeTelemetry: runtimeTelemetry.telemetry, budgetStore, contactEnrichmentSafety: safetyComposition.service }),
       ...createRawSourceActivities({ prisma }),
       ...createQualifyActivities({ prisma, sanctionsScreening }),
       ...createRejudgeActivities({ prisma, providers, gateway, broker, runtimeTelemetry: runtimeTelemetry.telemetry, budgetStore, skills: skillResolver }),

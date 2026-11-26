@@ -108,6 +108,38 @@ function fakeFinder(email: string): { adapter: EmailEnrichmentAdapter; findEmail
 }
 
 describe('Batch 1.4-C Step 0 零成本邮箱反推、other fail-closed 与 GDPR Art.14 排期', () => {
+  it('reports a rate limit from Step 0 verification when there is no finder fallback', async () => {
+    const db = buildMockDb();
+    const onRateLimited = vi.fn();
+    const provider = fakeVerifier('VALID');
+    (provider.verify as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      providerKey: provider.key, state: 'UNKNOWN', catchAll: 'unknown', catchAllClass: 'unknown',
+      score: 0, acceptAll: false, disposable: null, role: null, detail: 'provider_http_429',
+      costMicrousd: 0, latencyMs: 10, error: 'rate_limited',
+    });
+    await expect(enrichContactEmail(
+      {
+        prisma: db.prisma as never,
+        finders: [],
+        verifiers: [provider],
+        gate: async () => ({ ok: true }),
+        mayUseExternalProcessing: async () => true,
+        onRateLimited,
+      },
+      {
+        workspaceId: WS,
+        contactId: CONTACT,
+        fullName: 'Marco Rossi',
+        domain: 'refeel-epc.it',
+        accountKey: 'acc-1',
+        lawfulBasis: 'legitimate_interest',
+        knownCompanyEmailSamples: [{ fullName: 'Mattia Masotti', email: 'm.masotti@refeel-epc.it' }],
+      },
+    )).resolves.toMatchObject({ status: 'not_found', finderAttempts: 0 });
+    expect(onRateLimited).toHaveBeenCalledOnce();
+    expect(db.pointUpserts).toHaveLength(0);
+  });
+
   it('同公司已有 VALID 样本 → Step 0 零 finder 成本直验 VALID 落库并排期 EU Art.14 通知', async () => {
     const db = buildMockDb();
     const finder = fakeFinder('marco.rossi@refeel-epc.it');

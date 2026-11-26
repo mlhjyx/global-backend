@@ -98,6 +98,8 @@ export interface EnrichCompanyContactsResult {
   attempted: number;
   costMicrousd: number;
   deadlineHit: boolean;
+  /** A finder or verifier reported a rate limit during this execution. */
+  rateLimited?: boolean;
   results: Array<{ contactId: string; status: EnrichCompanyContactsStatus }>;
 }
 
@@ -204,6 +206,7 @@ export async function enrichCompanyContacts(
   let costMicrousd = 0;
   let attempted = 0;
   let deadlineHit = false;
+  let rateLimited = false;
 
   for (const contact of prioritizedContacts) {
     if (now().getTime() >= deadlineAtMs) {
@@ -234,6 +237,7 @@ export async function enrichCompanyContacts(
           input.maxProvidersPerContact ?? MAX_FINDER_ATTEMPTS,
         ),
         maxVerificationCalls: input.maxVerificationCalls,
+        onRateLimited: () => { rateLimited = true; },
         onValidEmail: (email) => {
           knownSamples.push({ fullName: contact.fullName, email });
         },
@@ -265,6 +269,7 @@ export async function enrichCompanyContacts(
     attempted,
     costMicrousd,
     deadlineHit,
+    ...(rateLimited ? { rateLimited } : {}),
     results,
   };
 }

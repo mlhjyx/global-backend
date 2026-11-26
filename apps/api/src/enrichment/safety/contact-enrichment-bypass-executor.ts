@@ -265,7 +265,7 @@ export function createBypassContactEnrichmentSafetyExecutor(deps: {
         scope.subjectId,
         scope.requestSha256,
       ].join(":");
-      return executeDirect({
+      const { rateLimited: _rateLimited, ...result } = await executeDirect({
         workspaceId: context.workspaceId,
         companyId,
         accountKey,
@@ -281,6 +281,7 @@ export function createBypassContactEnrichmentSafetyExecutor(deps: {
           ? {}
           : { maxProbe: normalized.maxProbe }),
       });
+      return result;
     },
     executeRun: async (input) => {
       assertBypassSafetyAddress(input.workspaceId, input.companyId);

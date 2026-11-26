@@ -7,6 +7,7 @@ import type { RuntimeTelemetry } from '../model-runtime/types';
 import type { ExecutionBroker } from '../tools/tool-contract';
 import { UnavailableBudgetStore, type BudgetStore } from '../tools/budget-store';
 import type { DiscoveryProviderRegistry } from '../discovery/provider.registry';
+import type { ContactEnrichmentSafetyService } from '../enrichment/safety/contact-enrichment-safety.service';
 import {
   parseExecutionBudgetBinding,
   type ExecutionBudgetBinding,
@@ -41,7 +42,7 @@ import {
 import type { DiscoveryRunFailure } from './discovery.run-failure';
 import { projectDiscoveryCompletedStats } from './discovery-run-final-stats';
 import { startActivityHeartbeat } from './activity-heartbeat';
-import { parseConfiguredLawfulBasis } from './backlog.activities';
+import { enrichMatchedStreamingCompany, resolveStreamingContactDiscoveryLawfulBasis } from './streaming-contact-enrichment';
 
 export interface StreamingAuthorityInput {
   readonly workspaceId: string;
@@ -437,6 +438,7 @@ export function createStreamingDiscoveryActivities(deps: {
   runtimeTelemetry?: RuntimeTelemetry;
   budgetStore?: BudgetStore;
   sharedFactsHook?: SharedFactsStreamingHook;
+  contactEnrichmentSafety?: Pick<ContactEnrichmentSafetyService, 'executeRun'>;
 }) {
   const budgets =
     deps.budgetStore ??
@@ -857,6 +859,7 @@ export function createStreamingDiscoveryActivities(deps: {
         runId: string;
         icpId: string;
         companyId: string;
+        enrichmentSlot?: number;
       },
     ): Promise<{ companyId: string; contactsCreated: number }> {
       const heartbeat = startActivityHeartbeat({ stage: 'l2', companyId: args.companyId }, 15_000);
@@ -869,7 +872,12 @@ export function createStreamingDiscoveryActivities(deps: {
         if (!allowed) return { companyId: args.companyId, contactsCreated: 0 };
 
         let contactsCreated = 0;
-        const lawfulBasis = parseConfiguredLawfulBasis(process.env.CONTACT_DISCOVERY_RUN_LAWFUL_BASIS);
+        const policy = await deps.prisma.dataProvider.findUnique({
+          where: { key: 'decision_maker' }, select: { config: true },
+        });
+        const lawfulBasis = resolveStreamingContactDiscoveryLawfulBasis(
+          process.env.CONTACT_DISCOVERY_RUN_LAWFUL_BASIS, policy?.config,
+        );
         if (lawfulBasis) {
           const stamped = stampLawfulBasis(lawfulBasis, 'streaming-worker', new Date().toISOString());
           const discovered = await discoverContactsCore(
@@ -888,6 +896,16 @@ export function createStreamingDiscoveryActivities(deps: {
             },
           );
           contactsCreated = discovered.contacts.length;
+          try {
+            throwIfActivityCancelled();
+            await enrichMatchedStreamingCompany(
+              { prisma: deps.prisma, budgetStore: budgets, safety: deps.contactEnrichmentSafety },
+              { ...args, binding, providerConfig: policy?.config },
+            );
+          } catch (error) {
+            throwIfActivityCancelled();
+            console.warn('[streaming-f7] optional company enrichment pending', error instanceof Error ? error.name : 'unknown');
+          }
         }
 
         await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {

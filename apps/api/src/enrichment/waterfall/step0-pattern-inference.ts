@@ -57,6 +57,7 @@ export interface Step0InferenceDeps {
   readonly clock: () => Date;
   readonly actorId: string;
   readonly maxVerificationCalls: number;
+  readonly onRateLimited?: () => void;
   readonly onValidEmail?: (email: string) => void;
 }
 
@@ -290,6 +291,7 @@ export async function tryStep0PatternInference(
       runId: input.runId,
       maxCalls: deps.maxVerificationCalls,
     });
+    if (verification.steps.some((step) => step.result.error === 'rate_limited')) deps.onRateLimited?.();
     totalCostMicrousd += verification.costMicrousd;
     deps.budget.settle(0, verification.costMicrousd);
 

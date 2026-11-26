@@ -112,6 +112,7 @@ export interface EnrichContactDeps {
   perContactCapMicrousd?: number;
   /** 验证瀑布单地址调用上限（计划 ≤6）。 */
   maxVerificationCalls?: number;
+  onRateLimited?: () => void;
   /** 进程内回调：本联系人拿到 VALID 个人邮箱时通知同公司后续联系人复用格式学习（绝不出进程）。 */
   onValidEmail?: (email: string) => void;
 }
@@ -205,6 +206,7 @@ export async function enrichContactEmail(
       clock: now,
       actorId,
       maxVerificationCalls: deps.maxVerificationCalls,
+      onRateLimited: deps.onRateLimited,
       onValidEmail: deps.onValidEmail,
     },
     {
@@ -310,12 +312,14 @@ export async function enrichContactEmail(
 
     attempts += 1;
     const outcome = await finder.findEmail(findInput);
+    const errorCode = outcome.status === 'error' ? outcome.errorCode : null;
+    if (errorCode === 'rate_limited') deps.onRateLimited?.();
     budget.settle(finder.costMicrousd, outcome.costMicrousd);
     costMicrousd += outcome.costMicrousd;
 
     if (deps.circuits) {
       // provider_unconfigured 是本地配置问题，不进熔断统计；其余 error 计失败。
-      if (!(outcome.status === 'error' && outcome.errorCode === 'provider_unconfigured')) {
+      if (errorCode !== 'provider_unconfigured') {
         const nextCircuit = applyCircuitOutcome(
           circuit,
           outcome.status === 'error' ? 'failure' : 'success',
@@ -332,7 +336,7 @@ export async function enrichContactEmail(
         providerKey: finder.key,
         requestHash,
         outcome: outcome.status,
-        errorCode: outcome.status === 'error' ? outcome.errorCode : null,
+        errorCode,
         retryable: outcome.status === 'error' ? outcome.retryable : null,
         costMicrousd: outcome.costMicrousd,
         latencyMs: outcome.latencyMs,
@@ -380,6 +384,7 @@ export async function enrichContactEmail(
         })
       : null;
     if (verification) {
+      if (verification.steps.some((step) => step.result.error === 'rate_limited')) deps.onRateLimited?.();
       costMicrousd += verification.costMicrousd;
       budget.settle(0, verification.costMicrousd);
     }

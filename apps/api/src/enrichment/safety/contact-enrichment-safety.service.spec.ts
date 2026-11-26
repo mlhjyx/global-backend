@@ -79,5 +79,23 @@ describe('shared safe service admission and read/recovery orchestration, pure po
   it('POST recovery authorizes current company then uses only RECOVER_NO_WIRE without Grant or new admission', async () => {
     const x = world(); expect(await x.service.recoverEnrichmentExecution(ctx, C, 'd'.repeat(64))).toEqual({ opaqueMetadata: true }); expect(x.deps.execution.execute).toHaveBeenCalledWith(expect.objectContaining({ mode: 'RECOVER_NO_WIRE', actorId: ctx.userId })); expect(x.deps.authority.verifyWorkspaceGrant).not.toHaveBeenCalled(); expect(x.deps.repository.admitHttp).not.toHaveBeenCalled(); expect(x.deps.repository.admitRun).not.toHaveBeenCalled();
   });
+  it('recovers a streaming result by reading only after the existing recovery scope check', async () => {
+    const x = world();
+    const operationRef = '7'.repeat(64);
+    const pending = { operationRef, status: 'APPLY_PENDING' };
+    const readStreamingEnrichmentExecution = vi.fn(async () => pending);
+    x.deps.execution.findByRef.mockResolvedValueOnce(null);
+    const service = new ContactEnrichmentSafetyService({
+      ...x.deps, results: { ...x.deps.results, readStreamingEnrichmentExecution },
+    });
+
+    await expect(service.recoverEnrichmentExecution({ ...ctx, scopes: ['acquisition:write'] }, C, operationRef)).rejects.toThrow();
+    expect(readStreamingEnrichmentExecution).not.toHaveBeenCalled();
+    await expect(service.recoverEnrichmentExecution(ctx, C, operationRef)).resolves.toEqual(pending);
+    expect(readStreamingEnrichmentExecution).toHaveBeenCalledWith(ctx, C, operationRef);
+    expect(x.deps.execution.findByRef).toHaveBeenCalledOnce();
+    expect(x.deps.execution.execute).not.toHaveBeenCalled();
+    expect(x.deps.authority.verifyWorkspaceGrant).not.toHaveBeenCalled();
+  });
   it('does not execute recovery when the current subject gate denies it', async () => { const x = world({ deniedRecovery: true }); await expect(x.service.recoverEnrichmentExecution(ctx, C, 'd'.repeat(64))).rejects.toThrow(); expect(x.deps.execution.execute).not.toHaveBeenCalled(); });
 });
