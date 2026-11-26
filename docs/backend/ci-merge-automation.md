@@ -54,8 +54,8 @@ review thread 必须解决、push 后撤销旧 review。与下文 2026-08-09 相
 - 关闭 strict（`strict_required_status_checks_policy: false`）：PR 绿了即可合，不再要求先并入最新 main。
   理由：单人加开发代理顺序合并、并行 PR 少，strict 带来的是每次合并后其余 PR 串行重跑（一批 4 个 PR 约多等 45 分钟），
   而它防范的"各自绿、合起来坏"在此规模下风险低。替代保护：main 每个 push 的 CI 不被取消、完整跑完；
-  开发代理合并前把 PR 与最新 main 的组合在本地复核（`governance:verify`、`docs:verify`、Copy 指纹）；
-  Copy 回执与 changelog 等多 PR 共改的行会产生文本冲突，迫使后合者变基重签。
+  开发代理合并前把 PR 与最新 main 的组合在本地复核（`governance:verify`、`docs:verify`）；
+  当时 Copy 回执与 changelog 的冲突见历史记录；现行文档检查入口见[校验治理](../governance/docs-verification.md)。
   （changelog 部分已于 2026-10-14 改为每个 PR 一个片段，见下文 [Changelog 片段的汇编](#changelog-片段的汇编)。）
 
 删除、non-fast-forward、review thread 解决与 push 后撤销旧 review 等其余规则不变。
@@ -167,7 +167,7 @@ diff 失败、定时与手动触发时 fail-closed 为 `true`。`build · typech
 才跳过。`contracts` 与 build job 一样以 `needs` + 固定的 `${{ !cancelled() }}` 启动，并在
 任何 checkout 或仓库代码执行前验证 scope 成功；纯文档时执行「契约面未变化」证明步
 （代码与已提交的 OpenAPI 契约文件均未变化），不以 skipped 或空跑冒充完整契约门。
-`docs:verify`、Copy 影响评估与 tree-cleanliness 始终运行。
+`docs:verify` 与 tree-cleanliness 按 CI 工作流运行。Copy fixed-source 门禁已于 2026-11-26 [退役](../implementation-records/copy-fixed-source-impact-governance.md)。
 
 `build · typecheck · test` 与它依赖的 `renderer visual scope` 均已被 live ruleset
 强制（2026-09-21 回读；2026-11-12 起还包括拆分出的 `OCI runtime image · smokes`、
@@ -181,7 +181,7 @@ build job 固定以 policy 批准的 `${{ !cancelled() }}` 启动（不用 `alwa
 `docs:verify` 与 `memory:test` 当初留在 `build · typecheck · test`
 内，是因为 `governance · traceability · release` 那时尚未被 live ruleset 强制。
 2026-09-21 回读确认它已被强制，消除这部分重复的前置条件已满足；但 `docs:verify`
-是 Copy fixed-source 绑定的根 package 命令，拆分须另开 PR 并同步指纹，不在本次范围。
+曾受 Copy fixed-source 绑定。现行步骤由 package 脚本与分支检查清单共同核对。
 
 ## Release Bundle 的晋级 provenance（PRD4-D12）
 
@@ -199,7 +199,7 @@ Release Bundle 中的 `CHECK_RUN`、`GITHUB_REVIEW`、`SIGNED_AUTHORIZATION`、m
 
 ## 开发代理收口步骤
 
-1. 按 [worktree 管理 runbook](worktree-management.md) 用 `pnpm worktree:new <topic>` 从最新 `origin/main` 建 `.claude/worktrees/<topic>` 与 `claude/<topic>`；一个任务一个 writer 一个 worktree，一个逻辑改动一个 PR。
+1. 按 [worktree 管理 runbook](worktree-management.md) 核对主线和任务 owner，在 `/global/.agy-worktrees/backend/<topic>` 创建隔离工作树。
 2. 按 [CONTRIBUTING.md](../../CONTRIBUTING.md) 跑 lint/build/test；provider/采集/富集另附真源验证。
 3. 开 PR 后等待 required-context 清单中的 CI、Security 与 Governance 门，触发独立 review，逐条处置 inline comment 并 resolve。
 4. 向用户报告改动、风险、验证和未完成项；按用户对当次 PR 的明确授权合并，或在 `DEC-AIDEV-004` 常设授权下于独立审查通过、必需检查在当前 head 全绿、审查线程清零，且 PR 与最新 main 的组合已在本地复核（ruleset 不再强制 strict）后合并。

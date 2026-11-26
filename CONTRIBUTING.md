@@ -5,10 +5,10 @@
 ## 分支
 
 - **不在 `main` 上直接提交**。`main` 受保护，只经 PR 合入。
-- 当前开发主体为 Claude Code（2026-09-21 起接替 Codex），分支使用 `claude/<topic>`（`codex/<topic>` 仅限迁移前的在飞分支），从最新 `main` 切出；改动类型用 Conventional Commit 的 `feat` / `fix` / `docs` 等表达。
-- `/global/backend` 只承载 `main`。正式施工遵循「一个任务一个 writer 一个 worktree」；`pnpm worktree:new <topic>` 从最新 `origin/main` 在 `/global/backend/.claude/worktrees/<topic>` 创建 `claude/<topic>`；`.codex/worktrees/` 只剩迁移前的在飞 worktree，不再新建。禁止在 `/tmp`、`/private/tmp`、`/root/.codex/worktrees` 或 legacy `/global/wt` 新建正式施工目录。完整创建、迁移、恢复与清理规则见 [worktree 管理 runbook](docs/backend/worktree-management.md)。
-- 远端 PR 合入后，本地根 `main` 的跟随使用 `node scripts/governance-main-worktree-sync.mjs status` / `node scripts/governance-main-worktree-sync.mjs apply`。`apply` 只允许 fetch 后把 `origin/main` 解析成精确 commit，再对该 commit 纯 fast-forward，且必须证明远端入站路径不触碰本地 tracked、untracked 或 ignored 现场；任何 ahead/diverged、路径冲突、ref 新鲜度变化或事后状态变化都 fail-closed。它不 stash/reset/clean，不处理 PR、push、merge 授权或分支清理。
-- **新鲜度门**：规划、只读审计和实施开始前先执行 `git fetch origin --prune` 与 `git rev-list --count HEAD..origin/main`。若结果非 `0`，该 worktree 已落后，不能据此给出“当前事实”结论；必须从刚 fetch 的 `origin/main` 新建正式 worktree，或先完成受控同步后再继续。功能分支上的已提交工作不免除此门。
+- 角色分工见 [AI 辅助开发运行模式](docs/ai-development/operating-model.md)。每项工作从核验过的基线创建独立分支，提交遵循 Conventional Commits。
+- 在 xin 工作区，从 [worktree 手册](docs/backend/worktree-management.md) 创建 `/global/.agy-worktrees/backend/<topic>` 下的工作树。开工核对任务、基线和文件 owner。
+- 根 `main` 的检查、快进同步和清理都按 [worktree 手册](docs/backend/worktree-management.md#22-根-main-受控跟随) 执行。
+- 对依赖当前主线的工作，先核验远端 main 与本地基线；固定基线任务按批准的提交开展并记录日期与限制。
 - 已有 `/global/wt/*` 不批量迁移：干净且确认仍需开发的才可用 `git worktree move` 迁入；脏、锁定、失联或承载 provenance 的现场原地冻结并先审计。工具管理且仍被活跃任务持有的 worktree 不得手工移动。
 - **PR 合入即删 worktree**：PR 合入后依次删除该任务的 worktree（`git worktree remove`）与本地分支，再在 `/global/backend` 用 `node scripts/governance-main-worktree-sync.mjs apply` 跟随 `main`。删除前确认目标提交已进入 `main`（本仓 squash 合并，要与已合并 PR 交叉核对，不能只看 `rev-list`）、工作区干净、未跟踪文件已逐项归属；有未推送提交或无法归属的文件时先推送或归档，不得强删。常驻的 `local-development` worktree 不在此列。
 - 项目内 worktree 位于父 `main` 工作区的 ignored 子树；禁止在 `/global/backend` 运行 `git clean -fdx`、递归删除 `.claude/` 或 `.codex/`，或绕过 `git worktree move/remove` 手工搬删目录。
@@ -21,7 +21,7 @@
 2. 核对 Git 层：本地/远端分支与 PR、commit、reflog、stash、未跟踪文件和失联 worktree 登记。
 3. 核对 Codex 持久层：任务 UI 的“已编辑文件”、本地 `/root/.codex/sessions/**/rollout-*.jsonl` 中成功的 `patch_apply_end`、任务附件与子任务记录。**UI 仍能展示 diff 就说明必须继续追查其持久来源**。
 4. 核对文件系统与服务层：原目录是否真的消失、是否只是未挂载/路径变化/权限问题；临时目录只作现场来源，不再作为恢复目标。
-5. 从最后可信 commit 在 `/global/backend/.claude/worktrees/<topic>-recovery` 或 `/global/backend/.codex/worktrees/<topic>-recovery` 建隔离快照，按原时间顺序重放可证明的变更；先验证事件数和补丁数，再与正式分支逐文件三方比较。原现场无论位于 legacy `/global/wt` 还是工具目录都保持只读。
+5. 从最后可信 commit 在 `/global/.agy-worktrees/backend/<topic>-recovery` 建隔离快照，按原时间顺序重放可证明的变更；先验证事件数和补丁数，再与正式分支逐文件三方比较。原现场无论位于 legacy `/global/wt` 还是工具目录都保持只读。
 6. 只有在“原始变更全部可追踪、后来正确修订未被覆盖、diff/check/build/test 通过”后才宣告恢复完成；恢复前的人工重写只能作为候选稿，不能冒充原始内容。
 
 恢复后立即 checkpoint commit + push；临时恢复 worktree 即使计划删除，也必须等 PR 合并、分支清理与独有文件审计完成后再做。
@@ -58,13 +58,7 @@ cd /global/backend/apps/api && node --import tsx scripts/verify-*.mts
 ## Pull Request
 
 - `gh pr create --base main`，按 `.github/pull_request_template.md` 填（概述 / 改动分组 / 文档与阶段回写 / 测试 / 给产品负责人的说明 / 合规 / 待续）；「给产品负责人的说明」四行（得到什么 / 没改什么 / 风险与回退 / 建议）不经机器解析。
-- **5 项必需检查在当前 head 全绿**才可合（`main` 的 ruleset 要求）：
-  - `build · typecheck · test`（`.github/workflows/ci.yml`）
-  - `contracts · drift · lint · breaking`（`.github/workflows/ci.yml`）
-  - `governance · traceability · release`（`.github/workflows/governance.yml`）
-  - `gitleaks 密钥扫描`（`.github/workflows/security.yml`）
-  - `renderer visual scope`（`.github/workflows/ci.yml`）
-  `github-advanced-security`（Copilot Autofix）不是必需检查。推送前本地先跑 `gctl check`（docs/governance、prisma generate、contracts、lint、build、零容器单测）。
+- **当前 head 的必需检查全部通过**才可合。核对[提交的上下文清单](.github/required-contexts.json)与目标分支生效规则。按改动范围走本地检查和 [CI 指南](docs/backend/ci-merge-automation.md)。
 - **代码审查**：按 `DEC-AIDEV-004`，由开发代理对每个 PR 做独立审查（`/code-review` 或逐文件审查），发现的问题先修复重验；处置每条意见后在该线程回复并 resolve。
 - CI 的单测零容器（无网络）；另有一步在一次性 PostgreSQL 上跑登记的真库用例。需要真源或付费调用的验证走本地 `verify-*` 脚本，不进 CI。
 

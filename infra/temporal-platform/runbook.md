@@ -1,10 +1,7 @@
 # Dedicated platform-automation Temporal service
 
 This directory defines the infrastructure boundary required by the independent
-Temporal Schedule proof in `task-4-design.md`. It does not modify `temporal-dev.service`,
-replace it, or derive authority from it. The existing development service
-remains an integration probe and is not an independently authenticated managed
-runtime.
+Temporal Schedule proof in `task-4-design.md`. The existing customer development Temporal runs independently. On xin, the old systemd unit is retired and the development service is the `global-temporal-dev` container. Keep the environments separate until the authorized customer cutover.
 
 ## Namespace admission on every provision
 
@@ -241,8 +238,8 @@ their validity. Check the native image manifest against this exact source before
 using its public templates as bind mounts; a different source tree is not an
 equivalent deployment input. The printed admission summary contains no secrets.
 
-Preserve `temporal-dev.service`, its SQLite data, legacy namespaces and existing
-Workflow executions. The dedicated PostgreSQL/schema/namespace resources remain
+Preserve the customer development container configuration, SQLite data,
+legacy namespaces and existing Workflow executions until the cutover runbook authorizes retirement. The dedicated PostgreSQL/schema/namespace resources remain
 separate. Backend clients reach this service only through the loopback ingress
 relay; their machine credentials and namespace-aware Worker/lease admission are
 Backend runtime contracts, not part of this directory. `provision.sh` and `verify.sh` below

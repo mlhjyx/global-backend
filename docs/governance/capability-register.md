@@ -9,6 +9,8 @@
 
 本表是 Capability ID、用户结果和多轴状态的唯一登记。当前前端规范、页面目录和 Capability Pack 只能引用本表 ID；审批与审计过程保留在 Git/PR，不再维护平行能力清单。
 
+钱包、设置、导航等租户产品现行实现读 [SaaS 状态](https://github.com/mlhjyx/gain-saas/blob/main/docs/status/current.md)。多轴登记按本仓批准的设计与证据使用。
+
 ## 1. 读表规则
 
 - 详细状态行必须使用[唯一七轴模型](terminology-and-status.md#6-多轴交付状态)：`PRODUCT / UX / SOURCE / TEST / RUNTIME / RELEASE / PILOT_GA`；七轴基态互相独立。

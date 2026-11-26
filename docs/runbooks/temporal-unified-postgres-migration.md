@@ -1,5 +1,8 @@
 # 单一 Postgres Temporal 统一编排与多租户隔离迁移手册
 
+> 生命周期：`GUIDE`
+> 适用口径：单集群迁移方案。当前部署上两个 Temporal 服务是否仍并存，以[状态页](../status/current.md)和操作窗口回读为准。先检查[客户工作流迁移手册](../backend/postgres-temporal-customer-migration.md)的实际双模入口与回退前提。
+
 最后核验：2026-11-26
 
 ## 1. 适用范围与目标

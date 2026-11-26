@@ -154,7 +154,7 @@ GrowthOS 当前统一 source 状态是 `LOCAL_SOURCE_AUTHORITY_FOUND / REMOTE_CI
 | `PAGE-FE-092` | 集成中心 | `TARGET_EXTERNAL` |
 | `PAGE-FE-093` | Workspace 设置 | `TARGET_EXTERNAL` |
 | `PAGE-FE-094` | 安全与审计 | `TARGET_EXTERNAL` |
-| `PAGE-FE-095` | 套餐、用量与账单 | customer Billing/Credits `DEFERRED / NOT_IMPLEMENTED` |
+| `PAGE-FE-095` | 套餐、用量与账单 | 该行保留套餐、完整账单和订阅的设计目标。已合入的预付积分钱包与采纳状态见 [SaaS 状态](https://github.com/mlhjyx/gain-saas/blob/main/docs/status/current.md) |
 | `PAGE-FE-096` | 运营控制台 | `TARGET_EXTERNAL` |
 
 该索引共 76 个稳定 Page ID；缺号是预留，不代表遗漏。新增页面先证明既有 Page/Capability 不能承载，并更新 Registry/Decision，而不是直接占一个菜单入口。

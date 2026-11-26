@@ -6,7 +6,7 @@
 > 评审状态：`APPROVED_AT_GATE_8`
 > 事实 Owner：`OWN-DOC-GOV`
 > 机器政策：[`docs-verification-policy/v1`](docs-verification-policy.json)
-> 最后核验：2026-11-12
+> 最后核验：2026-11-27（本地提示与发布验签口径）
 > 批准边界：产品负责人条件批准机器门与例外治理；独立人工、真实 Release 和全部 blocker 仍保留
 
 本文定义文档如何进入持续集成、什么必须失败、什么只能告警，以及历史证据为什么不能为了“全绿”被无声重写。机器规则由 JSON 政策和 `scripts/verify-docs.mjs` 承重；本文解释其人类语义。
@@ -17,7 +17,21 @@
 pnpm docs:verify
 ```
 
-该命令不访问网络、不连接数据库、不生成产品代码，也不写入仓库。它运行模型候选基线、contracts build、Model Candidate Registry 与 Markdown 校验（含 changelog 片段格式）。`governance:verify` 的 mutation tests 与机器 Registry/Schema/生成物检查**不再包含在内**（2026-11-12 起去重）：普通 CI 的 `build · typecheck · test` 安装后运行 `docs:verify`，独立 `governance · traceability · release` required context 运行 `pnpm governance:verify`（每个 PR 各一次，不再重复），后者只在 `pull_request` 上再运行一步 `node scripts/governance-changelog-fragments.mjs require --base <base.sha> --head <head.sha>`（push 到 main 时跳过；前一步失败也照跑，同一轮报全）。本地推送前快检 `gctl check` 依次运行 `governance:verify` 与 `docs:verify`。
+该命令离线运行，不访问数据库。contracts build 在任务 worktree 产生本地构建产物；只需 Markdown 结构诊断时可单跑 `node scripts/verify-docs.mjs`。它运行模型候选基线、contracts build、Model Candidate Registry 与 Markdown 校验（含 changelog 片段格式）。`governance:verify` 的 mutation tests 与机器 Registry/Schema/生成物检查**不再包含在内**（2026-11-12 起去重）：普通 CI 的 `build · typecheck · test` 安装后运行 `docs:verify`，独立 `governance · traceability · release` required context 运行 `pnpm governance:verify`（每个 PR 各一次，不再重复），后者只在 `pull_request` 上再运行一步 `node scripts/governance-changelog-fragments.mjs require --base <base.sha> --head <head.sha>`（push 到 main 时跳过；前一步失败也照跑，同一轮报全）。本地推送前快检 `gctl check` 依次运行 `governance:verify` 与 `docs:verify`。
+
+### 跨仓文档漂移提示
+
+从后端任务工作树运行：
+
+```bash
+node scripts/docs-drift-report.mjs --workspace /global
+node scripts/docs-drift-report.mjs --workspace /global --backend /global/.agy-worktrees/backend/<topic> --saas /global/.agy-worktrees/gain-saas/<topic>
+node scripts/docs-drift-report.mjs --workspace /global --repo backend --base <base-ref> --head <head-ref>
+```
+
+默认从工作区的两个根 checkout 读取文档与脚本清单。核对未合入的变更时，用 `--backend`、`--saas` 指向本任务工作树。范围为工作区、两仓 Agent 指令、导航、状态和部署的关键入口。检查相对链接、Markdown 标题锚点、`node scripts/…` 和根 `pnpm` 项目脚本。跨仓 GitHub main 文档链接按本地工作树解析。历史命令与动态 shell、过滤器子命令仍需人工判断。
+
+三个比较参数一起提供。`--repo` 取 `backend` 或 `gain-saas`，引用须本地可读。按合并基点到 head 的已提交路径提示运行、业务与导航变更应复核哪些文档。未提交的文档由入口扫描读取。提示退出码为 0，参数或读取错误为 2。命令只读本地文件与 Git，供自查和审查使用。
 
 ## 2. 检查面与失败语义
 
@@ -32,7 +46,7 @@ pnpm docs:verify
 | Provider Registry | 机器清单与代码 seed 的 key/default enablement 漂移、SourceClass 不精确等于代码 manifest、test path 不存在，或生成页被手改 | Provider 当前启用、外部源健康或运行成功 |
 | Delivery traceability | Capability/Object/operationId/code/test/Scenario 任一不存在；`PILOT/GA` 无 fresh PASS RuntimeEvidence 或 Release Bundle | test 内容足以覆盖业务语义，或用户已经可用 |
 | RuntimeEvidence | 必需字段、SHA、时间窗、result、digest 或声明的本地 artifact 不合法；artifact 路径逃逸、符号链接、非普通文件或超过 10 MiB；过期记录自动失去晋级资格 | artifact 内容真实、环境代表生产或外部系统未变化 |
-| Release Bundle | 真实 `*.release.json` 缺字段/生成页漂移，晋级门混用 PR 正文，merge-method 形状不闭合，或 `PILOT/GA` 没有可信独立外部 readback receipt；当前 verifier 尚未实现，因此全部 promotion 故意 fail closed | Bundle 中的 URL/枚举真实、发布实际成功或用户已授权 |
+| Release Bundle | 真实 `*.release.json` 的结构、生成页、证据精确绑定或 merge provenance 不合格，或 `PILOT/GA` 缺少当前有效证据与可验签的产品负责人回执 | 部署实际采用、独立业务验收或新的行动授权 |
 | Workflow 供应链与 ownership | 任一 workflow 含 moving-tag/未登记 action，完整 40 位 SHA 与版本注释不匹配，或 CODEOWNERS 结尾治理规则块缺失 | GitHub ruleset 已生效、action 本身无漏洞或外部 review 已发生 |
 | Spec 可达性 | `scripts/` 下的 spec 既不在 workflow 经 `node --test`/`tsx --test`（直接或经根 package.json 脚本）执行的入口及其 import 链上，也没有带理由与运行命令登记进 `MANUAL_SPECS`；登记项已失效（已被 runner 执行或文件已删）；runner 用 glob 或指向不存在的 spec | spec 内容正确、手动 spec 近期跑过，或 `scripts/` 以外的测试有 runner 执行 |
 | 敏感模式 | Markdown 出现高置信私钥、长 API key 或 AWS access key 模式 | 已完成完整 DLP/secret scan |
@@ -96,7 +110,7 @@ pnpm docs:verify
 - `APPROVED_AT_GATE_*` 只来自真实批准记录；脚本不根据推荐语句自动升级。
 - `AS_BUILT` 声明必须在 Capability/Traceability/Release Bundle 中链接到代码或机器合同，并把 `TEST_ANCHOR` 与当前运行结果分开。
 - 只有真实用户可见的 candidate/pilot/GA 才在 `docs/releases/` 创建 Release Bundle。`docs/templates/release-bundle.template.json` 是带显式占位符的输入模板，不是 release；验证器拒绝把占位符、空目录、文档提交或开发机探针冒充发布。
-- Bundle 中的 provenance 字段和 refs 只是 documentary；当前没有可信外部 readback verifier，所以 `EXTERNAL_UNVERIFIED` 是唯一可证当前状态，任何自报 `VERIFIED` 或 URL 都不能满足 `PILOT/GA`。
+- `PILOT/GA` 的 `OWNER_SIGNED` 须由 [release 授权验证器](../../scripts/release-authorization.mjs) 以已登记公钥离线验证，绑定 bundle 摘要、提交、证据、必需检查和审查记录。`EXTERNAL_UNVERIFIED` 及自报的验证状态无法晋级。
 - 大体积日志、截图、扫描报告和含敏感字段的证据放受控 artifact store；Markdown 只保存脱敏索引、hash、环境、提交、时间、结果和 Owner。
 - 普通文档的“最后核验”日期仅是人工追溯信息，不作为机械过期门。RuntimeEvidence 是例外：它必须显式绑定 `verified_at`/`valid_until`，到期后自动降为 `HISTORICAL`；模型、运行环境、阶段完成或发布事实不能靠延长文档日期续命。
 

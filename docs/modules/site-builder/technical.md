@@ -4,6 +4,7 @@
 > 生命周期：`DRAFT`（依据 2026-11-02 已批准方案起草）
 > 生命周期依据：承接已批准方案 §3.3；实现事实以代码与 site-builder 00–14 为准。
 > 模块产品说明：[product.md](product.md)
+> M1 收口记录见[当前架构](../../architecture/current.md)。现行产品 task 入口见 [Agent 设计](../../site-builder/03-agents.md)；环境是否启用按[运行模式](../../architecture/current.md#运行模式与开关)核查。
 
 ## 1. 变更历史
 

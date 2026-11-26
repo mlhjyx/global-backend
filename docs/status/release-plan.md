@@ -20,6 +20,8 @@
 > - **RL6 内容与站点**：Site Builder 作为「被找到」的信任资产按条件复活。退出指标：客户主动要求（触发条件）。
 > - **X 减负线**（与 RL1–RL2 并行）：冻结 Site / R4、门改 lint、文档归档、缩短 CI（Site 冻结待 PRD4-D1，门改 lint 待 PRD4-D12，归档清单待 PRD4-D11；R4 冻结已由 PRD4-D2 于 2026-10-31 重开并完成向 gain-saas 的迁移，平台 schedule 恢复仍待单独拍板）。退出指标：每 PR 固定开销。
 
+> 当前执行与运行采用先看[当前状态](current.md)。旧执行预算、平台调度与 Site Builder 模式见[运行架构](../architecture/current.md#运行模式与开关)。下文保留 RL 阶段、退出门与选定时的授权口径。
+
 ## Stable product sequence
 
 **2026-11-23：先闭底座再启动，旧产品目标纳入首期**

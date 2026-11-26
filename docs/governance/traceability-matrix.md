@@ -9,6 +9,8 @@
 
 本表回答“一个用户结果如何追到页面、对象、机器合同、main 代码、测试和场景”。它不复制规范或测试内容；链接只证明关系存在，是否通过/部署仍看精确 Evidence/Release Bundle。
 
+本表保留稳定追踪 ID 和历史验证口径。SaaS 已实现能力与运行证据见 [SaaS 状态](https://github.com/mlhjyx/gain-saas/blob/main/docs/status/current.md)。晋级判定仍使用规定的证据与签名。
+
 ## 1. 追踪规则
 
 每个进入交付的 Capability 至少具备：

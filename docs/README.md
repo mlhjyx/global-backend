@@ -4,9 +4,9 @@
 > 层级：`L1 / Navigation`
 > 状态：`CURRENT`
 > 维护 Owner：`OWN-DOC-GOV`
-> 最后核验：2026-11-12（工程审计文档权威回写：事件计数、M2 七轴、周报取消、frontend 生命周期）；当前主线提交只见 [`status/current.md`](status/current.md)，本页不复制 SHA
+> 最后核验：2026-11-27（维护入口与跨仓链接）。
 
-这是 `/global/backend` 的唯一人类文档入口。项目是统一的出海企业 AI 全球客户开发与增长执行 SaaS；Site Builder M1 收口已经进入历史，获客主链的 Campaign / QGO / 受控触达 / 前端主链路（M2）已于 2026-11-08 上线并验收，但 pilot/GA 晋级门仍未达成，治理、运行身份与可观测性继续补齐。独立站管理仍属于 SaaS 的一级产品区域，Astro 公开站是它管理的版本化输出，不是另一套 SaaS 前端。
+这是后端仓库的文档导航。按下面的入口定位工作；实际实现、运行采用和验收记录见[当前状态](status/current.md)。租户应用的页面、账本与发布记录由 [gain-saas 文档](https://github.com/mlhjyx/gain-saas/tree/main/docs) 维护。
 
 ## 1. 先读五份当前真值
 
@@ -24,7 +24,7 @@
 
 - [`archive/research/platform-top-level-design-v1.md`](archive/research/platform-top-level-design-v1.md)：**SUPERSEDED**——顶层设计 v1，已被 [产品边界](product-scope.md) + [as-built 架构](architecture/current.md) + [ADR 注册表](adr/registry.md) 取代，其中「QGO 归本仓」等表述已被 ADR-001 改判，已归档，不得再当现行设计引用。
 - `docs/frontend/` 系列（19 份）：**目标规范 / 设计基线，不是 as-built**；实际运行的 SaaS 前端以 gain-saas 仓库为准，本目录不描述其实现状态。
-- `docs/site-builder/` 与 `docs/design/` 中独立站相关文档：**冻结线文档**——Site Builder 正式冻结仍待 PRD4-D1 拍板，冻结期间不作为当前施工依据；M1 收口属历史。
+- `docs/site-builder/` 保留独立站任务合同与历史设计；先读 [源码与运行边界](architecture/current.md#运行模式与开关)，再判断本次任务适用的章节。
 - `docs/archive/`：只读历史，正文不改写，链接问题按历史结构告警处理。
 
 ## 2. 模块设计文档（docs/modules/）
@@ -37,6 +37,7 @@
 | 卖家知识中心 | [product](modules/seller-knowledge/product.md) | [technical](modules/seller-knowledge/technical.md) |
 | 买家知识网络 | [product](modules/buyer-knowledge/product.md) | [technical](modules/buyer-knowledge/technical.md) |
 | 买家发现与资格判断 | [product](modules/discovery-qualification/product.md) | [technical](modules/discovery-qualification/technical.md) |
+| AI 基础能力 | [product](modules/ai-foundation/product.md) | [technical](modules/ai-foundation/technical.md) |
 | 独立站建设 | [product](modules/site-builder/product.md) | [technical](modules/site-builder/technical.md) |
 
 开发与实施流程见 [development-process.md](shared/development-process.md)。
@@ -58,6 +59,7 @@
 | 改获客主链（发现 / 评分 / 联系人） | [AGENTS.md](../AGENTS.md) → [当前状态](status/current.md) → [模块技术方案](modules/discovery-qualification/technical.md) | 先读 no-go 与不变量；入口、文件与测试锚点见[代码地图](governance/code-map.md) |
 | 做验收、交付或回填 | [当前状态](status/current.md) → [证据索引](evidence/README.md) | 四态与 RuntimeEvidence 口径，不把「跑通」当「验收」 |
 | 查「为什么这样决定」 | [ADR registry](adr/registry.md) → [冲突与开放决策登记](governance/conflict-register.md) | 决策与冲突分开，不按更新时间判断 |
+| 平台调度或 Temporal 迁移 | [平台授权模式](runbooks/platform-authority-internal-db-and-slimming.md) · [客户 Temporal](backend/postgres-temporal-customer-migration.md) | 切换前核对运行模式、队列与回退材料 |
 | 日常运维与排障 | 工作区 `local-config/RUNBOOK.md` → [后端专题](backend/) | 按 RUNBOOK 顺序，不裸跑 `docker compose` |
 
 ### 产品、设计与前端交接
@@ -97,16 +99,7 @@
 
 ## 4. 当前产品深度
 
-| 区域 | 当前深度 | 不应误读为 |
-|---|---|---|
-| 今日与公共 Shell | 目标产品地图 | 正式 SaaS 前端已存在 |
-| 客户开发 | 主链已上线并验收（M2，2026-11-08）；pilot/GA 门未晋级，当前机器链仍为 `INTERNAL_ONLY` | 本仓负责 Campaign、触达或商机，或历史真测等于当前 pilot |
-| 独立站管理 | M1 收口历史；详细规格和后端纵切最深 | 公网发布、域名、回滚或生产就绪 |
-| 增长执行 | 地图级目标 | 已有 SoR、合同或页面 |
-| 互动与商机 | 地图级目标 | 本仓负责 Conversation/Opportunity |
-| 洞察 | 目标读模型；Site 有局部成本事实 | Mock 图表是指标真值 |
-
-多轴状态只在 [能力登记](governance/capability-register.md)维护。
+实现与验证从[实现状态](status/implementation-matrix.md)进入，发布门和下一步看[路线](status/release-plan.md)，稳定 ID 与产品承诺见[能力登记](governance/capability-register.md)。
 
 ## 5. 文档分层与生命周期
 

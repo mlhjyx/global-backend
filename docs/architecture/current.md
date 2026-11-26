@@ -3,6 +3,7 @@
 > 文档 ID：`DOC-ARCH-001`
 > 生命周期：`CURRENT`
 > 当前事实来源：当前代码、共享合同与 [当前状态](../status/current.md)。
+> 最后核验：2026-11-27（运行开关、数据平面与跨仓接缝；专项历史读数保留原日期）。
 > 2026-07-10 v2（合流定稿）。上游：[../product-scope.md](../product-scope.md)（边界与决策）、[../adr/registry.md](../adr/registry.md)（决策注册表）。缺口的整改排期见 [../status/release-plan.md](../status/release-plan.md)。
 >
 > **as-built 与运行身份边界**：本文描述源码结构和目标收敛，不复制当前提交、工作区状态、审查数量、端口或运行证据计数；这些时间绑定事实只见[当前状态](../status/current.md)。历史观察保留在 changelog/evidence。Program C 的 Opportunity 主聚合与服务端消费边界不由既有 browser ACK 或 Conversation shell 替代；任何源码合入都不能自动证明 runtime adoption。
@@ -32,6 +33,17 @@ TED / openFDA / Web / Crawl4AI / SearXNG / GLEIF / Wikidata / SMTP ／ new-api �
 ```
 
 物理形态：模块化单体 + 单 PostgreSQL；进程可按资源特征拆（API/workflow worker/crawl worker/outbox delivery worker）——**资源隔离，不是微服务化**（ADR-002）。
+
+### 运行模式与开关
+
+| 能力 | 代码默认与可选项 | 职责与证据 |
+| --- | --- | --- |
+| 身份与平台调度 | SaaS 签发用户身份，Backend 校验。平台调度 `PLATFORM_AUTHORITY_MODE` 默认 `r4`，可选 `internal_db` | R4 使用 SaaS 签发、绑定与撤销合同。`internal_db` 使用 `platform_schedule_config` 受控开关；迁移步骤见[平台授权手册](../runbooks/platform-authority-internal-db-and-slimming.md) |
+| 旧执行预算 | `LEGACY_EXECUTION_BUDGET_MODE` 默认 `enforce`，可切 `bypass` | 适用路径在 `enforce` 下验证与消费请求绑定 Grant。`bypass` 路径仍执行技术限额，平台作用域独立路由。SaaS 钱包负责积分，引擎 `usage_ledger` 记录成本；实际扣点取决于接入的 SaaS 业务路径 |
+| 工作流编排 | 客户与平台队列分离；源码支持客户工作流向 PostgreSQL Temporal 迁移 | 迁移与回退看[客户 Temporal 运维手册](../backend/postgres-temporal-customer-migration.md)。单集群是目标，运行证据在[状态页](../status/current.md) |
+| 建站加载 | `SITE_BUILDER_ENABLED` 默认 `true`；关闭时 API 与 Worker 跳过 Site Builder 相应模块注册 | 开关来自 `site-builder-feature-flag.ts`。API 导出与源码策略可在默认模式验证，实际运行采用单独读回 |
+
+客户及平台 Worker 丢失运行租约或无法续租时停止轮询，并为已领取任务保留有界排空。实现见 [Worker 关闭策略](../../apps/api/src/runtime/worker-shutdown-policy.ts)，采用证据回到[状态页](../status/current.md)。
 
 ## 1A. Site Builder as-built 与演进门
 
@@ -109,9 +121,9 @@ API 与 Worker 使用同一 OCI image digest、同一 `global-runtime-build-atte
 ## 3. 数据平面与最小权限
 
 - Tenant plane：`workspace_id + RLS`（✅ 已建）。
-- Platform reference plane：taxonomy/provider/source_policy/monitored_source/source_signal，无 RLS，**只存共享低风险绿色事实、零个人数据**（ADR-003）。
-- PII/rights zone：contact_point/具名决策人——**列级加密或 Tokenization**（收口⑥交付）+ 保留期 + 删除链。
-- **DB 角色拆分**（收口⑥）：现状 `app_user` 对 public schema 全表默认 CRUD → 拆 `tenant_app`/`platform_worker`/`platform_reader`/`migration_owner`。
+- Platform reference plane：taxonomies、provider 与 source_policy 等目录仍各有明确的写入者。共享企业事实由 ADR-003 的 `platform_shared` 迁移承载，应用侧只读取，数据库拦截 PII 写入。租户 `canonical_company` 投影继续受 RLS 约束。
+- PII/rights zone：具名联系人、联系方式与渠道联系人按列加密与权利处置规则处理。主线已合入租户派生密钥的 v2 加密、抑制匹配盲索引及渠道联系人列加密，见 [PII v2 迁移](../../packages/db/prisma/migrations/20261126093000_pii_crypto_v2_blind_keys/migration.sql) 与 [渠道迁移](../../packages/db/prisma/migrations/20261126100000_encrypt_source_channel_record_pii/migration.sql)。
+- **DB 角色拆分**。平台写入和租户连接按作用域分开。2026-11-26 的 [权限迁移](../../packages/db/prisma/migrations/20261126020000_revoke_app_user_platform_table_writes/migration.sql) 收回 `app_user` 对指定平台表的写权限；部署期平台目录由专用种子入口初始化。
 - **逻辑 Schema 写入 Owner 分区**（吸收交付包 §6.2，演进方向非立即迁移）：单库内按域分逻辑区并绑定写入 Owner（示意：core/knowledge/data/intel/execution/analytics/ops），以 Repository+应用服务+DB 权限+Code Owner 共同强制「同库也禁止跨模块直接写表」。触发时机=B 写路径进场或第二个领域模块开建。
 
 ## 4. 数据流（两条）
@@ -179,9 +191,9 @@ scores 与 as-built 六维映射注记：现行六维=fit/role/intent/dataQualit
 | 7   | ✅ **source 层继续收口**：一等 LIA/Art.14/deletion、`DataRightsService`、PII 列级加密、DB 角色拆分和 deletionWorkflow 已存在；#375 已把九个闭合 scope、受控 role map、未知 role 零权限、双 guard 与 OpenAPI `x-required-scopes` 合入 main。当前变更集进一步以不可删除 suppression fact + 单向 LEGAL 提升 + append-only decision 取代裸 DELETE，并让 DataRights DENY 审计先提交、业务拒绝后返回。Production Parity 分支已删除产品 DevTokenVerifier，统一 managed JWKS/role-scope 语义，并增加 `app_user`/runtime lease principal admission。**仍缺**：consent(Art.21)、通用 retention、真正受审批准的 preference release 执行，以及 live SaaS JWKS/token、目标环境 principal 与跨 workspace 运行证据。 | `discovery.service.ts`、`lead.service.ts`、`suppression_decision` migration、auth/runtime contracts | release/correction request 本身不解除 suppression；当前只证明 source、隔离测试、本地非发布 OCI 与先前 disposable DB 权限验证，不能推导部署或 live compliance。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | 8   | 下游跨-sweep 游标饿死：扫描集不收缩，预算位次后的 match 公司永久饿死                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | roadmap 🟠（水位列修复进行中）                                                                      | R2 验收：预算位次后公司 N 轮 sweep 内可被处理                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 
-**2026-10-30 development as-built readback（历史读数；当前读数见本节末尾 2026-11-04 段）：** 运行时为 `348fa0cb`（镜像 `sha256:4a76e2c3…`，含 #697/#698/#699）。身份分层已经变化：产品登录/身份与执行预算 Grant 由 **gain-saas** 签发（`AUTH_ISSUER` / `AUTH_JWKS_URI` / `EXECUTION_BUDGET_GRANT_ISSUER` 指向 `https://127.0.0.1:18446`），事件消费（含 LeadQualified ACK）也在 gain-saas；R4 平台权威仍由 GrowthOS 提供（`PLATFORM_CAPABILITY_*`、`TEMPORAL_MACHINE_*` 指向 `18444`），PRD4-D2 已重开，唯一目的是把平台权威迁到 gain-saas 后退役 GrowthOS（P7 切路由、P8 退役）。交付侧 `outbox_delivery` 321 行全部 ACKED；获客模型按任务分层（抽取 `gemini-3.8-flash`、推理 `gpt-6.1-terra`，任务级覆盖见运行 env）。联系人能力仍是缺口：`decision_maker` 等 provider ENABLED 但不在发现 run 内调用，`email_guess` DISABLED，`canonical_contact`/`contact_point` 0 行。
+**2026-10-30 development as-built readback（历史读数；后续读数见[当前状态](../status/current.md)）：** 运行时为 `348fa0cb`（镜像 `sha256:4a76e2c3…`，含 #697/#698/#699）。身份分层已经变化：产品登录/身份与执行预算 Grant 由 **gain-saas** 签发（`AUTH_ISSUER` / `AUTH_JWKS_URI` / `EXECUTION_BUDGET_GRANT_ISSUER` 指向 `https://127.0.0.1:18446`），事件消费（含 LeadQualified ACK）也在 gain-saas；R4 平台权威仍由 GrowthOS 提供（`PLATFORM_CAPABILITY_*`、`TEMPORAL_MACHINE_*` 指向 `18444`），PRD4-D2 已重开，唯一目的是把平台权威迁到 gain-saas 后退役 GrowthOS（P7 切路由、P8 退役）。交付侧 `outbox_delivery` 321 行全部 ACKED；获客模型按任务分层（抽取 `gemini-3.8-flash`、推理 `gpt-6.1-terra`，任务级覆盖见运行 env）。联系人能力仍是缺口：`decision_maker` 等 provider ENABLED 但不在发现 run 内调用，`email_guess` DISABLED，`canonical_contact`/`contact_point` 0 行。
 
-**2026-11-04 development as-built readback：** 运行时镜像以 `local-config/global/runtime.compose.env` 为准（本文不复写 digest）。身份与 R4 平台权威均在 gain-saas；GrowthOS 已于 2026-10-31 退役，其 issuer 字符串仅作过渡延续。事件消费（含 LeadQualified ACK）在 gain-saas；`outbox_delivery` 当前 475 ACKED / 49 PENDING（在途）。联系人线 M1–M4 已接进 run：`canonical_contact` 129、`contact_point` 134、`company_contact_point` 280；`email_guess` 2026-11-02 重开、待验证。首条 `DONE` run 出现在 2026-11-03。计数快照与阻塞以 [status/current](../status/current.md) 为唯一来源。
+**2026-11-04 development as-built readback（历史）**。 运行时镜像以 `local-config/global/runtime.compose.env` 为准（本文不复写 digest）。身份与 R4 平台权威均在 gain-saas；GrowthOS 已于 2026-10-31 退役，其 issuer 字符串仅作过渡延续。事件消费（含 LeadQualified ACK）在 gain-saas；当时 `outbox_delivery` 记录 475 ACKED / 49 PENDING（在途）。联系人线 M1–M4 已接进 run：`canonical_contact` 129、`contact_point` 134、`company_contact_point` 280；`email_guess` 2026-11-02 重开、待验证。首条 `DONE` run 出现在 2026-11-03。计数快照与阻塞以 [status/current](../status/current.md) 为唯一来源。
 
 ## 9. 架构不变量（红线）
 

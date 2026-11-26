@@ -4,6 +4,7 @@
 > 生命周期：`DRAFT`（依据 2026-11-02 已批准方案起草）
 > 生命周期依据：承接已批准方案 D7/D8/D9/D11/D16/D17；实现事实以代码与 status 为准。
 > 模块产品说明：[product.md](product.md)
+> 当前源码支持整文件直传、S3 分片续传、PDF 优先解析与异步补齐。实际调用名由 [OpenAPI](../../../packages/contracts/openapi/openapi.json) 维护；近期实现与跨仓运行证据从[当前状态](../../status/current.md)进入。
 
 ## 1. 变更历史
 
