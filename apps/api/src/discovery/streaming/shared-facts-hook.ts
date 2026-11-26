@@ -1,3 +1,4 @@
+import { PrismaClient } from '@prisma/client';
 import Redis, { type RedisOptions } from 'ioredis';
 import {
   DEFAULT_COOLDOWN_THRESHOLD,
@@ -6,11 +7,16 @@ import {
   InMemoryDomainCooldownBackend,
   InMemorySharedFactRepository,
   normalizeCompanyDomain,
+  PostgresDomainCooldownBackend,
+  PostgresSharedFactRepository,
   RedisDomainCooldownBackend,
   RedisSharedFactRepository,
   SharedGreenFactStore,
+  type DomainCooldownBackend,
   type DomainCooldownStatus,
   type GreenCompanyFact,
+  type PlatformSharedSqlClient,
+  type SharedFactRepository,
   type SharedFactWriteOutcome,
 } from '../../shared-facts';
 import type { StreamingCompanyExtraction } from './raw-http-extractor';
@@ -142,11 +148,33 @@ export function greenFactToStreamingExtraction(fact: GreenCompanyFact): Streamin
   };
 }
 
+export type SharedFactsBackendKind = 'postgres' | 'redis' | 'memory';
+
+export interface SharedFactsDiagnostics {
+  readonly mode: SharedGreenFactsMode;
+  readonly backendKind: SharedFactsBackendKind;
+  readonly pgReaderConfigured: boolean;
+  readonly pgWriterConfigured: boolean;
+  readonly redisFallbackConfigured: boolean;
+  readonly cooldownConfigured: boolean;
+}
+
+export interface CreateSharedFactsHookOptions {
+  readonly redisFactory?: SharedFactsRedisFactory;
+  readonly pgReader?: PlatformSharedSqlClient;
+  readonly pgWriter?: PlatformSharedSqlClient;
+  readonly pgClientFactory?: (datasourceUrl: string) => PlatformSharedSqlClient & { $disconnect(): Promise<void> };
+}
+
 export interface SharedFactsStreamingHookOptions {
   readonly mode: SharedGreenFactsMode;
   readonly factStore: SharedGreenFactStore;
   readonly cooldownService: DomainCooldownService;
   readonly defaultTtlDays?: number;
+  readonly backendKind?: SharedFactsBackendKind;
+  readonly pgReaderConfigured?: boolean;
+  readonly pgWriterConfigured?: boolean;
+  readonly redisFallbackConfigured?: boolean;
   readonly closeClient?: () => Promise<void>;
 }
 
@@ -155,6 +183,10 @@ export class SharedFactsStreamingHook {
   private readonly factStore: SharedGreenFactStore;
   private readonly cooldownService: DomainCooldownService;
   private readonly defaultTtlDays: number;
+  private readonly backendKind: SharedFactsBackendKind;
+  private readonly pgReaderConfigured: boolean;
+  private readonly pgWriterConfigured: boolean;
+  private readonly redisFallbackConfigured: boolean;
   private readonly closeClient?: () => Promise<void>;
 
   constructor(options: SharedFactsStreamingHookOptions) {
@@ -162,11 +194,26 @@ export class SharedFactsStreamingHook {
     this.factStore = options.factStore;
     this.cooldownService = options.cooldownService;
     this.defaultTtlDays = options.defaultTtlDays ?? DEFAULT_GREEN_FACT_TTL_DAYS;
+    this.backendKind = options.backendKind ?? 'memory';
+    this.pgReaderConfigured = options.pgReaderConfigured ?? false;
+    this.pgWriterConfigured = options.pgWriterConfigured ?? false;
+    this.redisFallbackConfigured = options.redisFallbackConfigured ?? false;
     this.closeClient = options.closeClient;
   }
 
   getMode(): SharedGreenFactsMode {
     return this.mode;
+  }
+
+  getDiagnostics(): SharedFactsDiagnostics {
+    return {
+      mode: this.mode,
+      backendKind: this.backendKind,
+      pgReaderConfigured: this.pgReaderConfigured,
+      pgWriterConfigured: this.pgWriterConfigured,
+      redisFallbackConfigured: this.redisFallbackConfigured,
+      cooldownConfigured: this.cooldownService.isConfigured(),
+    };
   }
 
   isEnabled(): boolean {
@@ -180,6 +227,7 @@ export class SharedFactsStreamingHook {
   async inspectL0Domains(
     domains: readonly (string | null | undefined)[],
     nowMs = Date.now(),
+    category?: string | null,
   ): Promise<Map<string, L0DomainAdvisory>> {
     const out = new Map<string, L0DomainAdvisory>();
     if (!this.isEnabled()) return out;
@@ -191,7 +239,7 @@ export class SharedFactsStreamingHook {
         batch.map(async (domain) => {
           const [fact, cooldown] = await Promise.all([
             this.factStore.get(domain, nowMs),
-            this.cooldownService.checkCooldown(domain, { nowMs }),
+            this.cooldownService.checkCooldown(domain, { nowMs, category }),
           ]);
           return { domain, sharedFactAvailable: fact !== null, cooldown };
         }),
@@ -209,6 +257,7 @@ export class SharedFactsStreamingHook {
   async lookupL1PreFetch(input: {
     domain: string | null | undefined;
     nowMs?: number;
+    category?: string | null;
   }): Promise<L1PreFetchOutcome> {
     if (!this.isEnabled()) {
       return {
@@ -230,9 +279,9 @@ export class SharedFactsStreamingHook {
     const nowMs = input.nowMs ?? Date.now();
     const [fact, cooldown] = await Promise.all([
       this.factStore.get(domain, nowMs),
-      this.cooldownService.checkCooldown(domain, { nowMs }),
+      this.cooldownService.checkCooldown(domain, { nowMs, category: input.category }),
     ]);
-    if (!fact) {
+    if (!fact || (fact.sourceKind !== 'public_web' && fact.sourceKind !== 'public_web_streaming')) {
       return {
         hit: false,
         fact: null,
@@ -260,7 +309,9 @@ export class SharedFactsStreamingHook {
     now?: Date;
   }): Promise<SharedFactWriteOutcome | null> {
     if (!this.canWrite()) return null;
-    if (input.extraction.pagesFetched.length === 0) return null;
+    if (input.extraction.fetchMethod === 'skipped' || input.extraction.pagesFetched.length === 0) {
+      return null;
+    }
     return this.factStore.putFromRaw(
       {
         domain: input.domain,
@@ -293,10 +344,12 @@ export class SharedFactsStreamingHook {
     workspaceId: string;
     isImportedBuyer: boolean;
     nowMs?: number;
+    category?: string | null;
   }): Promise<DomainCooldownStatus | null> {
     if (!this.canWrite() || input.isImportedBuyer) return null;
     return this.cooldownService.recordTouch(input.domain, input.workspaceId, {
       nowMs: input.nowMs,
+      category: input.category,
     });
   }
 
@@ -305,49 +358,40 @@ export class SharedFactsStreamingHook {
   }
 }
 
-export function createSharedFactsHookFromEnv(
-  env: NodeJS.ProcessEnv = process.env,
-  redisFactory: SharedFactsRedisFactory = (url, options) => new Redis(url, options),
-): SharedFactsStreamingHook {
-  const mode = resolveSharedGreenFactsMode(env);
-  const ttlDays = parsePositiveIntEnv(env.ADR003_GREEN_FACT_TTL_DAYS, DEFAULT_GREEN_FACT_TTL_DAYS);
-  const threshold = parsePositiveIntEnv(
-    env.ADR003_DOMAIN_COOLDOWN_THRESHOLD,
-    DEFAULT_COOLDOWN_THRESHOLD,
-  );
-  const pepper = env.ADR003_DOMAIN_COOLDOWN_PEPPER ?? null;
-  const fallbackFactRepo = new InMemorySharedFactRepository();
-  const fallbackCooldownBackend = new InMemoryDomainCooldownBackend();
+type OwnedDisconnectableClient = { $disconnect(): Promise<void> };
 
-  if (mode === 'off') {
-    return new SharedFactsStreamingHook({
-      mode: 'off',
-      factStore: new SharedGreenFactStore(fallbackFactRepo),
-      cooldownService: new DomainCooldownService({
-        pepper,
-        backend: fallbackCooldownBackend,
-        fallbackBackend: fallbackCooldownBackend,
-        maxDistinctWorkspaces30d: threshold,
-      }),
-      defaultTtlDays: ttlDays,
-    });
+const FORBIDDEN_SCOPED_USERNAMES = new Set(['global', 'app_user', 'postgres']);
+
+function resolveOptionalPostgresUrl(raw: string | undefined): string | null {
+  const trimmed = raw?.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'postgresql:' && parsed.protocol !== 'postgres:') return null;
+    if (!parsed.hostname || !parsed.pathname || parsed.pathname === '/') return null;
+    return trimmed;
+  } catch {
+    return null;
   }
+}
 
-  const redisUrl = resolveOptionalRedisUrl(env);
-  if (!redisUrl) {
-    return new SharedFactsStreamingHook({
-      mode,
-      factStore: new SharedGreenFactStore(fallbackFactRepo),
-      cooldownService: new DomainCooldownService({
-        pepper,
-        backend: fallbackCooldownBackend,
-        fallbackBackend: fallbackCooldownBackend,
-        maxDistinctWorkspaces30d: threshold,
-      }),
-      defaultTtlDays: ttlDays,
-    });
+function resolveOptionalScopedPostgresUrl(raw: string | undefined): string | null {
+  const url = resolveOptionalPostgresUrl(raw);
+  if (!url) return null;
+  try {
+    const username = decodeURIComponent(new URL(url).username);
+    if (!username || FORBIDDEN_SCOPED_USERNAMES.has(username)) return null;
+    return url;
+  } catch {
+    return null;
   }
+}
 
+function createRedisFallbackClient(
+  redisUrl: string | null,
+  redisFactory: SharedFactsRedisFactory,
+): SharedFactsRedisLike | null {
+  if (!redisUrl) return null;
   const client = redisFactory(redisUrl, {
     lazyConnect: true,
     maxRetriesPerRequest: 1,
@@ -357,23 +401,139 @@ export function createSharedFactsHookFromEnv(
     ...(redisUrl.startsWith('rediss:') ? { tls: { rejectUnauthorized: true } } : {}),
   });
   client.on('error', () => {});
+  return client;
+}
+
+function resolvePgClientsFromEnv(
+  env: NodeJS.ProcessEnv,
+  mode: SharedGreenFactsMode,
+  options: CreateSharedFactsHookOptions,
+): {
+  pgReader?: PlatformSharedSqlClient;
+  pgWriter?: PlatformSharedSqlClient;
+  ownedClients: OwnedDisconnectableClient[];
+} {
+  const makeClient =
+    options.pgClientFactory ?? ((datasourceUrl: string) => new PrismaClient({ datasourceUrl }));
+  const ownedClients: OwnedDisconnectableClient[] = [];
+
+  let pgReader = options.pgReader;
+  if (!pgReader) {
+    const appUrl = resolveOptionalPostgresUrl(env.APP_DATABASE_URL);
+    if (appUrl) {
+      const client = makeClient(appUrl);
+      pgReader = client;
+      ownedClients.push(client);
+    }
+  }
+
+  let pgWriter = options.pgWriter;
+  if (!pgWriter && mode === 'on') {
+    // Customer worker admission verifies the scoped ops principal before it can poll.
+    const workerOpsUrl = resolveOptionalScopedPostgresUrl(env.CUSTOMER_WORKER_OPS_DATABASE_URL);
+    if (workerOpsUrl) {
+      const client = makeClient(workerOpsUrl);
+      pgWriter = client;
+      ownedClients.push(client);
+    }
+  }
+
+  return { pgReader, pgWriter, ownedClients };
+}
+
+export function createSharedFactsHookFromEnv(
+  env: NodeJS.ProcessEnv = process.env,
+  redisFactoryOrOptions: SharedFactsRedisFactory | CreateSharedFactsHookOptions = {},
+): SharedFactsStreamingHook {
+  const options: CreateSharedFactsHookOptions =
+    typeof redisFactoryOrOptions === 'function'
+      ? { redisFactory: redisFactoryOrOptions }
+      : redisFactoryOrOptions;
+  const redisFactory: SharedFactsRedisFactory =
+    options.redisFactory ?? ((url, opts) => new Redis(url, opts));
+
+  const mode = resolveSharedGreenFactsMode(env);
+  const ttlDays = parsePositiveIntEnv(env.ADR003_GREEN_FACT_TTL_DAYS, DEFAULT_GREEN_FACT_TTL_DAYS);
+  const threshold = parsePositiveIntEnv(
+    env.ADR003_DOMAIN_COOLDOWN_THRESHOLD,
+    DEFAULT_COOLDOWN_THRESHOLD,
+  );
+  const pepper = env.ADR003_DOMAIN_COOLDOWN_PEPPER ?? null;
+  const inMemoryFactRepo = new InMemorySharedFactRepository();
+  const inMemoryCooldown = new InMemoryDomainCooldownBackend();
+
+  if (mode === 'off') {
+    return new SharedFactsStreamingHook({
+      mode: 'off',
+      backendKind: 'memory',
+      factStore: new SharedGreenFactStore(inMemoryFactRepo),
+      cooldownService: new DomainCooldownService({
+        pepper,
+        backend: inMemoryCooldown,
+        fallbackBackend: inMemoryCooldown,
+        maxDistinctWorkspaces30d: threshold,
+      }),
+      defaultTtlDays: ttlDays,
+    });
+  }
+
+  const redisClient = createRedisFallbackClient(resolveOptionalRedisUrl(env), redisFactory);
+  const fallbackFactRepo: SharedFactRepository = redisClient
+    ? new RedisSharedFactRepository(redisClient)
+    : inMemoryFactRepo;
+  const fallbackCooldownBackend: DomainCooldownBackend = redisClient
+    ? new RedisDomainCooldownBackend(redisClient)
+    : inMemoryCooldown;
+
+  const { pgReader, pgWriter, ownedClients } = resolvePgClientsFromEnv(env, mode, options);
+  const effectiveReader = pgReader ?? pgWriter;
+  const backendKind: SharedFactsBackendKind = effectiveReader
+    ? 'postgres'
+    : redisClient
+      ? 'redis'
+      : 'memory';
+
+  const primaryFactRepo: SharedFactRepository = effectiveReader
+    ? new PostgresSharedFactRepository(effectiveReader, pgWriter)
+    : fallbackFactRepo;
+  const primaryCooldownBackend: DomainCooldownBackend = effectiveReader
+    ? new PostgresDomainCooldownBackend(effectiveReader, pgWriter)
+    : fallbackCooldownBackend;
+
+  const closeClient =
+    ownedClients.length > 0 || redisClient
+      ? async () => {
+          const tasks: Promise<unknown>[] = ownedClients.map((c) =>
+            c.$disconnect().catch(() => undefined),
+          );
+          if (redisClient) {
+            tasks.push(
+              redisClient.quit().catch(() => {
+                redisClient.disconnect();
+              }),
+            );
+          }
+          await Promise.allSettled(tasks);
+        }
+      : undefined;
 
   return new SharedFactsStreamingHook({
     mode,
-    factStore: new SharedGreenFactStore(new RedisSharedFactRepository(client), fallbackFactRepo),
+    backendKind,
+    pgReaderConfigured: Boolean(effectiveReader),
+    pgWriterConfigured: Boolean(pgWriter),
+    redisFallbackConfigured: Boolean(redisClient),
+    factStore: new SharedGreenFactStore(
+      primaryFactRepo,
+      effectiveReader ? fallbackFactRepo : inMemoryFactRepo,
+    ),
     cooldownService: new DomainCooldownService({
       pepper,
-      backend: new RedisDomainCooldownBackend(client),
-      fallbackBackend: fallbackCooldownBackend,
+      backend: primaryCooldownBackend,
+      fallbackBackend: effectiveReader ? fallbackCooldownBackend : inMemoryCooldown,
       maxDistinctWorkspaces30d: threshold,
     }),
     defaultTtlDays: ttlDays,
-    closeClient: async () => {
-      try {
-        await client.quit();
-      } catch {
-        client.disconnect();
-      }
-    },
+    closeClient,
   });
 }

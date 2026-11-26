@@ -194,12 +194,58 @@ describe('渠道服务：manifest 导入/编辑/启用门/详情脱敏', () => {
     expect((error as { response: { error: { issues?: unknown[] } } }).response.error.issues?.length).toBeGreaterThan(0);
   });
 
-  it('html manifest v1 不接受（抓取运行链未接 manifest，明确 409）', async () => {
-    const { service } = makeService();
-    await expect(service.createChannel(CTX, { manifest: HTML_MANIFEST })).rejects.toMatchObject({
-      status: 409,
-      response: { error: { code: 'CHANNEL_MANIFEST_HTML_UNSUPPORTED' } },
+  it('html manifest v1：未验证的配置保持停用，通过试跑和条款闸门的配置才可启用', async () => {
+    const { service, writes } = makeService();
+    const view = await service.createChannel(CTX, { manifest: HTML_MANIFEST });
+    const data = writes.creates[0]!;
+    expect(data).toMatchObject({
+      name: 'Hannover',
+      mode: 'crawl',
+      category: 'trade_fair',
+      status: 'DISABLED',
+      probeRequired: true,
+      connectorKind: 'manifest',
+      baseUrl: 'https://www.hannovermesse.de',
     });
+    expect(data.config).toMatchObject({
+      mode: 'crawl',
+      list: {
+        url: 'https://www.hannovermesse.de/en/search/?page={page}',
+        maxPages: 5,
+        itemSelector: '.card',
+      },
+    });
+    expect(view).toMatchObject({ mode: 'crawl', probeRequired: true });
+
+    const htmlWithGov = parseChannelManifest({
+      ...HTML_MANIFEST,
+      governance: {
+        license: 'fair-directory',
+        tosUrl: 'https://www.hannovermesse.de/terms',
+        robotsPolicy: 'A',
+      },
+    });
+    const channel = {
+      mode: 'crawl',
+      manifest: htmlWithGov,
+      baseUrl: 'https://www.hannovermesse.de',
+      license: 'fair-directory',
+      tosUrl: 'https://www.hannovermesse.de/terms',
+      robotsPolicy: 'A',
+    };
+    const policies = [
+      { domain: 'hannovermesse.de', reviewStatus: 'APPROVED', termsStatus: 'REVIEWED_OK', robotsStatus: 'ALLOWS' },
+    ];
+    const unverified = makeService({ channel: channelRow({ ...channel, probeRequired: true }), policies });
+    await expect(unverified.service.patchChannel(CTX, CHANNEL_ID, { status: 'ENABLED' })).rejects.toMatchObject({
+      status: 409,
+      response: { error: { code: 'CHANNEL_PROBE_REQUIRED' } },
+    });
+    expect(unverified.writes.updates).toHaveLength(0);
+
+    const enableSvc = makeService({ channel: channelRow({ ...channel, probeRequired: false }), policies });
+    await enableSvc.service.patchChannel(CTX, CHANNEL_ID, { status: 'ENABLED' });
+    expect(enableSvc.writes.updates[0]).toMatchObject({ status: 'ENABLED' });
   });
 
   it('PATCH manifest：重存并重新置 probe_required=true', async () => {

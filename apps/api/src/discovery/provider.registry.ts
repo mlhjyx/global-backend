@@ -164,7 +164,7 @@ export class DiscoveryProviderRegistry {
     );
     // channel_catalog = 本地渠道库（source_channel_record）枚举（零出网零成本，Batch 1.4-B / Phase 1 唤醒）。
     // 默认声明 local_query 血缘（CHANNEL_CATALOG_PROVIDER=off 可紧急关停），
-    // data_provider.channel_catalog（seed 默认 DISABLED）作运行时主开关。
+    // data_provider.channel_catalog（新安装 seed 默认 ENABLED）作运行时主开关。
     this.discovery.push(
       new ChannelCatalogDiscoveryProvider({
         prisma,
@@ -880,11 +880,11 @@ export class DiscoveryProviderRegistry {
       update: {},
       create: { key: 'registry_frame', class: 'company_registry', status: 'DISABLED', costPerCallCents: 0 },
     });
-    // channel_catalog（Batch 1.4-B）：本地已审渠道库（source_channel_record），零出网零成本。
+    // channel_catalog（Batch 1.4-B）：本地已审渠道库（source_channel_record），零出网零成本；默认 ENABLED。
     await db.dataProvider.upsert({
       where: { key: 'channel_catalog' },
       update: {},
-      create: { key: 'channel_catalog', class: 'industry_data', status: 'DISABLED', costPerCallCents: 0 },
+      create: { key: 'channel_catalog', class: 'industry_data', status: 'ENABLED', costPerCallCents: 0 },
     });
   }
 

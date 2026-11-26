@@ -317,4 +317,73 @@ describe('channelCrawlActivities（P4-P4c）', () => {
       truncated: true,
     });
   });
+
+  it('executes an HTML channel-manifest/v1 channel when channel.manifest is present', async () => {
+    const { activities, materializeRecords } = makeActivities({
+      channel: {
+        id: INPUT.channelId,
+        mode: 'crawl',
+        status: 'ENABLED',
+        config: {},
+        manifestSha256: 'c'.repeat(64),
+        manifest: {
+          meta: { name: 'ProPak Fair', version: 1, category: 'trade_fair' },
+          transport: { baseUrl: 'https://expo.example', responseType: 'html', allowedHosts: ['expo.example'] },
+          crawl: {
+            list: {
+              url: 'https://expo.example/exhibitors',
+              itemSelector: '.card',
+              itemUrlSelector: 'a',
+              maxPages: 1,
+            },
+            detail: { enabled: false },
+          },
+        },
+      },
+    });
+    const outcome = await activities.runChannelCrawl({ input: INPUT, binding: BINDING });
+    expect(outcome.status).toBe('SUCCEEDED');
+    expect(outcome.recordsFound).toBe(1);
+    expect(outcome.manifestSha256).toBe('c'.repeat(64));
+    expect(materializeRecords).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not dispatch HTML detail links outside the stored manifest host list', async () => {
+    const { activities, fetchPage, materializeRecords } = makeActivities({
+      channel: {
+        id: INPUT.channelId,
+        mode: 'crawl',
+        status: 'ENABLED',
+        probeRequired: false,
+        manifest: {
+          meta: { name: 'Fixture Fair', version: 1, category: 'trade_fair' },
+          transport: { baseUrl: 'https://expo.example', responseType: 'html', allowedHosts: ['expo.example'] },
+          crawl: {
+            list: { url: 'https://expo.example/exhibitors', itemSelector: '.card', itemUrlSelector: 'a::attr(href)', maxPages: 1 },
+            detail: { enabled: true, fields: { name: 'h1' } },
+          },
+        },
+      },
+    });
+    await activities.runChannelCrawl({ input: INPUT, binding: BINDING });
+    expect(fetchPage.mock.calls.map(([url]) => url)).toEqual(['https://expo.example/exhibitors']);
+    expect(materializeRecords).toHaveBeenCalledWith(expect.objectContaining({
+      records: [expect.objectContaining({ sourceUrl: 'https://expo.example/exhibitors' })],
+    }));
+  });
+
+  it('fails non-retryably with CHANNEL_MANIFEST_INVALID on malformed channel.manifest', async () => {
+    const { activities } = makeActivities({
+      channel: {
+        id: INPUT.channelId,
+        mode: 'crawl',
+        status: 'ENABLED',
+        config: CRAWL_CONFIG,
+        manifest: { bad: true },
+      },
+    });
+    await expect(activities.runChannelCrawl({ input: INPUT, binding: BINDING })).rejects.toMatchObject({
+      message: 'CHANNEL_MANIFEST_INVALID',
+    });
+  });
 });

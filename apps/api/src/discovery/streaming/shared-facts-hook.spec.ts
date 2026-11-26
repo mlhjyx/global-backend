@@ -73,6 +73,25 @@ describe('SharedFactsStreamingHook (ADR-003 L0/L1 integration)', () => {
     expect(factorySpy).not.toHaveBeenCalled();
   });
 
+  it('does not select a platform writer from the discovery worker environment', async () => {
+    const pgClientFactory = vi.fn(() => ({
+      $queryRaw: vi.fn(async () => []),
+      $executeRaw: vi.fn(async () => 1),
+      $disconnect: vi.fn(async () => undefined),
+    }));
+    const hook = createSharedFactsHookFromEnv({
+      ADR003_SHARED_GREEN_FACTS: 'on',
+      APP_DATABASE_URL: 'postgresql://app_user@localhost/disposable',
+      EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE_URL: 'postgresql://platform_writer_fixture@localhost/disposable',
+    }, { pgClientFactory });
+    try {
+      expect(hook.getDiagnostics().pgWriterConfigured).toBe(false);
+      expect(pgClientFactory).toHaveBeenCalledOnce();
+    } finally {
+      await hook.close();
+    }
+  });
+
   it('writes back sanitized green facts, reuses them on L1 hit with zero PII, and blocks imported_buyer', async () => {
     const repo = new InMemorySharedFactRepository();
     const cooldownBackend = new InMemoryDomainCooldownBackend();
@@ -190,5 +209,98 @@ describe('SharedFactsStreamingHook (ADR-003 L0/L1 integration)', () => {
     });
     expect(writeRes).toBeNull();
     expect(await store.get('new-site.de', now.getTime())).toBeNull();
+  });
+
+  it('wires PostgresSharedFactRepository + PostgresDomainCooldownBackend via createSharedFactsHookFromEnv and disconnects owned clients', async () => {
+    const queryRaw = vi.fn(async () => []);
+    const executeRaw = vi.fn(async () => 1);
+    const pgReader = { $queryRaw: queryRaw, $executeRaw: executeRaw };
+    const pgWriter = { $queryRaw: vi.fn(async () => []), $executeRaw: executeRaw };
+
+    const injectedHook = createSharedFactsHookFromEnv(
+      {
+        ADR003_SHARED_GREEN_FACTS: 'on',
+        ADR003_DOMAIN_COOLDOWN_PEPPER: TEST_PEPPER,
+        ADR003_DOMAIN_COOLDOWN_THRESHOLD: '2',
+      },
+      { pgReader, pgWriter },
+    );
+    expect(injectedHook.getDiagnostics()).toEqual({
+      mode: 'on',
+      backendKind: 'postgres',
+      pgReaderConfigured: true,
+      pgWriterConfigured: true,
+      redisFallbackConfigured: false,
+      cooldownConfigured: true,
+    });
+
+    await injectedHook.writeBackFromStreamingExtraction({
+      domain: 'solar-pg.de',
+      legalName: 'Solar PG GmbH',
+      country: 'DE',
+      extraction: sampleExtraction({ domain: 'solar-pg.de', homepageUrl: 'https://solar-pg.de/' }),
+      isImportedBuyer: false,
+    });
+    expect(executeRaw).toHaveBeenCalled();
+    await injectedHook.recordQualifiedTouch({
+      domain: 'solar-pg.de',
+      workspaceId: 'ws-1',
+      isImportedBuyer: false,
+      category: 'solar_pv',
+    });
+    expect(queryRaw).toHaveBeenCalled();
+
+    // Env-driven PG resolution: APP_DATABASE_URL + CUSTOMER_WORKER_OPS_DATABASE_URL, owned clients disconnected on close()
+    const createdClients: Array<{ url: string; disconnect: ReturnType<typeof vi.fn> }> = [];
+    const envHook = createSharedFactsHookFromEnv(
+      {
+        ADR003_SHARED_GREEN_FACTS: 'on',
+        ADR003_DOMAIN_COOLDOWN_PEPPER: TEST_PEPPER,
+        APP_DATABASE_URL: 'postgresql://app_user:secret@localhost:5432/global_dev',
+        CUSTOMER_WORKER_OPS_DATABASE_URL: 'postgresql://customer_worker_ops_login:secret@localhost:5432/global_dev',
+      },
+      {
+        pgClientFactory: (url) => {
+          const disconnect = vi.fn(async () => undefined);
+          createdClients.push({ url, disconnect });
+          return {
+            $queryRaw: vi.fn(async () => []),
+            $executeRaw: vi.fn(async () => 1),
+            $disconnect: disconnect,
+          };
+        },
+      },
+    );
+    expect(envHook.getDiagnostics().backendKind).toBe('postgres');
+    expect(envHook.getDiagnostics().pgReaderConfigured).toBe(true);
+    expect(envHook.getDiagnostics().pgWriterConfigured).toBe(true);
+    expect(createdClients).toHaveLength(2);
+    await envHook.close();
+    expect(createdClients[0]!.disconnect).toHaveBeenCalledTimes(1);
+    expect(createdClients[1]!.disconnect).toHaveBeenCalledTimes(1);
+
+    // Readonly mode resolves reader only without constructing writer
+    const readonlyClients: string[] = [];
+    const roHook = createSharedFactsHookFromEnv(
+      {
+        ADR003_SHARED_GREEN_FACTS: 'readonly',
+        APP_DATABASE_URL: 'postgresql://app_user:secret@localhost:5432/global_dev',
+        CUSTOMER_WORKER_OPS_DATABASE_URL: 'postgresql://customer_worker_ops_login:secret@localhost:5432/global_dev',
+      },
+      {
+        pgClientFactory: (url) => {
+          readonlyClients.push(url);
+          return { $queryRaw: vi.fn(async () => []), $executeRaw: vi.fn(async () => 0), $disconnect: vi.fn(async () => undefined) };
+        },
+      },
+    );
+    expect(readonlyClients).toHaveLength(1);
+    expect(roHook.getDiagnostics()).toMatchObject({
+      mode: 'readonly',
+      backendKind: 'postgres',
+      pgReaderConfigured: true,
+      pgWriterConfigured: false,
+    });
+    await roHook.close();
   });
 });

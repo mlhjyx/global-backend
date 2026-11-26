@@ -14,7 +14,8 @@ const MAX_IN_MEMORY_FACTS = 10_000;
 
 export interface SharedFactRepository {
   getByDomain(normalizedDomain: string, nowMs?: number): Promise<GreenCompanyFact | null>;
-  upsert(fact: GreenCompanyFact, nowMs?: number): Promise<void>;
+  /** Return false when a newer or higher-priority fact was retained. */
+  upsert(fact: GreenCompanyFact, nowMs?: number): Promise<void | boolean>;
   deleteByDomain(normalizedDomain: string): Promise<boolean>;
 }
 
@@ -165,7 +166,15 @@ export class SharedGreenFactStore {
     const nowMs = (opts.now ?? new Date()).getTime();
     try {
       assertGreenCompanyFactClean(sanitized.fact);
-      await this.repository.upsert(sanitized.fact, nowMs);
+      const written = await this.repository.upsert(sanitized.fact, nowMs);
+      if (written === false) {
+        return {
+          stored: false,
+          degraded: false,
+          reason: 'PREFERRED_FACT_RETAINED',
+          details: 'The repository retained a newer or higher-priority fact.',
+        };
+      }
       return {
         stored: true,
         degraded: false,

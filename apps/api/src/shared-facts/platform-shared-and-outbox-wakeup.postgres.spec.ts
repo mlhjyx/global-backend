@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { describe, expect, it, vi } from 'vitest';
 import { PrismaClient } from '@prisma/client';
 import {
   DomainCooldownService,
@@ -6,6 +7,12 @@ import {
   PostgresSharedFactRepository,
   SharedGreenFactStore,
 } from './index';
+import { projectApprovedChannelGreenFacts } from '../channels/channel-platform-writer';
+import { ChannelService } from '../channels/channel.service';
+import { materializeChannelRecords } from '../channels/channel-records';
+import { createPrismaChannelRecordWriter } from '../channels/channel-records.prisma';
+import { ChannelCatalogDiscoveryProvider } from '../discovery/providers/channel-catalog.provider';
+import { createSharedFactsHookFromEnv } from '../discovery/streaming/shared-facts-hook';
 import { PgNotifyListener } from '../relay/pg-notify-listener';
 
 const ADMIN_URL = process.env.TEST_M10_PG_ADMIN_URL?.trim();
@@ -17,6 +24,134 @@ const ENABLED = Boolean(ADMIN_URL && WRITER_URL && APP_USER_URL);
 describe.skipIf(!ENABLED)(
   'M10-PR2 Block 4 & 5 real PG16 integration: ADR-003 platform_shared boundary & Outbox PG NOTIFY wakeup',
   () => {
+    it('requires a fresh review for changed materialized content and preserves approval on repeat observations', async () => {
+      const adminDb = new PrismaClient({ datasourceUrl: ADMIN_URL });
+      const channelId = randomUUID();
+      const writer = createPrismaChannelRecordWriter(adminDb);
+      const record = {
+        name: 'Review Fixture GmbH',
+        website: 'https://materialized-review-fixture.example',
+        country: 'DE',
+        sourceUrl: 'https://expo.example/exhibitors/review-fixture',
+      };
+      const materialize = (industry: string) => materializeChannelRecords(writer, {
+        channelId, crawlRunId: randomUUID(), records: [{ ...record, industry }],
+      });
+      const readBack = () => adminDb.sourceChannelRecord.findFirstOrThrow({ where: { channelId } });
+      try {
+        await adminDb.sourceChannel.create({ data: {
+          id: channelId, name: 'Materialized Review Fixture', category: 'trade_fair',
+          mode: 'crawl', config: {}, status: 'ENABLED',
+        } });
+        await materialize('industrial controls');
+        const first = await readBack();
+        expect(first.reviewStatus).toBe('PENDING');
+        await adminDb.sourceChannelRecord.update({
+          where: { id: first.id },
+          data: { reviewStatus: 'APPROVED', reviewedAt: new Date(), reviewedBy: randomUUID() },
+        });
+        await materialize('industrial controls');
+        expect((await readBack()).reviewStatus).toBe('APPROVED');
+
+        await materialize('changed directory evidence');
+        const changed = await readBack();
+        expect(changed.id).toBe(first.id);
+        expect(changed.contentHash).not.toBe(first.contentHash);
+        expect(changed.reviewStatus).toBe('PENDING');
+      } finally {
+        await adminDb.sourceChannel.deleteMany({ where: { id: channelId } });
+        await adminDb.$disconnect();
+      }
+    });
+
+    it('returns matching catalog rows beyond the initial page and interleaves channels after review precedence', async () => {
+      const adminDb = new PrismaClient({ datasourceUrl: ADMIN_URL });
+      const appDb = new PrismaClient({ datasourceUrl: APP_USER_URL });
+      const channelIds = Array.from({ length: 53 }, (_, i) =>
+        `00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`,
+      );
+      const primary = channelIds[0]!;
+      const late = channelIds[51]!;
+      const disabled = channelIds[52]!;
+      const crawlRunId = randomUUID();
+      const reviewedBy = randomUUID();
+      const row = (channelId: string, dedupeKey: string) => ({
+        channelId, crawlRunId, dedupeKey,
+        name: 'Catalog Fixture', country: 'Italy',
+        sourceUrl: 'https://expo.example/directory',
+        reviewStatus: 'APPROVED',
+        reviewedBy, reviewedAt: new Date(),
+      });
+      try {
+        await adminDb.sourceChannel.createMany({ data: channelIds.map((id) => ({
+          id, name: 'Catalog Fixture', category: 'trade_fair', mode: 'crawl', config: {},
+          status: id === disabled ? 'DISABLED' : 'ENABLED',
+        })) });
+        await adminDb.sourceChannelRecord.createMany({ data: [
+          ...Array.from({ length: 510 }, (_, i) => ({
+            ...row(primary, `a-${String(i).padStart(3, '0')}`),
+            ...(i < 255 ? { country: 'Germany', industry: 'photovoltaic' } : { industry: 'bakery' }),
+          })),
+          { ...row(primary, 'z-1'), name: 'Catalog Solar A', website: 'https://catalog-a.example', products: ['photovoltaic modules'] },
+          { ...row(primary, 'z-2'), name: 'Catalog Solar B', website: 'https://catalog-b.example', industry: 'photovoltaic' },
+          { ...row(late, 'n-1'), name: 'Catalog Solar C', website: 'https://catalog-c.example', keywords: 'PHOTOVOLTAIC' },
+          { ...row(late, 'n-2'), name: 'Catalog Pending Duplicate', website: 'https://catalog-a.example', industry: 'photovoltaic', reviewStatus: 'PENDING', reviewedBy: null, reviewedAt: null },
+          { ...row(late, 'n-3'), name: 'Catalog Rejected Match', industry: 'photovoltaic', reviewStatus: 'REJECTED' },
+          { ...row(late, 'n-4'), name: 'Catalog Invalid Evidence', website: 'https://candidate.example', industry: 'photovoltaic', sourceUrl: 'https://expo.example:8443/directory' },
+          { ...row(disabled, 'n-1'), name: 'Catalog Disabled Match', industry: 'photovoltaic' },
+        ] });
+
+        const provider = new ChannelCatalogDiscoveryProvider({ prisma: appDb, lineageEnabled: true });
+        const result = await provider.discoverCompanies({
+          sourceClass: 'industry_data', filters: { country: 'IT', industry: 'photovoltaic' },
+          keywords: [], limit: 5,
+        }, {
+          workspaceId: randomUUID(), runId: randomUUID(),
+          durableBudgetAuthority: { authorityId: randomUUID(), accountId: randomUUID() },
+        });
+        expect(result.records.map((record) => record.name)).toEqual([
+          'Catalog Solar A', 'Catalog Solar C', 'Catalog Solar B',
+        ]);
+      } finally {
+        await adminDb.sourceChannel.deleteMany({ where: { id: { in: channelIds } } });
+        await Promise.all([adminDb.$disconnect(), appDb.$disconnect()]);
+      }
+    });
+
+    it('keeps fresh website facts and leaves normal website collection open for directory-only facts', async () => {
+      const writerDb = new PrismaClient({ datasourceUrl: WRITER_URL });
+      const appDb = new PrismaClient({ datasourceUrl: APP_USER_URL });
+      const repository = new PostgresSharedFactRepository(appDb, writerDb);
+      const store = new SharedGreenFactStore(repository);
+      const now = new Date('2026-11-27T00:00:00Z');
+      const later = new Date(now.getTime() + 1000);
+      try {
+        await store.putFromRaw({
+          domain: 'adr003-rich-website.example', sourceKind: 'public_web_streaming',
+          websiteSummary: 'Verified industrial control equipment.',
+          contactPageUrl: 'https://adr003-rich-website.example/contact',
+        }, { now });
+        for (const domain of ['adr003-rich-website.example', 'adr003-directory-only.example']) {
+          await store.putFromRaw({ domain, sourceKind: 'public_directory', legalName: 'Listing name' }, { now: later });
+        }
+
+        const hook = createSharedFactsHookFromEnv(
+          { ADR003_SHARED_GREEN_FACTS: 'readonly' }, { pgReader: appDb },
+        );
+        const rich = await hook.lookupL1PreFetch({ domain: 'adr003-rich-website.example', nowMs: later.getTime() });
+        const directory = await hook.lookupL1PreFetch({ domain: 'adr003-directory-only.example', nowMs: later.getTime() });
+        expect(rich.fact?.sourceKind).toBe('public_web_streaming');
+        expect(rich.syntheticExtraction?.channels.contactPageUrl).toBe('https://adr003-rich-website.example/contact');
+        expect(directory.hit).toBe(false);
+        expect(directory.syntheticExtraction).toBeNull();
+        expect((await repository.getByDomain('adr003-directory-only.example', later.getTime()))?.sourceKind).toBe('public_directory');
+      } finally {
+        await repository.deleteByDomain('adr003-rich-website.example');
+        await repository.deleteByDomain('adr003-directory-only.example');
+        await Promise.all([writerDb.$disconnect(), appDb.$disconnect()]);
+      }
+    });
+
     it('enforces platform_writer RW, app_user strict SELECT-only, and physical PII rejection on platform_shared', async () => {
       const writerDb = new PrismaClient({ datasourceUrl: WRITER_URL });
       const appDb = new PrismaClient({ datasourceUrl: APP_USER_URL });
@@ -184,6 +319,200 @@ describe.skipIf(!ENABLED)(
             DELETE FROM platform_shared.domain_cooldown_touch
           `),
         ).rejects.toThrow(/42501|permission denied/i);
+
+        // 6. F12: createSharedFactsHookFromEnv PG round-trip (app_user read + platform_writer write)
+        const hook = createSharedFactsHookFromEnv(
+          {
+            ADR003_SHARED_GREEN_FACTS: 'on',
+            ADR003_DOMAIN_COOLDOWN_PEPPER: 'test-pepper-at-least-16-chars-long',
+            ADR003_DOMAIN_COOLDOWN_THRESHOLD: '2',
+          },
+          { pgReader: appDb, pgWriter: writerDb },
+        );
+        expect(hook.getDiagnostics().backendKind).toBe('postgres');
+        await hook.writeBackFromStreamingExtraction({
+          domain: 'solaris-hook.example',
+          legalName: 'Solaris Hook GmbH',
+          country: 'DE',
+          extraction: {
+            domain: 'solaris-hook.example',
+            homepageUrl: 'https://solaris-hook.example/',
+            fetchMethod: 'raw_http',
+            usedCrawl4aiFallback: false,
+            usedWwwRetry: false,
+            pdfSkipped: false,
+            robotsBlocked: false,
+            title: 'Solaris Hook GmbH',
+            metaDescription: 'Solar modules',
+            visibleText: 'Solar modules',
+            jsonLd: {
+              organizationNames: ['Solaris Hook GmbH'],
+              descriptions: ['Solar modules'],
+              emails: ['sales@solaris-hook.example'],
+              phones: [],
+              socialLinks: [],
+              products: ['HJT Module'],
+              jobPostings: [],
+            },
+            channels: {
+              roleEmails: ['sales@solaris-hook.example'],
+              otherEmails: [],
+              phones: [],
+              socialLinks: [],
+              hasInquiryForm: false,
+              contactFormUrl: null,
+              contactPageUrl: null,
+              impressumUrl: null,
+              careersPageUrl: null,
+            },
+            pagesFetched: ['https://solaris-hook.example/'],
+            failureReason: null,
+          },
+          isImportedBuyer: false,
+        });
+        const preFetch = await hook.lookupL1PreFetch({
+          domain: 'solaris-hook.example',
+          category: 'trade_fair',
+        });
+        expect(preFetch.hit).toBe(true);
+        expect(preFetch.fact?.roleEmails).toEqual(['sales@solaris-hook.example']);
+
+        // 7. F12: runtime_customer_worker_ops narrow grants + execution_budget_platform_writer ingestion
+        const adminDbForRoles = new PrismaClient({ datasourceUrl: ADMIN_URL });
+        try {
+          const roleRows = await adminDbForRoles.$queryRaw<
+            Array<{ worker_ops: boolean; epw: boolean }>
+          >`
+            SELECT
+              EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'runtime_customer_worker_ops') AS worker_ops,
+              EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'execution_budget_platform_writer') AS epw
+          `;
+          if (roleRows[0]?.worker_ops) {
+            const privs = await adminDbForRoles.$queryRaw<
+              Array<{
+                cf_sel: boolean;
+                cf_ins: boolean;
+                cf_upd: boolean;
+                cf_del: boolean;
+                dc_del: boolean;
+                app_ins: boolean;
+              }>
+            >`
+              SELECT
+                has_table_privilege('runtime_customer_worker_ops', 'platform_shared.company_fact', 'SELECT') AS cf_sel,
+                has_table_privilege('runtime_customer_worker_ops', 'platform_shared.company_fact', 'INSERT') AS cf_ins,
+                has_table_privilege('runtime_customer_worker_ops', 'platform_shared.company_fact', 'UPDATE') AS cf_upd,
+                has_table_privilege('runtime_customer_worker_ops', 'platform_shared.company_fact', 'DELETE') AS cf_del,
+                has_table_privilege('runtime_customer_worker_ops', 'platform_shared.domain_cooldown_touch', 'DELETE') AS dc_del,
+                has_table_privilege('app_user', 'platform_shared.company_fact', 'INSERT') AS app_ins
+            `;
+            expect(privs[0]).toEqual({
+              cf_sel: true,
+              cf_ins: true,
+              cf_upd: true,
+              cf_del: false,
+              dc_del: true,
+              app_ins: false,
+            });
+          }
+
+          if (roleRows[0]?.epw) {
+            const epwRole = `ci_f12_epw_${randomBytes(4).toString('hex')}`;
+            const epwPass = randomBytes(16).toString('hex');
+            const epwUrl = new URL(ADMIN_URL!);
+            epwUrl.username = epwRole;
+            epwUrl.password = epwPass;
+            await adminDbForRoles.$executeRawUnsafe(
+              `CREATE ROLE "${epwRole}" LOGIN PASSWORD '${epwPass}' IN ROLE execution_budget_platform_writer`,
+            );
+            const epwDb = new PrismaClient({ datasourceUrl: epwUrl.toString() });
+            try {
+              await epwDb.$connect();
+              const sourceDomain = 'adr003-reviewed-directory.example';
+              const approvedDomain = 'solaris-channel.example';
+              const excludedDomain = 'unapproved-path-channel.example';
+              const fixture = await adminDbForRoles.sourceChannel.create({ data: {
+                mode: 'crawl', category: 'trade_fair', name: 'Synthetic Trade Fair',
+                status: 'ENABLED', probeRequired: false, license: 'Public discovery fixtures',
+                config: {
+                  mode: 'crawl', list: { url: `https://${sourceDomain}/exhibitors`, itemSelector: 'article', maxPages: 1, singlePage: true },
+                  detail: { enabled: false, fields: {} },
+                },
+              } });
+              const crawlRunId = randomUUID();
+              const projectionEnv = { ADR003_SHARED_GREEN_FACTS: 'on' };
+              const scope = { platformWriter: epwDb, channelId: fixture.id, crawlRunId, env: projectionEnv };
+              const approvedRecord = {
+                name: 'Solaris Channel GmbH',
+                website: `https://www.${approvedDomain}`,
+                country: 'Germany',
+                industry: 'Photovoltaic',
+                products: ['HJT Module'],
+                email: `sales@${approvedDomain}`,
+                phone: '+49 89 90410150',
+                sourceUrl: `https://${sourceDomain}/exhibitors/public`,
+              };
+              await adminDbForRoles.sourcePolicy.create({ data: {
+                domain: sourceDomain, sourceType: 'trade_fair', accessMode: 'crawl',
+                reviewStatus: 'APPROVED', termsStatus: 'REVIEWED_OK', robotsStatus: 'ALLOWS',
+                personalData: false, allowedPurpose: ['discovery'],
+                allowedPaths: ['/exhibitors/'], disallowedPaths: ['/exhibitors/private'],
+                retentionDays: 14,
+              } });
+              try {
+                const recordWriter = createPrismaChannelRecordWriter(epwDb);
+                await materializeChannelRecords(recordWriter, {
+                  channelId: fixture.id, crawlRunId, records: [
+                    approvedRecord,
+                    {
+                      ...approvedRecord, name: 'Excluded Path GmbH', website: `https://${excludedDomain}`,
+                      sourceUrl: `https://${sourceDomain}/exhibitors/%70rivate`,
+                    },
+                  ],
+                });
+                expect(await projectApprovedChannelGreenFacts(scope)).toEqual({ stored: 0, skipped: 0, rejected: 0 });
+
+                const recordIds = (await epwDb.sourceChannelRecord.findMany({
+                  where: { channelId: fixture.id },
+                  select: { id: true },
+                })).map(({ id }) => id);
+                const service = new ChannelService(appDb as never, undefined, undefined, epwDb);
+                vi.stubEnv('ADR003_SHARED_GREEN_FACTS', 'on');
+                const reviewer = { workspaceId: randomUUID(), userId: randomUUID(), roles: [] };
+                await service.reviewChannelRecords(reviewer, fixture.id, { recordIds, verdict: 'APPROVED' });
+
+                const repository = new PostgresSharedFactRepository(appDb, epwDb);
+                const fact = await repository.getByDomain(approvedDomain);
+                expect(fact?.sourceKind).toBe('public_directory');
+                expect(fact?.websiteSummary).toBe('Synthetic Trade Fair: Photovoltaic');
+                expect(fact?.productCategories).toEqual(['HJT Module']);
+                expect(fact?.roleEmails).toEqual([]);
+                expect(fact?.switchboardPhones).toEqual([]);
+                expect(fact?.ttlDays).toBe(14);
+                expect(await repository.getByDomain(excludedDomain)).toBeNull();
+
+                const nextRunId = randomUUID();
+                await materializeChannelRecords(recordWriter, {
+                  channelId: fixture.id, crawlRunId: nextRunId,
+                  records: [{ ...approvedRecord, industry: 'Changed source content' }],
+                });
+                expect(await projectApprovedChannelGreenFacts({ ...scope, crawlRunId: nextRunId }))
+                  .toEqual({ stored: 0, skipped: 0, rejected: 0 });
+                expect(await repository.getByDomain(approvedDomain)).toEqual(fact);
+              } finally {
+                vi.unstubAllEnvs();
+                await new PostgresSharedFactRepository(appDb, epwDb).deleteByDomain(approvedDomain);
+                await adminDbForRoles.sourceChannel.delete({ where: { id: fixture.id } });
+                await adminDbForRoles.sourcePolicy.delete({ where: { domain: sourceDomain } });
+              }
+            } finally {
+              await epwDb.$disconnect();
+              await adminDbForRoles.$executeRawUnsafe(`DROP ROLE IF EXISTS "${epwRole}"`);
+            }
+          }
+        } finally {
+          await adminDbForRoles.$disconnect();
+        }
       } finally {
         await writerDb.$disconnect();
         await appDb.$disconnect();

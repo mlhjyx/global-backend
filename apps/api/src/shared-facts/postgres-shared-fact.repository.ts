@@ -120,10 +120,10 @@ export class PostgresSharedFactRepository implements SharedFactRepository {
     return isGreenCompanyFactExpired(fact, nowMs) ? null : fact;
   }
 
-  async upsert(fact: GreenCompanyFact): Promise<void> {
+  async upsert(fact: GreenCompanyFact): Promise<boolean> {
     assertGreenCompanyFactClean(fact);
     const writer = this.requireWriter();
-    await writer.$executeRaw`
+    const written = await writer.$executeRaw`
       INSERT INTO platform_shared.company_fact (
         domain, schema_version, homepage_url, legal_name, country, trade_role,
         website_summary, role_emails, switchboard_phones, inquiry_form_url,
@@ -170,7 +170,10 @@ export class PostgresSharedFactRepository implements SharedFactRepository {
         expires_at = EXCLUDED.expires_at,
         ttl_days = EXCLUDED.ttl_days,
         updated_at = now()
+      WHERE (EXCLUDED.source_kind IN ('public_web', 'public_web_streaming'), EXCLUDED.observed_at)
+        > (company_fact.source_kind IN ('public_web', 'public_web_streaming'), company_fact.observed_at)
     `;
+    return written > 0;
   }
 
   async deleteByDomain(normalizedDomain: string): Promise<boolean> {

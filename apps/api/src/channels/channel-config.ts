@@ -4,12 +4,13 @@
  */
 
 export interface CrawlListConfig {
-  /** 列表页 URL；含 `{page}` 占位符或配合 pageParam 翻页。 */
+  /** 列表页 URL；含 `{page}` 占位符或配合 pageParam 翻页（singlePage=true 时单页直抓）。 */
   url: string;
   maxPages: number;
   itemSelector: string;
   itemUrlSelector?: string;
   pageParam?: string;
+  singlePage?: boolean;
 }
 
 export interface CrawlDetailConfig {
@@ -96,6 +97,27 @@ function selector(value: unknown, field: string): string {
   return boundedString(value, field, 200);
 }
 
+function parseCrawlPagination(
+  listRecord: Record<string, unknown>,
+  url: string,
+  maxPages: number,
+): { pageParam?: string; singlePage?: boolean } {
+  const singlePage = listRecord.singlePage === true;
+  if (singlePage) {
+    if (maxPages !== 1) invalid('config.list.singlePage=true requires maxPages=1');
+    if (listRecord.pageParam !== undefined) {
+      return { singlePage: true, pageParam: boundedString(listRecord.pageParam, 'config.list.pageParam', 32) };
+    }
+    return { singlePage: true };
+  }
+  if (!url.includes('{page}') && typeof listRecord.pageParam !== 'string') {
+    invalid('config.list.url needs a {page} placeholder or a pageParam');
+  }
+  return listRecord.pageParam === undefined
+    ? {}
+    : { pageParam: boundedString(listRecord.pageParam, 'config.list.pageParam', 32) };
+}
+
 export function parseChannelConfig(mode: string, raw: unknown): ChannelConfig {
   if (!(CHANNEL_MODES as readonly string[]).includes(mode)) invalid(`mode must be one of ${CHANNEL_MODES.join(', ')}`);
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) invalid('config must be an object');
@@ -120,9 +142,7 @@ export function parseChannelConfig(mode: string, raw: unknown): ChannelConfig {
     invalid('config.list.maxPages must be an integer in 1–50');
   }
   const url = httpsUrl(listRecord.url, 'config.list.url');
-  if (!url.includes('{page}') && typeof listRecord.pageParam !== 'string') {
-    invalid('config.list.url needs a {page} placeholder or a pageParam');
-  }
+  const pagination = parseCrawlPagination(listRecord, url, maxPages);
   const parsedList: CrawlListConfig = {
     url,
     maxPages,
@@ -130,9 +150,7 @@ export function parseChannelConfig(mode: string, raw: unknown): ChannelConfig {
     ...(listRecord.itemUrlSelector === undefined
       ? {}
       : { itemUrlSelector: selector(listRecord.itemUrlSelector, 'config.list.itemUrlSelector') }),
-    ...(listRecord.pageParam === undefined
-      ? {}
-      : { pageParam: boundedString(listRecord.pageParam, 'config.list.pageParam', 32) }),
+    ...pagination,
   };
 
   const detail = record.detail;
@@ -209,8 +227,11 @@ export function parseChannelConfig(mode: string, raw: unknown): ChannelConfig {
   return { mode: 'crawl', list: parsedList, detail: parsedDetail };
 }
 
-/** 列表页 URL 序列（最多 maxPages；受每日页数配额截断）。 */
+/** 列表页 URL 序列（最多 maxPages；受每日页数配额截断；singlePage 或无翻页参数时返回单页）。 */
 export function crawlPageUrls(config: ChannelCrawlConfig, pageCap: number): string[] {
+  if (config.list.singlePage || (!config.list.url.includes('{page}') && !config.list.pageParam)) {
+    return pageCap > 0 && config.list.maxPages > 0 ? [config.list.url] : [];
+  }
   const pages = Math.max(0, Math.min(config.list.maxPages, pageCap));
   const urls: string[] = [];
   for (let page = 1; page <= pages; page += 1) {

@@ -747,7 +747,7 @@
         "note": "Reads only platform-reviewed records from ENABLED channels; downstream evidence retains public/licensed provenance without copying personal contact fields."
       },
       "personal_data_class": "COMPANY_ONLY",
-      "default_enablement": "DISABLED",
+      "default_enablement": "ENABLED",
       "call_gates": [
         "data_provider_status",
         "provider_env_switch"

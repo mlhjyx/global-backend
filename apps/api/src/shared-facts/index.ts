@@ -40,6 +40,7 @@ export {
   DomainCooldownService,
   InMemoryDomainCooldownBackend,
   MIN_COOLDOWN_PEPPER_LENGTH,
+  normalizeCooldownCategory,
   RedisDomainCooldownBackend,
   type CooldownWindowSnapshot,
   type DomainCooldownBackend,

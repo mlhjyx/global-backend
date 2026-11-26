@@ -273,6 +273,10 @@
     },
     {
       "from": "channels",
+      "to": "shared-facts"
+    },
+    {
+      "from": "channels",
       "to": "temporal"
     },
     {

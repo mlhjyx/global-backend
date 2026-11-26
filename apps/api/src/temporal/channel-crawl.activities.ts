@@ -9,12 +9,14 @@ import {
   CHANNEL_RUN_MAX_PAGES,
   parseChannelConfig,
 } from "../channels/channel-config";
+import { deriveAllowedHosts, parseChannelManifest } from "../channels/connector/channel-manifest";
+import { manifestToCrawlConfig } from "../channels/html-manifest-adapter";
 import {
   crawlChannel,
   type CrawledRecord,
   type CrawlPageFetcher,
 } from "../channels/channel-crawler";
-import { recordChannelRunInTransaction, type RecordChannelRunInput } from "../channels/channel-run-recorder";
+import type { RecordChannelRunInput } from "../channels/channel-run-recorder";
 import {
   PlatformCrawlGrantClient,
   type PlatformCrawlGrantClientError,
@@ -158,10 +160,22 @@ export function createChannelCrawlActivities(deps: {
         throw nonRetryable("CHANNEL_NOT_APPROVED");
       }
       let config;
-      try {
-        config = parseChannelConfig("crawl", channel.config);
-      } catch {
-        throw nonRetryable("CHANNEL_CONFIG_INVALID");
+      let allowedHosts: readonly string[] | undefined;
+      if (channel.manifest !== null && channel.manifest !== undefined) {
+        if (channel.probeRequired === true) throw nonRetryable("CHANNEL_PROBE_REQUIRED");
+        try {
+          const manifest = parseChannelManifest(channel.manifest);
+          config = manifestToCrawlConfig(manifest);
+          allowedHosts = deriveAllowedHosts(manifest);
+        } catch {
+          throw nonRetryable("CHANNEL_MANIFEST_INVALID");
+        }
+      } else {
+        try {
+          config = parseChannelConfig("crawl", channel.config);
+        } catch {
+          throw nonRetryable("CHANNEL_CONFIG_INVALID");
+        }
       }
       if (config.mode !== "crawl") {
         throw nonRetryable("CHANNEL_NOT_CRAWL");
@@ -246,7 +260,7 @@ export function createChannelCrawlActivities(deps: {
           await persistProgress();
         }
       };
-      const result = await crawlChannel(config, fetchPage, { pageCap });
+      const result = await crawlChannel(config, fetchPage, { pageCap, allowedHosts });
       // 记录物化在活动内完成（记录不进 Temporal 历史）。物化失败按不可重试失败：
       // 活动重试会因围栏拒绝重发已 ACK 的 URL 而拿到空页，重试只会把「已抓未写」伪装成「无记录」。
       let recordsMaterialized = 0;

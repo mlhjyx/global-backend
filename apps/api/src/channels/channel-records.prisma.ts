@@ -42,7 +42,7 @@ export function createPrismaChannelRecordWriter(
           firstSeenAt: seenAt,
           lastSeenAt: seenAt,
           // CH-7 观察名单：新观测一律 PENDING，人工抽检后才改 APPROVED/REJECTED；
-          // update 分支刻意不碰 review_status（重复观测不覆盖人工结论）。
+          // 数据库按内容哈希保留同版本审批，版本变化时将 APPROVED 恢复为 PENDING。
           reviewStatus: 'PENDING',
         },
         update: {

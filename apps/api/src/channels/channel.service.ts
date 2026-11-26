@@ -39,14 +39,16 @@ import {
 import type { PrismaClient } from '@prisma/client';
 import { Inject, Optional as OptionalDep } from '@nestjs/common';
 import { EXECUTION_BUDGET_PLATFORM_WRITER_DATABASE } from '../execution-budget/execution-budget-platform-writer.database';
-import { requireChannelPlatformWriter } from './channel-platform-writer';
+import { projectApprovedChannelGreenFacts, requireChannelPlatformWriter } from './channel-platform-writer';
 import {
   CHANNEL_MANIFEST_VERSION,
   ChannelManifestError,
-  collectAuthRefs,
-  manifestSha256,
   parseChannelManifest,
 } from './connector/channel-manifest';
+import {
+  buildManifestColumns,
+  type ManifestColumnsResult,
+} from './html-manifest-adapter';
 import { CHANNEL_SECRET_RESOLVER, type ChannelSecretResolver } from './connector/secret-resolver';
 import { describeAuthSecrets } from './channel-probe.service';
 import {
@@ -246,24 +248,10 @@ export class ChannelService {
     return channelView(row);
   }
 
-  /** manifest → 渠道列（校验→sha256→治理镜像→probe_required=true）。 */
-  private manifestColumns(rawManifest: unknown): {
-    manifest: Record<string, unknown>;
-    document: import('@global/contracts').ChannelManifestDocument;
-    manifestSha256: string;
-    baseUrl: string;
-    authRef: unknown;
-    rateLimit: unknown;
-    quotaPolicy: unknown;
-    pagination: unknown;
-    fieldMapping: unknown;
-    governance: { license?: string; tosUrl?: string; robotsPolicy?: string };
-    displayName: string;
-    category: string;
-  } {
-    let manifest;
+  /** JSON manifest 转为 API 渠道，HTML manifest 转为抓取渠道。 */
+  private manifestColumns(rawManifest: unknown): ManifestColumnsResult {
     try {
-      manifest = parseChannelManifest(rawManifest);
+      return buildManifestColumns(parseChannelManifest(rawManifest));
     } catch (error) {
       if (error instanceof ChannelManifestError) {
         throw new BadRequestException({
@@ -272,34 +260,21 @@ export class ChannelService {
       }
       throw error;
     }
-    if (manifest.transport.responseType !== 'json') {
-      throw new ConflictException({
-        error: {
-          code: 'CHANNEL_MANIFEST_HTML_UNSUPPORTED',
-          message: 'html manifests are accepted by the schema but not executable in this wave; keep using crawl configs',
-        },
-      });
+  }
+
+  private resolvePatchConfig(
+    manifestColumns: ManifestColumnsResult | null,
+    mode: string,
+    patch: Record<string, unknown>,
+    current: ChannelRow,
+  ): unknown {
+    if (manifestColumns) return manifestColumns.config;
+    if (patch.config === undefined && mode === current.mode) return current.config;
+    try {
+      return parseChannelConfig(mode, patch.config ?? current.config);
+    } catch (error) {
+      badConfig(error);
     }
-    const refs = collectAuthRefs(manifest.auth);
-    return {
-      manifest: manifest as unknown as Record<string, unknown>,
-      document: manifest,
-      manifestSha256: manifestSha256(manifest),
-      baseUrl: manifest.transport.baseUrl,
-      authRef: refs.length > 0 ? { refs } : null,
-      rateLimit: manifest.rateLimit ?? null,
-      quotaPolicy:
-        manifest.rateLimit?.dailyRequests === undefined
-          ? null
-          : { dailyRequests: manifest.rateLimit.dailyRequests },
-      pagination: manifest.pagination ?? null,
-      fieldMapping: manifest.fieldMapping ?? null,
-      governance: {
-        ...(manifest.governance ? { license: manifest.governance.license, tosUrl: manifest.governance.tosUrl, robotsPolicy: manifest.governance.robotsPolicy } : {}),
-      },
-      displayName: manifest.meta.name,
-      category: manifest.meta.category,
-    };
   }
 
   private async createChannelFromManifest(
@@ -315,9 +290,9 @@ export class ChannelService {
       tx.sourceChannel.create({
         data: {
           name,
-          mode: 'api',
+          mode: columns.mode,
           category: columns.category,
-          config: { adapter: 'channel-manifest/v1' } as never,
+          config: columns.config as unknown as object,
           status: 'DISABLED',
           manifest: columns.manifest as never,
           manifestSha256: columns.manifestSha256,
@@ -329,7 +304,7 @@ export class ChannelService {
           quotaPolicy: columns.quotaPolicy as never,
           pagination: columns.pagination as never,
           fieldMapping: columns.fieldMapping as never,
-          probeRequired: true,
+          probeRequired: columns.probeRequired,
           ...(columns.governance.license ? { license: columns.governance.license } : {}),
           ...(columns.governance.tosUrl ? { tosUrl: columns.governance.tosUrl } : {}),
           ...(columns.governance.robotsPolicy ? { robotsPolicy: columns.governance.robotsPolicy } : {}),
@@ -342,7 +317,7 @@ export class ChannelService {
     return {
       ...created,
       sourcePolicyDrafts: deriveSourcePolicyDrafts(
-        { id: (row as { id: string }).id, mode: 'api', category: columns.category },
+        { id: (row as { id: string }).id, mode: columns.mode, category: columns.category },
         columns.document,
       ),
     };
@@ -355,15 +330,8 @@ export class ChannelService {
 
       const manifestColumns =
         patch.manifest !== undefined ? this.manifestColumns(patch.manifest) : null;
-      const mode = manifestColumns ? 'api' : typeof patch.mode === 'string' ? patch.mode : current.mode;
-      let config: unknown = current.config;
-      if (patch.config !== undefined || mode !== current.mode) {
-        try {
-          config = parseChannelConfig(mode, patch.config ?? current.config);
-        } catch (error) {
-          badConfig(error);
-        }
-      }
+      const mode = manifestColumns ? manifestColumns.mode : typeof patch.mode === 'string' ? patch.mode : current.mode;
+      const config = this.resolvePatchConfig(manifestColumns, mode, patch, current);
       const status = typeof patch.status === 'string' ? patch.status : current.status;
       if (!(CHANNEL_STATUSES as readonly string[]).includes(status)) {
         throw new BadRequestException({ error: { code: 'VALIDATION_ERROR', message: `status must be one of ${CHANNEL_STATUSES.join(', ')}` } });
@@ -383,7 +351,7 @@ export class ChannelService {
         throw new BadRequestException({ error: { code: 'VALIDATION_ERROR', message: 'robotsPolicy must be A, B or C' } });
       }
       const hasManifest = manifestColumns !== null || current.manifest !== null && current.manifest !== undefined;
-      const probeRequiredAfter = manifestColumns !== null ? true : (current.probeRequired ?? false);
+      const probeRequiredAfter = manifestColumns !== null ? manifestColumns.probeRequired : (current.probeRequired ?? false);
       if (status === 'ENABLED') {
         // 治理硬闸门：启用前必须登记许可、条款与 robots 结论，且不是「C 不做」。
         if (!license || !tosUrl || !robotsPolicy || robotsPolicy === 'C') {
@@ -404,16 +372,18 @@ export class ChannelService {
         }
         // 保存即测试闸门：manifest 渠道必须先 probe 通过（legacy crawl 沿用既有流程，不在此门内）。
         // 同一请求里换 manifest 时不算「请求启用」——savedStatus 会把渠道落回 DISABLED 等 probe。
-        if (mode === 'api' && hasManifest && probeRequiredAfter && manifestColumns === null) {
+        if (hasManifest && probeRequiredAfter && manifestColumns === null) {
           throw new ConflictException({
             error: {
               code: 'CHANNEL_PROBE_REQUIRED',
-              message: 'manifest channel must pass POST /source-channels/:id/test before it can be enabled',
+              message: mode === 'crawl'
+                ? 'HTML manifest requires a verified crawl before the channel can be enabled'
+                : 'manifest channel must pass POST /source-channels/:id/test before it can be enabled',
             },
           });
         }
         // CH-8 条款闸门：allowedHosts 逐域必须有已复核的 source_policy（官方开放数据域豁免）。
-        if (manifestColumns === null && mode === 'api' && hasManifest) {
+        if (manifestColumns === null && hasManifest) {
           const violations = await this.enablePolicyViolations(tx, current);
           if (violations.length > 0) {
             throw new ConflictException({
@@ -428,8 +398,7 @@ export class ChannelService {
         }
       }
 
-      // 已启用渠道换了 manifest：新配置未 probe，保存后回到 DISABLED（章节 §6.3.2：
-      // ENABLED ⇒ probe_required=false；不允许带着未测配置继续跑）。
+      // 已启用渠道换了 manifest：新配置未 probe/preview，保存后回到 DISABLED（章节 §6.3.2）。
       const savedStatus = manifestColumns !== null && status === 'ENABLED' ? 'DISABLED' : status;
       const row = await tx.sourceChannel.update({
         where: { id: channelId },
@@ -457,7 +426,7 @@ export class ChannelService {
                 quotaPolicy: manifestColumns.quotaPolicy as never,
                 pagination: manifestColumns.pagination as never,
                 fieldMapping: manifestColumns.fieldMapping as never,
-                probeRequired: true,
+                probeRequired: manifestColumns.probeRequired,
               }
             : {}),
           ...(savedStatus === 'DISABLED' ? { disabledReason: 'OPERATOR' } : {}),
@@ -487,9 +456,9 @@ export class ChannelService {
       if (manifestColumns) {
         return {
           ...view,
-          probeUrl,
+          ...(manifestColumns.mode === 'api' ? { probeUrl } : {}),
           sourcePolicyDrafts: deriveSourcePolicyDrafts(
-            { id: channelId, mode: 'api', category: manifestColumns.category },
+            { id: channelId, mode: manifestColumns.mode, category: manifestColumns.category },
             manifestColumns.document,
           ),
         };
@@ -938,7 +907,8 @@ export class ChannelService {
       });
     }
     const verdict = input.verdict;
-    return (await requireChannelPlatformWriter(this.platformWriter)).$transaction(async (tx) => {
+    const writer = await requireChannelPlatformWriter(this.platformWriter);
+    const result = await writer.$transaction(async (tx) => {
       const channel = await tx.sourceChannel.findUnique({
         where: { id: channelId },
         select: { id: true, status: true },
@@ -985,6 +955,10 @@ export class ChannelService {
       }
       return { channelId, reviewed: updated.count, verdict, counts, autoDisabled };
     });
+    if (verdict === 'APPROVED' && !result.autoDisabled) {
+      await projectApprovedChannelGreenFacts({ platformWriter: writer, channelId, recordIds: ids as string[] });
+    }
+    return result;
   }
 
   private async channelRecordReviewCounts(
