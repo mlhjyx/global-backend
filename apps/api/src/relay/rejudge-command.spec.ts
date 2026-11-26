@@ -176,7 +176,7 @@ describe('LeadRejudgeRequested relay command', () => {
     await relay.routeEvent(validEv);
     expect(start).toHaveBeenCalledWith(REJUDGE_WORKFLOW, {
       taskQueue: UNDERSTANDING_TASK_QUEUE,
-      workflowId: `rejudge-${REJUDGE_ID}`,
+      workflowId: `ws:${WORKSPACE_ID}:rejudge:${REJUDGE_ID}`,
       workflowIdReusePolicy: WorkflowIdReusePolicy.REJECT_DUPLICATE,
       workflowExecutionTimeout: REJUDGE_EXECUTION_TIMEOUT,
       args: [

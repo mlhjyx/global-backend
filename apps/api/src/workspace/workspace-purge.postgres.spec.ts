@@ -561,7 +561,7 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
         campaignPlanJobIds: ['50000000-0000-4000-8000-000000000005'],
       });
       expect(began.status).toBe('PENDING');
-      expect(startedWorkflows[0]?.workflowId).toBe(`workspace-purge-${wsA}`);
+      expect(startedWorkflows[0]?.workflowId).toBe(`ws:${wsA}:workspace-purge:${wsA}`);
 
       const cancelledIds: string[] = [];
       const erasedPersonal: unknown[] = [];

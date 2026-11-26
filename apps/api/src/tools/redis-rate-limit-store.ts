@@ -29,6 +29,31 @@ const MAX_ACQUIRE_WAIT_MS = 1_000;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 export const DEFAULT_RATE_LIMIT_LEASE_MS = 60_000;
 export const DEFAULT_MAX_DOMAIN_DELAY_WAIT_MS = 15_000;
+/** Per-tenant concurrency/RPS ceiling share of the global tool bucket (<= 40%, min 1 slot). */
+export const DEFAULT_TENANT_TOOL_SHARE_RATIO = 0.4;
+const VALID_TENANT_WORKSPACE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u;
+
+export function tenantToolLimitNamespace(workspaceId: string): string {
+  const normalized = workspaceId.trim();
+  if (!VALID_TENANT_WORKSPACE_ID.test(normalized) || normalized === 'platform') {
+    throw new TypeError('invalid rate-limit workspaceId');
+  }
+  return `ws:${normalized}:tool-limit`;
+}
+
+export function computeTenantToolShare(
+  spec: RateLimitSpec,
+  shareRatio = DEFAULT_TENANT_TOOL_SHARE_RATIO,
+): RateLimitSpec {
+  const ratio =
+    Number.isFinite(shareRatio) && shareRatio > 0 && shareRatio <= 1
+      ? shareRatio
+      : DEFAULT_TENANT_TOOL_SHARE_RATIO;
+  const concurrency = Math.max(1, Math.floor(spec.concurrency * ratio));
+  const scaledRps = spec.rps * ratio;
+  const rps = spec.rps >= 1 ? Math.max(1, Number(scaledRps.toFixed(3))) : Math.max(0.1, Number(scaledRps.toFixed(3)));
+  return { rps: Math.min(spec.rps, rps), concurrency: Math.min(spec.concurrency, concurrency) };
+}
 
 function isLoopbackRedisHost(hostname: string): boolean {
   return (
@@ -186,6 +211,7 @@ function normalizeTimerDelay(value: unknown): number {
 export class RedisRateLimitStore implements RateLimitStore {
   private readonly specs = new Map<string, RateLimitSpec>();
   private readonly namespace: string;
+  private readonly tenantShareRatio: number;
   private readonly leaseMs: number;
   private readonly acquireTimeoutMs: number;
   private readonly maxDomainDelayWaitMs: number;
@@ -196,6 +222,7 @@ export class RedisRateLimitStore implements RateLimitStore {
     private readonly client: RedisScriptClient,
     options?: {
       namespace?: string;
+      tenantShareRatio?: number;
       leaseMs?: number;
       acquireTimeoutMs?: number;
       maxDomainDelayWaitMs?: number;
@@ -204,6 +231,15 @@ export class RedisRateLimitStore implements RateLimitStore {
     },
   ) {
     this.namespace = options?.namespace ?? 'global:tool-limit';
+    const rawRatio =
+      options?.tenantShareRatio ??
+      (process.env.TOOL_RATE_LIMIT_TENANT_SHARE_RATIO
+        ? Number(process.env.TOOL_RATE_LIMIT_TENANT_SHARE_RATIO)
+        : DEFAULT_TENANT_TOOL_SHARE_RATIO);
+    this.tenantShareRatio =
+      Number.isFinite(rawRatio) && rawRatio > 0 && rawRatio <= 1
+        ? rawRatio
+        : DEFAULT_TENANT_TOOL_SHARE_RATIO;
     this.leaseMs = options?.leaseMs ?? DEFAULT_RATE_LIMIT_LEASE_MS;
     this.acquireTimeoutMs = options?.acquireTimeoutMs ?? 30_000;
     this.maxDomainDelayWaitMs =
@@ -219,11 +255,13 @@ export class RedisRateLimitStore implements RateLimitStore {
     this.specs.set(toolId, { rps, concurrency });
   }
 
-  async acquire(toolId: string, _nowMs?: number): Promise<() => Promise<void>> {
-    const spec = this.specs.get(toolId);
-    if (!spec) throw new RateLimitStoreUnavailableError(`rate-limit configuration missing for ${toolId}`);
-    const started = this.now();
-    const tag = `{${this.namespace}:${toolId}}`;
+  private async acquireBucket(
+    bucketNamespace: string,
+    toolId: string,
+    spec: RateLimitSpec,
+    started: number,
+  ): Promise<() => Promise<void>> {
+    const tag = `{${bucketNamespace}:${toolId}}`;
     const bucketKey = `${tag}:bucket`;
     const leasesKey = `${tag}:leases`;
     while (this.now() - started <= this.acquireTimeoutMs) {
@@ -287,6 +325,49 @@ export class RedisRateLimitStore implements RateLimitStore {
       await this.sleep(Math.max(1, waitMs));
     }
     throw new RateLimitAcquireTimeoutError(toolId);
+  }
+
+  async acquire(toolId: string, _nowMs?: number, workspaceId?: string): Promise<() => Promise<void>> {
+    const spec = this.specs.get(toolId);
+    if (!spec) throw new RateLimitStoreUnavailableError(`rate-limit configuration missing for ${toolId}`);
+    const started = this.now();
+    const tenantNs =
+      workspaceId && workspaceId.trim() !== '' && workspaceId.trim() !== 'platform'
+        ? tenantToolLimitNamespace(workspaceId)
+        : null;
+    if (!tenantNs) {
+      return this.acquireBucket(this.namespace, toolId, spec, started);
+    }
+    // Two-tier anti-noisy-neighbor acquisition:
+    // 1) Acquire per-tenant share slot FIRST (`ws:<workspaceId>:tool-limit:<toolId>`, <= 40%, min 1)
+    //    so a busy tenant waits on its own cap without occupying global slots.
+    // 2) Acquire global tool slot SECOND (`global:tool-limit:<toolId>`); release tenant slot on failure.
+    const tenantSpec = computeTenantToolShare(spec, this.tenantShareRatio);
+    const releaseTenant = await this.acquireBucket(tenantNs, toolId, tenantSpec, started);
+    let releaseGlobal: () => Promise<void>;
+    try {
+      releaseGlobal = await this.acquireBucket(this.namespace, toolId, spec, started);
+    } catch (error) {
+      await releaseTenant().catch(() => undefined);
+      throw error;
+    }
+    let released = false;
+    return async () => {
+      if (released) return;
+      released = true;
+      let firstError: unknown;
+      try {
+        await releaseGlobal();
+      } catch (error) {
+        firstError = error;
+      }
+      try {
+        await releaseTenant();
+      } catch (error) {
+        if (firstError === undefined) firstError = error;
+      }
+      if (firstError !== undefined) throw firstError;
+    };
   }
 
   async respectDomainDelay(domain: string, delayMs: number): Promise<void> {

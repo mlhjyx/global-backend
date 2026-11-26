@@ -12,6 +12,10 @@ import {
   resolveModelGatewayBaseUrl,
   validateModelGatewayEndpoint,
 } from '../adapters/model-gateway-endpoint';
+import {
+  MODEL_GATEWAY_TENANT_KEYS_ENV,
+  parseTenantGatewayKeyMap,
+} from './tenant-gateway-routing';
 
 export interface GatewayEvaluationConfig {
   /**
@@ -44,10 +48,17 @@ export function buildGatewayProvider(
     env,
   });
   if (!validated.ok) return null;
+  let tenantApiKeys: ReadonlyMap<string, string>;
+  try {
+    tenantApiKeys = parseTenantGatewayKeyMap(env[MODEL_GATEWAY_TENANT_KEYS_ENV]);
+  } catch {
+    return null;
+  }
   return new OpenAICompatibleProvider({
     id: 'gateway',
     baseUrl,
     apiKey,
+    tenantApiKeys,
     requestTimeoutMs,
     // deepseek-chat/reasoner 旧别名官方 2026-07-24 起彻底关停，默认必须用显式 V4 型号
     model: env.MODEL_DEFAULT_MODEL ?? 'deepseek-v4-flash',

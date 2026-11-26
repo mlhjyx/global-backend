@@ -19,6 +19,22 @@ import {
   decodeJsonBytes,
   readFetchResponseBodyBounded,
 } from "./bounded-fetch-response";
+import {
+  positiveIntEnv,
+  TenantConcurrencySemaphore,
+} from "../runtime/tenant-concurrency-semaphore";
+
+let crawl4aiSemaphore: TenantConcurrencySemaphore | undefined;
+
+export function getCrawl4aiTenantSemaphore(): TenantConcurrencySemaphore {
+  crawl4aiSemaphore ??= new TenantConcurrencySemaphore({
+    name: "crawl4ai",
+    perTenantLimit: positiveIntEnv(process.env, "CRAWL4AI_MAX_CONCURRENT_PER_TENANT", 3, 32),
+    globalLimit: positiveIntEnv(process.env, "CRAWL4AI_MAX_CONCURRENT_GLOBAL", 12, 128),
+    acquireTimeoutMs: CRAWL4AI_REQUEST_TIMEOUT_MS,
+  });
+  return crawl4aiSemaphore;
+}
 
 export const MAX_CRAWL4AI_RENDER_ARTIFACT_BYTES =
   PLATFORM_CRAWL4AI_ARTIFACT_MAX_BYTES;
@@ -128,6 +144,8 @@ export async function crawlUrl(
   resolveUrl: PublicUrlResolver = resolvePublicHttpUrl,
   beforePhysicalWire?: () => Promise<void>,
   dispatchPhysicalWire?: DispatchPhysicalWire,
+  workspaceId?: string,
+  semaphore: TenantConcurrencySemaphore = getCrawl4aiTenantSemaphore(),
 ): Promise<CrawlResult> {
   await authorizeExternalAction?.();
   const target = await resolveUrl(url);
@@ -156,9 +174,13 @@ export async function crawlUrl(
     );
     return { res, responseBytes };
   };
-  const { res, responseBytes } = dispatchPhysicalWire
-    ? await dispatchPhysicalWire(executePhysicalWire)
-    : await executePhysicalWire();
+  const { res, responseBytes } = await semaphore.withTenantSlot(
+    workspaceId,
+    () =>
+      dispatchPhysicalWire
+        ? dispatchPhysicalWire(executePhysicalWire)
+        : executePhysicalWire(),
+  );
   if (!res.ok) throw new Error(`crawler ${res.status}`);
   const json = decodeJsonBytes<{ markdown?: string; success?: boolean }>(
     responseBytes,
@@ -184,6 +206,8 @@ export async function crawlHtml(
   resolveUrl: PublicUrlResolver = resolvePublicHttpUrl,
   beforePhysicalWire?: () => Promise<void>,
   dispatchPhysicalWire?: DispatchPhysicalWire,
+  workspaceId?: string,
+  semaphore: TenantConcurrencySemaphore = getCrawl4aiTenantSemaphore(),
 ): Promise<CrawlHtmlResult> {
   await authorizeExternalAction?.();
   const target = await resolveUrl(url);
@@ -220,9 +244,13 @@ export async function crawlHtml(
     );
     return { res, responseBytes };
   };
-  const { res, responseBytes } = dispatchPhysicalWire
-    ? await dispatchPhysicalWire(executePhysicalWire)
-    : await executePhysicalWire();
+  const { res, responseBytes } = await semaphore.withTenantSlot(
+    workspaceId,
+    () =>
+      dispatchPhysicalWire
+        ? dispatchPhysicalWire(executePhysicalWire)
+        : executePhysicalWire(),
+  );
   if (!res.ok) throw new Error(`crawler ${res.status}`);
   const data = decodeJsonBytes<{
     results?: { html?: string; response_headers?: Record<string, string> }[];

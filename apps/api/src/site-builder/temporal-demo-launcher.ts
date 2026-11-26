@@ -5,7 +5,12 @@ import {
   WorkflowIdReusePolicy,
 } from "@temporalio/client";
 import { TemporalClient } from "../temporal/temporal.client";
-import { UNDERSTANDING_TASK_QUEUE } from "../temporal/understanding.constants";
+import {
+  formatLegacyWorkflowId,
+  formatTenantWorkflowId,
+  isTemporalNotFoundError,
+} from "../temporal/tenant-workflow-id";
+import { resolveCustomerTaskQueue } from "../temporal/tenant-task-queues";
 import {
   DemoV0Launcher,
   DemoV0LaunchInput,
@@ -35,7 +40,7 @@ export class TemporalDemoV0Launcher implements DemoV0Launcher {
       const handle = await this.temporal.client.workflow.start(
         "demoV0Workflow",
         {
-          taskQueue: UNDERSTANDING_TASK_QUEUE,
+          taskQueue: resolveCustomerTaskQueue("interactive"),
           workflowId,
           args: [input],
           // Closed duplicate = the same build already ran; running duplicate = reuse its handle.
@@ -55,15 +60,26 @@ export class TemporalDemoV0Launcher implements DemoV0Launcher {
   }
 
   async recoverDemoV0(input: DemoV0LaunchInput): Promise<DemoV0LaunchResult> {
-    const description = await this.temporal.client.workflow
-      .getHandle(this.workflowId(input))
-      .describe();
-    const firstExecutionRunId =
-      description.raw.workflowExecutionInfo?.firstRunId || description.runId;
-    return launchResult(firstExecutionRunId);
+    try {
+      const description = await this.temporal.client.workflow
+        .getHandle(this.workflowId(input))
+        .describe();
+      const firstExecutionRunId =
+        description.raw.workflowExecutionInfo?.firstRunId || description.runId;
+      return launchResult(firstExecutionRunId);
+    } catch (error) {
+      if (!isTemporalNotFoundError(error)) throw error;
+      const legacyDescription = await this.temporal.client.workflow
+        .getHandle(formatLegacyWorkflowId("site-demo", input.buildRunId))
+        .describe();
+      const firstExecutionRunId =
+        legacyDescription.raw.workflowExecutionInfo?.firstRunId ||
+        legacyDescription.runId;
+      return launchResult(firstExecutionRunId);
+    }
   }
 
   private workflowId(input: DemoV0LaunchInput): string {
-    return `site-demo-${input.buildRunId}`;
+    return formatTenantWorkflowId(input.workspaceId, "site-demo", input.buildRunId);
   }
 }

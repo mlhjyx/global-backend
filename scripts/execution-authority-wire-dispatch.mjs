@@ -48,6 +48,7 @@ export const EXPECTED_WIRE_ADAPTER_IMPORTS = Object.freeze([
   'apps/api/src/adapters/guarded-http.ts',
   'apps/api/src/adapters/url-guard.ts',
   'apps/api/src/platform-authority/platform-execution-contract.ts',
+  'apps/api/src/runtime/tenant-concurrency-semaphore.ts',
 ]);
 
 const NETWORK_GLOBALS = new Set(['fetch', 'globalThis', 'global', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'require', 'eval', 'Function']);

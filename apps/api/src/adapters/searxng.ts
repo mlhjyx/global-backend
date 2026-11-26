@@ -46,12 +46,34 @@ export interface SearxResponse {
   numberOfResults: number;
 }
 
+import {
+  positiveIntEnv,
+  TenantConcurrencySemaphore,
+} from '../runtime/tenant-concurrency-semaphore';
+
+let searxngSemaphore: TenantConcurrencySemaphore | undefined;
+
+export function getSearxngTenantSemaphore(): TenantConcurrencySemaphore {
+  searxngSemaphore ??= new TenantConcurrencySemaphore({
+    name: 'searxng',
+    perTenantLimit: positiveIntEnv(process.env, 'SEARXNG_MAX_CONCURRENT_PER_TENANT', 4, 32),
+    globalLimit: positiveIntEnv(process.env, 'SEARXNG_MAX_CONCURRENT_GLOBAL', 16, 128),
+    acquireTimeoutMs: 30_000,
+  });
+  return searxngSemaphore;
+}
+
 function baseUrl(): string {
   return process.env.SEARXNG_URL ?? 'http://localhost:8081';
 }
 
 /** 一次 SearXNG JSON 搜索。失败抛错（由调用方决定容错）。 */
-export async function searxSearch(query: SearxQuery, timeoutMs = 30_000): Promise<SearxResponse> {
+export async function searxSearch(
+  query: SearxQuery,
+  timeoutMs = 30_000,
+  workspaceId?: string,
+  semaphore: TenantConcurrencySemaphore = getSearxngTenantSemaphore(),
+): Promise<SearxResponse> {
   const params = new URLSearchParams({ q: query.q, format: 'json' });
   if (query.categories?.length) params.set('categories', query.categories.join(','));
   if (query.engines?.length) params.set('engines', query.engines.join(','));
@@ -60,22 +82,24 @@ export async function searxSearch(query: SearxQuery, timeoutMs = 30_000): Promis
   if (query.pageno && query.pageno > 1) params.set('pageno', String(query.pageno));
   params.set('safesearch', String(query.safesearch ?? 0));
 
-  const res = await fetch(`${baseUrl()}/search?${params.toString()}`, {
-    signal: AbortSignal.timeout(timeoutMs),
-    headers: { Accept: 'application/json' },
+  return semaphore.withTenantSlot(workspaceId, async () => {
+    const res = await fetch(`${baseUrl()}/search?${params.toString()}`, {
+      signal: AbortSignal.timeout(timeoutMs),
+      headers: { Accept: 'application/json' },
+    });
+    if (!res.ok) {
+      throw new Error(`searxng ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    }
+    const json = (await res.json()) as Partial<SearxResponse> & {
+      results?: SearxResult[];
+    };
+    return {
+      results: json.results ?? [],
+      suggestions: json.suggestions ?? [],
+      infoboxes: json.infoboxes ?? [],
+      numberOfResults: json.numberOfResults ?? (json.results?.length ?? 0),
+    };
   });
-  if (!res.ok) {
-    throw new Error(`searxng ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  }
-  const json = (await res.json()) as Partial<SearxResponse> & {
-    results?: SearxResult[];
-  };
-  return {
-    results: json.results ?? [],
-    suggestions: json.suggestions ?? [],
-    infoboxes: json.infoboxes ?? [],
-    numberOfResults: json.numberOfResults ?? (json.results?.length ?? 0),
-  };
 }
 
 import {
@@ -91,13 +115,18 @@ import {
  * 首页触发 403/429/5xx 限流或封禁错误时显式抛出，便于上层冷却切换至 Serper/Exa；
  * 后续翻页失败保持返回已得结果的容错语义。
  */
-export async function searxSearchPaged(query: SearxQuery, pages = 1, timeoutMs = 30_000): Promise<SearxResult[]> {
+export async function searxSearchPaged(
+  query: SearxQuery,
+  pages = 1,
+  timeoutMs = 30_000,
+  workspaceId?: string,
+): Promise<SearxResult[]> {
   const out: SearxResult[] = [];
   const seen = new Set<string>();
   for (let p = 1; p <= pages; p++) {
     let resp: SearxResponse;
     try {
-      resp = await searxSearch({ ...query, pageno: p }, timeoutMs);
+      resp = await searxSearch({ ...query, pageno: p }, timeoutMs, workspaceId);
     } catch (error) {
       if (p === 1 && out.length === 0 && classifySearxngCooldownReason(error) !== null) {
         throw error;

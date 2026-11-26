@@ -182,7 +182,7 @@ export const searxngSearchTool: Tool<
       return { healthy: false };
     }
   },
-  execute: async (input) => {
+  execute: async (input, ctx) => {
     // 严格保持 searxng.search 为免费自托管工具，绝不在 costCents=0 合同下静默调用付费搜索 API；
     // 遇 403/429/5xx 时仅登记冷却状态并抛出错误，由调用方按需经 ToolBroker 切至已计费的 serper.search / exa.search。
     try {
@@ -195,6 +195,8 @@ export const searxngSearchTool: Tool<
           timeRange: input.timeRange,
         },
         input.pages ?? 1,
+        30_000,
+        ctx?.workspaceId,
       );
       return { data: { results: durableSearxResults(results) }, costCents: 0 };
     } catch (error) {
@@ -363,10 +365,12 @@ export const socialSearchTool: Tool<
       return { healthy: false };
     }
   },
-  execute: async (input) => {
+  execute: async (input, ctx) => {
     const results = await searxSearchPaged(
       { q: input.q, language: input.language },
       input.pages ?? 1,
+      30_000,
+      ctx?.workspaceId,
     );
     return { data: { results: personProfileSearxResults(results) }, costCents: 0 };
   },
@@ -585,8 +589,13 @@ export function createCrawl4aiFetchTool(
       // Exact provenance must never fall back to the renderer (or a cached redirect).
       if (exact) return { data: { url: input.url, text: "", contentHash: "" }, costCents: 0 };
       const invokeRender = () =>
-        dependencies.crawlUrl(input.url, () =>
-          assertToolExternalActionAuthorized(ctx),
+        dependencies.crawlUrl(
+          input.url,
+          () => assertToolExternalActionAuthorized(ctx),
+          undefined,
+          undefined,
+          undefined,
+          ctx.workspaceId,
         );
       let r: Awaited<ReturnType<typeof invokeRender>>;
       try {

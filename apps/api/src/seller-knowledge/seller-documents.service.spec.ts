@@ -201,7 +201,7 @@ describe('SellerDocumentsService', () => {
       ],
     });
     const rows = await service.search(CTX, COMPANY_ID, '轴承', 10);
-    expect(embeddings.embed).toHaveBeenCalledWith(['轴承']);
+    expect(embeddings.embed).toHaveBeenCalledWith(['轴承'], undefined, CTX.workspaceId);
     const setLocalSql = (tx.$executeRaw.mock.calls[0]?.[0] as { sql?: string } | undefined)?.sql ?? '';
     expect(setLocalSql).toContain('SET LOCAL hnsw.iterative_scan = relaxed_order');
     const searchSql = (tx.$queryRaw.mock.calls[0]?.[0] as { sql?: string } | undefined)?.sql ?? '';

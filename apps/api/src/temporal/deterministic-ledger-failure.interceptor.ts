@@ -14,6 +14,7 @@ import type {
 
 import { classifyDeterministicLedgerFailure } from './deterministic-ledger-failure';
 import { runCandidateOperation } from '../runtime/development-candidate';
+import { createTenantConcurrencyActivityInterceptor } from './tenant-task-queues';
 
 export class DeterministicLedgerFailureInterceptor implements ActivityInboundCallsInterceptor {
   async execute(
@@ -34,7 +35,10 @@ const factory: ActivityInterceptorsFactory = () => ({
   inbound: new DeterministicLedgerFailureInterceptor(),
 });
 
+const tenantConcurrencyFactory: ActivityInterceptorsFactory =
+  createTenantConcurrencyActivityInterceptor();
+
 /** 挂到 `Worker.create({ interceptors })` 的 activity 拦截器链。 */
 export const DETERMINISTIC_LEDGER_FAILURE_INTERCEPTORS: WorkerInterceptors = Object.freeze({
-  activity: [factory],
+  activity: [factory, tenantConcurrencyFactory],
 });

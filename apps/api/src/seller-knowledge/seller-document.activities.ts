@@ -211,6 +211,7 @@ export function createSellerDocumentActivities(deps: SellerDocumentActivityDeps)
 
   async function parseDocument(
     documentId: string,
+    workspaceId: string,
     row: ClaimedRow,
     content: Buffer,
     signal?: AbortSignal,
@@ -220,7 +221,12 @@ export function createSellerDocumentActivities(deps: SellerDocumentActivityDeps)
     }
     try {
       const filename = resolveDoclingFilename(documentId, row.filename, row.mime);
-      const converted = await deps.docling.convertToMarkdown(filename, content, signal);
+      const converted = await deps.docling.convertToMarkdown(
+        filename,
+        content,
+        signal,
+        workspaceId,
+      );
       return { ok: true, markdown: converted.markdown };
     } catch (error) {
       if (signal?.aborted) throw error;
@@ -233,6 +239,7 @@ export function createSellerDocumentActivities(deps: SellerDocumentActivityDeps)
 
   async function embedChunks(
     chunks: ReturnType<typeof chunkMarkdown>,
+    workspaceId: string,
     onBatch: (stage: string) => void,
     signal?: AbortSignal,
   ): Promise<{ ok: true; vectors: number[][] } | { ok: false; code: string; terminal: boolean }> {
@@ -246,6 +253,7 @@ export function createSellerDocumentActivities(deps: SellerDocumentActivityDeps)
         const embedded = await deps.embeddings.embed(
           batch.map((chunk) => chunk.text),
           signal,
+          workspaceId,
         );
         if (embedded.length !== batch.length) {
           throw new Error('embedding batch length mismatch');
@@ -312,7 +320,7 @@ export function createSellerDocumentActivities(deps: SellerDocumentActivityDeps)
         pulse('parse');
         await recordStage(input, leaseToken, 'parse');
         signal?.throwIfAborted();
-        const parsed = await parseDocument(input.documentId, row, content, signal);
+        const parsed = await parseDocument(input.documentId, input.workspaceId, row, content, signal);
         if (!parsed.ok) {
           const failed = await fail(input, leaseToken, attempt, parsed.code, {
             terminal: parsed.terminal,
@@ -337,7 +345,7 @@ export function createSellerDocumentActivities(deps: SellerDocumentActivityDeps)
 
         pulse('embed');
         await recordStage(input, leaseToken, 'embed');
-        const embedded = await embedChunks(chunks, pulse, signal);
+        const embedded = await embedChunks(chunks, input.workspaceId, pulse, signal);
         if (!embedded.ok) {
           const failed = await fail(input, leaseToken, attempt, embedded.code, {
             terminal: embedded.terminal,

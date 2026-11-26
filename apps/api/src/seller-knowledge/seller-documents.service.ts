@@ -432,7 +432,7 @@ export class SellerDocumentsService {
     const n = Math.min(Math.max(limit, 1), 50);
     let vector: number[];
     try {
-      const [embedded] = await this.embeddings.embed([trimmed]);
+      const [embedded] = await this.embeddings.embed([trimmed], undefined, ctx.workspaceId);
       if (!Array.isArray(embedded) || embedded.length === 0) {
         throw new Error('empty embedding');
       }

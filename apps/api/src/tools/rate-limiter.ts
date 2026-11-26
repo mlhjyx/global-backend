@@ -18,7 +18,7 @@ export interface RateLimitSpec {
 
 export interface RateLimitStore {
   configure(toolId: string, rps: number, concurrency: number): void | Promise<void>;
-  acquire(toolId: string, nowMs?: number): Promise<() => void | Promise<void>>;
+  acquire(toolId: string, nowMs?: number, workspaceId?: string): Promise<() => void | Promise<void>>;
   respectDomainDelay(domain: string, delayMs: number, nowMs?: number): Promise<void>;
 }
 
@@ -34,7 +34,7 @@ export class RateLimiter implements RateLimitStore {
   }
 
   /** 获取一个许可（受 rps + concurrency 限制）。返回释放函数。 */
-  async acquire(toolId: string, nowMs = Date.now()): Promise<() => void> {
+  async acquire(toolId: string, nowMs = Date.now(), _workspaceId?: string): Promise<() => void> {
     const b = this.buckets.get(toolId);
     if (!b) return () => {};
     // 简化的令牌补充（按经过时间）；nowMs 由调用方传入（避免 Date.now 在受限环境）

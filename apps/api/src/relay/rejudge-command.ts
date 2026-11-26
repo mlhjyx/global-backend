@@ -8,8 +8,9 @@ import { ICP_REJUDGE_MAX_COMPANIES_LIMIT } from "../execution-budget/icp-rejudge
 import {
   REJUDGE_EXECUTION_TIMEOUT,
   REJUDGE_WORKFLOW,
-  UNDERSTANDING_TASK_QUEUE,
 } from "../temporal/understanding.constants";
+import { formatTenantWorkflowId } from "../temporal/tenant-workflow-id";
+import { resolveCustomerTaskQueue } from "../temporal/tenant-task-queues";
 import { NonRetryableOutboxCommandError } from "./discovery-run-command";
 
 const UUID =
@@ -133,8 +134,8 @@ export async function dispatchRejudgeCommand(
   await startWorkflow(
     REJUDGE_WORKFLOW,
     {
-      taskQueue: UNDERSTANDING_TASK_QUEUE,
-      workflowId: `rejudge-${command.rejudgeId}`,
+      taskQueue: resolveCustomerTaskQueue("batch"),
+      workflowId: formatTenantWorkflowId(command.workspaceId, "rejudge", command.rejudgeId),
       workflowIdReusePolicy: WorkflowIdReusePolicy.REJECT_DUPLICATE,
       workflowExecutionTimeout: REJUDGE_EXECUTION_TIMEOUT,
       args: [command],

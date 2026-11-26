@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { TemporalClient } from '../temporal/temporal.client';
-import { UNDERSTANDING_TASK_QUEUE } from '../temporal/understanding.constants';
+import { formatTenantWorkflowId } from '../temporal/tenant-workflow-id';
+import { resolveCustomerTaskQueue } from '../temporal/tenant-task-queues';
 import type { SellerDocumentsIngestLauncher } from './seller-documents.service';
 
 /**
@@ -16,8 +17,8 @@ export class TemporalSellerDocumentsIngestLauncher implements SellerDocumentsIng
   async launchIngest(input: { workspaceId: string; companyId: string; documentId: string }): Promise<void> {
     try {
       await this.temporal.client.workflow.start('sellerDocumentIngestWorkflow', {
-        taskQueue: UNDERSTANDING_TASK_QUEUE,
-        workflowId: `seller-document-${input.documentId}`,
+        taskQueue: resolveCustomerTaskQueue('interactive'),
+        workflowId: formatTenantWorkflowId(input.workspaceId, 'seller-document', input.documentId),
         args: [input],
       });
     } catch (error) {

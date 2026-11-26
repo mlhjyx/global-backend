@@ -139,12 +139,18 @@ import { boundedModelUsage } from "./model-usage-boundary";
 import { assertPlatformEgressFenceAvailable } from "../platform-authority/platform-egress-fence";
 import type { LegacyExecutionBudgetMode } from "../execution-budget/legacy-execution-budget-mode";
 import {
+  assertTenantDailyCostAllowed,
   buildCachedStructuredOperationKey,
   executeWorkspaceBypassModelCall,
   isWorkspaceModelBudgetBypass,
   recordCachedStructuredTrace,
+  recordTenantDailyCostObserved,
   resolveModelTaskTimeoutMs,
 } from "./router-model-gateway-bypass";
+import {
+  TENANT_DAILY_COST_BREAKER,
+  type TenantDailyCostBreaker,
+} from "./tenant-daily-cost-breaker";
 
 type FrozenSettlementContext = NonNullable<
   ReturnType<SiteBuildCostReconciliationCatalog["resolveContext"]>
@@ -266,21 +272,20 @@ export class RouterModelGateway extends ModelGateway {
   settlementReadbackResolver?: NewApiRequestBoundSettlementResolver;
   legacyBudgetMode?: LegacyExecutionBudgetMode;
   maxBypassModelCallsPerAccount?: number;
+  dailyCostBreaker?: TenantDailyCostBreaker;
   private readonly bypassCallCounts = new Map<string, number>();
-  /**
-   * Deployment-approved substitute identities (owner decision D14), read once
-   * here so a malformed MODEL_IDENTITY_SUBSTITUTES stops startup. Empty by
-   * default: every call then keeps exact model identity.
-   */
+  /** Deployment-approved substitute identities (D14), read once at startup. */
   readonly #modelIdentitySubstitutes: ModelIdentitySubstitutes;
 
   constructor(
     private readonly router: ModelRouter,
     @Optional() private readonly trace?: AiTraceSink,
     @Optional() @Inject(TOOL_BUDGET_STORE) budgetStore?: BudgetStore,
+    @Optional() @Inject(TENANT_DAILY_COST_BREAKER) dailyCostBreaker?: TenantDailyCostBreaker,
   ) {
     super();
     this.budgetStore = budgetStore ?? this.unavailableBudgetStore;
+    this.dailyCostBreaker = dailyCostBreaker;
     this.#modelIdentitySubstitutes = parseModelIdentitySubstitutes(
       process.env[MODEL_IDENTITY_SUBSTITUTES_ENV],
     );
@@ -732,47 +737,23 @@ export class RouterModelGateway extends ModelGateway {
       op,
       input.model,
     );
+    await assertTenantDailyCostAllowed(this.dailyCostBreaker, ctx, input.task);
     const registeredTask = (await import("../ai-tasks/task-registry")).getTask(input.task);
     const bypassBudget = isWorkspaceModelBudgetBypass(ctx, this.legacyBudgetMode);
-    const taskSignal = withTaskTimeoutSignal(
-      input.signal,
-      resolveModelTaskTimeoutMs(registeredTask?.timeoutMs, bypassBudget),
-    );
-    const baseCents =
-      input.maxCostCents ??
-      registeredTask?.maxCostCents ??
-      DEFAULT_LLM_EST_CENTS;
-    const reserveCents =
-      op === "generateStructured"
-        ? baseCents * MODEL_STRUCTURED_OUTPUT_WIRE_UPPER_BOUND
-        : baseCents;
+    const taskSignal = withTaskTimeoutSignal(input.signal, resolveModelTaskTimeoutMs(registeredTask?.timeoutMs, bypassBudget));
+    const baseCents = input.maxCostCents ?? registeredTask?.maxCostCents ?? DEFAULT_LLM_EST_CENTS;
+    const reserveCents = op === "generateStructured" ? baseCents * MODEL_STRUCTURED_OUTPUT_WIRE_UPPER_BOUND : baseCents;
     if (ctx.paidCost) {
-      // Paid calls are priced by the requested alias: exact identity only.
-      return this.runPersistent(
-        op,
-        input,
-        ctx,
-        chain,
-        (provider, runCtx) => call(provider, runCtx, taskSignal),
-        reserveCents,
-      );
+      return this.runPersistent(op, input, ctx, chain, (provider, runCtx) => call(provider, runCtx, taskSignal), reserveCents);
     }
-    const substitutes =
-      registeredTask?.acceptsModelSubstitute === true
-        ? // 终判 judge 的替换目标收紧到 JUDGE_MODEL_ALLOWLIST（P3 J03，设计 §4.3.3.6）：
-          // 允许的上游降档（如 pro→flash）不得把最终 verdict 悄悄降档；过滤后为空
-          // 即只接受精确身份，上游换模型由身份门拒绝（fail closed）。
-          filterJudgeSubstitutes(input.task, deploymentSubstitutes)
-        : [];
-    const callCtx: AiContext =
-      substitutes.length > 0
-        ? { ...ctx, modelIdentitySubstitutes: substitutes }
-        : ctx;
+    const substitutes = registeredTask?.acceptsModelSubstitute === true ? filterJudgeSubstitutes(input.task, deploymentSubstitutes) : [];
+    const callCtx: AiContext = substitutes.length > 0 ? { ...ctx, modelIdentitySubstitutes: substitutes } : ctx;
     const accountKey = ctx.runId ?? ctx.workspaceId;
     if (bypassBudget) {
       return executeWorkspaceBypassModelCall({
         op, input, ctx, callCtx, taskMaxOutputTokens: registeredTask?.maxOutputTokens,
         taskSignal, accountKey, provider: chain[0]!, substitutes, call, trace: this.trace,
+        dailyCostBreaker: this.dailyCostBreaker,
         counts: this.bypassCallCounts, maxCalls: this.maxBypassModelCallsPerAccount,
         assertExternalActionAuthorized: (c) => this.assertExternalActionAuthorized(c),
         wrapSubstituteObserver: observingSubstituteAnswers, buildSubstitution: modelSubstitution,
@@ -1100,6 +1081,7 @@ export class RouterModelGateway extends ModelGateway {
       runId: ctx.runId,
       modelPolicy: ctx.modelPolicy,
     });
+    recordTenantDailyCostObserved(this.dailyCostBreaker, ctx, result);
     if (returnedResult.durableReceipt) {
       ctx.onDurableReceipt?.(input.task, returnedResult.durableReceipt);
     }
@@ -1848,6 +1830,7 @@ export class RouterModelGateway extends ModelGateway {
         runId: ctx.runId,
         modelPolicy: ctx.modelPolicy,
       });
+      recordTenantDailyCostObserved(this.dailyCostBreaker, ctx, result);
       return result;
     }
     throw new Error(`all paid providers failed for ${input.task}`);

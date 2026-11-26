@@ -111,7 +111,12 @@ describe('createSellerDocumentActivities（Phase 2b ingest）', () => {
     });
     const result = await activities.processSellerDocument(INPUT);
     expect(result.outcome).toBe('ready');
-    expect(docling.convertToMarkdown).toHaveBeenCalledWith('光伏组件规格书.pdf', expect.any(Buffer), undefined);
+    expect(docling.convertToMarkdown).toHaveBeenCalledWith(
+      '光伏组件规格书.pdf',
+      expect.any(Buffer),
+      undefined,
+      INPUT.workspaceId,
+    );
   });
 
   it('下载失败：按 attempt 退避回 queued（非终态）', async () => {

@@ -47,3 +47,9 @@ export {
   type DomainCooldownStatus,
   type RedisDomainCooldownClient,
 } from './domain-cooldown.service';
+
+export {
+  PostgresDomainCooldownBackend,
+  PostgresSharedFactRepository,
+  type PlatformSharedSqlClient,
+} from './postgres-shared-fact.repository';

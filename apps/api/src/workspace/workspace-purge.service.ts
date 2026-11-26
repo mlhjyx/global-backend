@@ -7,10 +7,9 @@ import {
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { TemporalClient } from '../temporal/temporal.client';
-import {
-  UNDERSTANDING_TASK_QUEUE,
-  WORKSPACE_PURGE_WORKFLOW,
-} from '../temporal/understanding.constants';
+import { WORKSPACE_PURGE_WORKFLOW } from '../temporal/understanding.constants';
+import { formatTenantWorkflowId } from '../temporal/tenant-workflow-id';
+import { resolveCustomerTaskQueue } from '../temporal/tenant-task-queues';
 import type { RequestWorkspacePurgeDto } from './dto/workspace-purge.dto';
 import type {
   WorkspacePurgeReceiptRecord,
@@ -84,7 +83,7 @@ function mapBeginRow(row: BeginPurgeRow): WorkspacePurgeReceiptRecord {
 }
 
 export function workspacePurgeWorkflowId(workspaceId: string): string {
-  return `workspace-purge-${workspaceId}`;
+  return formatTenantWorkflowId(workspaceId, 'workspace-purge', workspaceId);
 }
 
 @Injectable()
@@ -137,7 +136,7 @@ export class WorkspacePurgeService {
 
     try {
       await this.temporal.client.workflow.start(WORKSPACE_PURGE_WORKFLOW, {
-        taskQueue: UNDERSTANDING_TASK_QUEUE,
+        taskQueue: resolveCustomerTaskQueue('batch'),
         workflowId: workspacePurgeWorkflowId(workspaceId),
         args: [
           {

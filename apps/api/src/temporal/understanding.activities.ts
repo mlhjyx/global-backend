@@ -44,6 +44,11 @@ import {
   understandingFailureLabel,
   type UnderstandingFailure,
 } from './understanding.run-failure';
+import {
+  compactWorkflowPageText,
+  resolveTemporalHistoryTextMaxChars,
+  scrubInlinePiiForWorkflowHistory,
+} from './workflow-payload-hygiene';
 
 /**
  * 预算操作键的运行/尝试维度。
@@ -328,9 +333,10 @@ export function createUnderstandingActivities(deps: {
     ): Promise<CrawledPage> {
       return withActivityHeartbeat(30_000, () => withRunBudget(args, async (accountKey) => {
         const crawled = await crawlViaBroker(args.workspaceId, args.companyId, args.website, accountKey);
+        const maxChars = Math.min(MAX_PAGE_CHARS, resolveTemporalHistoryTextMaxChars());
         return {
           url: args.website,
-          text: crawled.text.slice(0, MAX_PAGE_CHARS),
+          text: compactWorkflowPageText(crawled.text, maxChars).text,
           ...(crawled.durableReceipt
             ? { durableReceipt: crawled.durableReceipt }
             : {}),
@@ -353,19 +359,20 @@ export function createUnderstandingActivities(deps: {
         const settled = await Promise.allSettled(
           args.urls.map((u) => crawlViaBroker(args.workspaceId, args.companyId, u, accountKey)),
         );
+        const maxChars = Math.min(MAX_PAGE_CHARS, resolveTemporalHistoryTextMaxChars());
         const pages: CrawledPage[] = [];
         settled.forEach((s, i) => {
           if (s.status === 'fulfilled' && s.value.text.trim()) {
             pages.push({
               url: args.urls[i],
-              text: s.value.text.slice(0, MAX_PAGE_CHARS),
+              text: compactWorkflowPageText(s.value.text, maxChars).text,
               ...(s.value.durableReceipt
                 ? { durableReceipt: s.value.durableReceipt }
                 : {}),
             });
           } else if (s.status === 'rejected') {
             if (isExecutionControlError(s.reason)) throw s.reason;
-            console.warn(`[understanding] subpage crawl failed ${args.urls[i]}: ${String(s.reason).slice(0, 200)}`);
+            console.warn(`[understanding] subpage crawl failed ${args.urls[i]}: ${scrubInlinePiiForWorkflowHistory(String(s.reason)).slice(0, 200)}`);
           }
         });
         return { pages };
