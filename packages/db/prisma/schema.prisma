@@ -1728,6 +1728,9 @@ model DiscoveryCompanyJob {
   createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
+  /// Committed Streaming L2 result. Null is unrecorded; zero is a completed result.
+  streamingL2ContactsCreated Int? @map("streaming_l2_contacts_created")
+
   /// Streaming L2 contact enrichment claim and durable readback in bypass mode.
   contactEnrichmentOperationRef String?   @map("contact_enrichment_operation_ref") @db.VarChar(64)
   contactEnrichmentStartedAt    DateTime? @map("contact_enrichment_started_at") @db.Timestamptz(3)

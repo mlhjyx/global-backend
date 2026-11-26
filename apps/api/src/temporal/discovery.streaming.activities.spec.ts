@@ -50,6 +50,67 @@ describe('streaming discovery activities & rollout switch', () => {
     );
   });
 
+  it('reuses a committed zero-contact L2 result when the activity is retried', async () => {
+    const createdAt = new Date('2026-11-27T00:00:00Z');
+    const progress = createInitialStreamingProgress(RUN_ID, { now: createdAt.toISOString() });
+    const run = {
+      id: RUN_ID, status: 'RUNNING', createdAt, completedAt: null, stats: { streaming: progress },
+    };
+    let savedContacts: number | null = null;
+    const findCompany = vi.fn(async () => ({
+      id: COMPANY_ID, name: 'Fixture company', domain: 'example.test', status: 'ACTIVE', attributes: {},
+    }));
+    const writeProgress = vi.fn(async ({ data }: { data: { stats: typeof run.stats } }) => {
+      run.stats = data.stats;
+    });
+    const writeResult = vi.fn(async ({ data }: { data: { streamingL2ContactsCreated: number } }) => {
+      savedContacts = data.streamingL2ContactsCreated;
+    });
+    const tx = {
+      discoveryCompanyJob: {
+        findUnique: vi.fn(async () => ({
+          streamingL2ContactsCreated: savedContacts, run: { status: 'RUNNING' },
+        })),
+        update: writeResult,
+      },
+      canonicalCompany: { findUnique: findCompany },
+      suppressionRecord: { findMany: vi.fn(async () => []) },
+      discoveryRun: { findUnique: vi.fn(async () => run), update: writeProgress },
+      $queryRaw: vi.fn(async (sql: TemplateStringsArray) => sql.join('').includes('discovery_company_job')
+        ? [{ id: COMPANY_ID, contactsCreated: savedContacts }]
+        : []),
+    };
+    const findPolicy = vi.fn(async () => null);
+    const prisma = {
+      withWorkspace: vi.fn(async (_ws: string, fn: (t: typeof tx) => unknown) => fn(tx)),
+      dataProvider: { findUnique: findPolicy },
+    } as unknown as PrismaService;
+    const activities = createStreamingDiscoveryActivities({
+      prisma,
+      providers: {} as DiscoveryProviderRegistry,
+      gateway: {} as ModelGateway,
+      broker: {} as ExecutionBroker,
+      budgetStore: { attestAuthorized: vi.fn(async () => undefined) } as unknown as BudgetStore,
+    });
+    vi.stubEnv('CONTACT_DISCOVERY_RUN_LAWFUL_BASIS', '');
+    try {
+      const args = { ...AUTHORITY, runId: RUN_ID, icpId: ICP_ID, companyId: COMPANY_ID };
+      await expect(activities.enrichStreamingTopKCompany(args)).resolves.toEqual({
+        companyId: COMPANY_ID, contactsCreated: 0,
+      });
+      await expect(activities.enrichStreamingTopKCompany(args)).resolves.toEqual({
+        companyId: COMPANY_ID, contactsCreated: 0,
+      });
+      expect(run.stats.streaming.stages.l2TopKEnrich.enriched).toBe(1);
+      expect(writeProgress).toHaveBeenCalledTimes(1);
+      expect(writeResult).toHaveBeenCalledTimes(1);
+      expect(findCompany).toHaveBeenCalledTimes(1);
+      expect(findPolicy).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('finalizeStreamingRun marks unfinished jobs skipped and emits QualifyRequested even on CANCELLED', async () => {
     const outboxCreate = vi.fn(async () => ({ id: 'ev-1' }));
     const runUpdate = vi.fn(async () => ({}));
@@ -214,6 +275,7 @@ describe('streaming discovery activities & rollout switch', () => {
                   ...progress.stages,
                   // An L1 activity can retry after committing and increment progress again.
                   l1ExtractFit: { ...progress.stages.l1ExtractFit, processed: 7, fitMatch: 4, fitWeak: 1, fitMismatch: 2 },
+                  l2TopKEnrich: { ...progress.stages.l2TopKEnrich, selected: 1, enriched: 2, contactsFound: 4 },
                 },
               },
             },
@@ -258,9 +320,9 @@ describe('streaming discovery activities & rollout switch', () => {
           canonicalCount: 0,
           l1Processed: 0,
           l1Failed: 0,
-          l2Selected: 0,
-          l2Enriched: 0,
-          l2ContactsFound: 0,
+          l2Selected: 1,
+          l2Enriched: 1,
+          l2ContactsFound: 2,
           l2Failed: 0,
           watchesRegistered: 0,
         },
@@ -282,6 +344,15 @@ describe('streaming discovery activities & rollout switch', () => {
             taskRef,
             stats: expect.objectContaining({
               fit: { evaluated: 3, match: 2, weak: 1, mismatch: 0 },
+              contactsEnriched: 1,
+              streaming: expect.objectContaining({
+                stages: expect.objectContaining({
+                  l2TopKEnrich: expect.objectContaining({
+                    enriched: status === 'DONE' ? 1 : 2,
+                    contactsFound: status === 'DONE' ? 2 : 4,
+                  }),
+                }),
+              }),
               ...(failure ? { failure } : {}),
             }),
           }),

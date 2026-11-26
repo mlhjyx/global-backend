@@ -866,10 +866,18 @@ export function createStreamingDiscoveryActivities(deps: {
       try {
         throwIfActivityCancelled();
         const binding = await ensureRunBudget(args);
-        const allowed = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
-          companyMayUseExternalProcessing(tx, args.workspaceId, args.companyId),
-        );
-        if (!allowed) return { companyId: args.companyId, contactsCreated: 0 };
+        const jobScope = { workspaceId: args.workspaceId, runId: args.runId, canonicalCompanyId: args.companyId };
+        const completedContacts = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+          const job = await tx.discoveryCompanyJob.findUnique({
+            where: { workspaceId_runId_canonicalCompanyId: jobScope },
+            select: { streamingL2ContactsCreated: true, run: { select: { status: true } } },
+          });
+          if (!job || job.run.status !== 'RUNNING') return job?.streamingL2ContactsCreated ?? 0;
+          if (job.streamingL2ContactsCreated !== null) return job.streamingL2ContactsCreated;
+          const allowed = await companyMayUseExternalProcessing(tx, args.workspaceId, args.companyId);
+          return allowed ? null : 0;
+        });
+        if (completedContacts !== null) return { companyId: args.companyId, contactsCreated: completedContacts };
 
         let contactsCreated = 0;
         const policy = await deps.prisma.dataProvider.findUnique({
@@ -908,10 +916,21 @@ export function createStreamingDiscoveryActivities(deps: {
           }
         }
 
-        await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+        const committedContacts = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+          // Match L1 and cancellation lock order: company job before run. Only the first writer
+          // updates both the result and progress; a concurrent completion returns that result.
+          const [job] = await tx.$queryRaw<Array<{ id: string; contactsCreated: number | null }>>`
+            SELECT id, streaming_l2_contacts_created AS "contactsCreated"
+            FROM public.discovery_company_job
+            WHERE workspace_id = ${jobScope.workspaceId}::uuid AND run_id = ${jobScope.runId}::uuid
+              AND canonical_company_id = ${jobScope.canonicalCompanyId}::uuid
+            FOR UPDATE
+          `;
+          if (!job) return contactsCreated;
+          if (job.contactsCreated !== null) return job.contactsCreated;
           await lockDiscoveryRunRow(tx, args.workspaceId, args.runId);
           const run = await tx.discoveryRun.findUnique({ where: { id: args.runId } });
-          if (!run) return;
+          if (!run || run.status !== 'RUNNING') return contactsCreated;
           const { nextStats } = mergeStreamingProgress(run.stats, run, (current, now) => ({
             ...current,
             updatedAt: now,
@@ -927,13 +946,18 @@ export function createStreamingDiscoveryActivities(deps: {
               item.companyId === args.companyId ? { ...item, stage: 'done' as const, updatedAt: now } : item,
             ),
           }));
+          await tx.discoveryCompanyJob.update({
+            where: { id: job.id, workspaceId: args.workspaceId },
+            data: { streamingL2ContactsCreated: contactsCreated },
+          });
           await tx.discoveryRun.update({
             where: { id: args.runId },
             data: { stats: nextStats as unknown as Prisma.InputJsonValue },
           });
+          return contactsCreated;
         });
 
-        return { companyId: args.companyId, contactsCreated };
+        return { companyId: args.companyId, contactsCreated: committedContacts };
       } finally {
         heartbeat.stop();
       }
@@ -967,6 +991,9 @@ export function createStreamingDiscoveryActivities(deps: {
         if (!run || run.status !== 'RUNNING') return;
         const stageOutcome =
           args.status === 'CANCELLED' ? 'cancelled' : args.status === 'FAILED' ? 'failed' : 'done';
+        // When every activity finished, the workflow summary also corrects overcounts from workers
+        // without per-company results. Interrupted runs can have committed work without an acknowledgement.
+        const completed = args.status === 'DONE';
         const { nextStats } = mergeStreamingProgress(run.stats, run, (current) => ({
           ...current,
           runStatus: args.status,
@@ -995,8 +1022,8 @@ export function createStreamingDiscoveryActivities(deps: {
               status:
                 current.stages.l2TopKEnrich.status === 'running' ? stageOutcome : current.stages.l2TopKEnrich.status,
               selected: Math.max(current.stages.l2TopKEnrich.selected, args.summary.l2Selected),
-              enriched: Math.max(current.stages.l2TopKEnrich.enriched, args.summary.l2Enriched),
-              contactsFound: Math.max(current.stages.l2TopKEnrich.contactsFound, args.summary.l2ContactsFound),
+              enriched: completed ? args.summary.l2Enriched : Math.max(current.stages.l2TopKEnrich.enriched, args.summary.l2Enriched),
+              contactsFound: completed ? args.summary.l2ContactsFound : Math.max(current.stages.l2TopKEnrich.contactsFound, args.summary.l2ContactsFound),
               watchesRegistered: args.summary.watchesRegistered,
               failed: args.summary.l2Failed,
               completedAt: current.stages.l2TopKEnrich.completedAt ?? nowIso,
