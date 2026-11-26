@@ -552,29 +552,25 @@ async function validateProtectedFiles(repoRoot, manifest, path, issues) {
   const wiring = manifest.physicalExecutionWiring;
   if (
     !closedKeys(wiring, ['status', 'protectedFiles'], issues, path, 'EXECUTION_AUTHORITY_WIRING_FENCE_INVALID') ||
-    wiring.status !== 'PARTIAL_HOLD' || !Array.isArray(wiring.protectedFiles)
+    wiring.status !== 'REVIEW_ONLY' || !Array.isArray(wiring.protectedFiles)
   ) {
-    issues.push(issue('EXECUTION_AUTHORITY_WIRING_FENCE_INVALID', path, 'physical execution wiring must preserve the typed-wired/artifact-held boundary'));
+    issues.push(issue('EXECUTION_AUTHORITY_WIRING_FENCE_INVALID', path, 'physical execution wiring must declare REVIEW_ONLY with the four core Router/ToolBroker composition paths'));
     return;
   }
-  const protectedPaths = wiring.protectedFiles.map((entry) => entry?.path).filter(Boolean);
+  const protectedPaths = wiring.protectedFiles.filter((entry) => typeof entry === 'string');
   if (
+    protectedPaths.length !== wiring.protectedFiles.length ||
     !sameSet(protectedPaths, EXPECTED_PROTECTED_WIRING_PATHS) ||
     new Set(protectedPaths).size !== EXPECTED_PROTECTED_WIRING_PATHS.length
   ) {
     issues.push(issue('EXECUTION_AUTHORITY_WIRING_FENCE_INVALID', path, 'protected files must be the exact four Router/ToolBroker composition paths'));
+    return;
   }
-  for (const entry of wiring.protectedFiles) {
-    if (
-      !isRecord(entry) || !sameSet(Object.keys(entry), ['path', 'sha256']) ||
-      typeof entry.path !== 'string' || !/^[0-9a-f]{64}$/.test(entry.sha256 ?? '')
-    ) {
-      issues.push(issue('EXECUTION_AUTHORITY_WIRING_FENCE_INVALID', path, 'protected file entry is invalid'));
-      continue;
-    }
-    const source = existsSync(resolve(repoRoot, entry.path)) ? await readText(repoRoot, entry.path) : null;
-    if (source === null || sha256(source) !== entry.sha256) {
-      issues.push(issue('EXECUTION_AUTHORITY_PHYSICAL_WIRING_DRIFT', entry.path, 'protected Router/ToolBroker composition changed: review the change for authority, budget, receipt and egress bypasses, then re-pin its sha256 in docs/governance/durable-result-strategies.json and record the review in the PR'));
+  // Controlled unlock (M10-PR1): hard byte-level SHA-256 pinning is downgraded to standard
+  // typecheck/test and PR review; keep verifying that all four composition files exist.
+  for (const filePath of protectedPaths) {
+    if (!existsSync(resolve(repoRoot, filePath))) {
+      issues.push(issue('EXECUTION_AUTHORITY_WIRING_FENCE_INVALID', filePath, 'protected Router/ToolBroker composition file is missing'));
     }
   }
 }

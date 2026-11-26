@@ -6,7 +6,8 @@ import { ModelProviderRegistry } from './model-provider.registry';
 import { buildGatewayProvider } from './model-providers.config';
 import { AiTraceSink } from './ai-trace.sink';
 import { PrismaService } from '../prisma/prisma.service';
-import { PostgresBudgetStore, TOOL_BUDGET_STORE } from '../tools/budget-store';
+import { TOOL_BUDGET_STORE } from '../tools/budget-store';
+import { createWorkspaceBudgetStore } from '../execution-budget/legacy-execution-budget-mode';
 
 /**
  * Exposes the single ModelGateway. All vendors live behind the 中转站 (new-api);
@@ -21,7 +22,7 @@ import { PostgresBudgetStore, TOOL_BUDGET_STORE } from '../tools/budget-store';
     AiTraceSink,
     {
       provide: TOOL_BUDGET_STORE,
-      useFactory: (prisma: PrismaService) => new PostgresBudgetStore(prisma),
+      useFactory: (prisma: PrismaService) => createWorkspaceBudgetStore(prisma),
       inject: [PrismaService],
     },
     { provide: ModelGateway, useClass: RouterModelGateway },

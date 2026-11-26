@@ -18,6 +18,7 @@ import { ModelRouter } from "../model-gateway/model-router";
 import { RouterModelGateway } from "../model-gateway/router-model-gateway";
 import { buildGatewayProvider } from "../model-gateway/model-providers.config";
 import { AiTraceSink } from "../model-gateway/ai-trace.sink";
+import { createWorkspaceBudgetStore } from "../execution-budget/legacy-execution-budget-mode";
 import { createUnderstandingActivities } from "./understanding.activities";
 import { createCampaignPlanningActivities } from "./campaign-planning.activities";
 import { BUILTIN_SKILLS } from "../skills/generated/builtin-skill-catalog";
@@ -107,7 +108,6 @@ import {
   PrismaRuntimeProcessLeaseStore,
   RuntimeProcessLeaseService,
 } from "../runtime/runtime-process-lease";
-import { PostgresBudgetStore } from "../tools/budget-store";
 import {
   checkBrowserReadiness,
   checkGenericArtifactStorageReadiness,
@@ -432,7 +432,7 @@ async function main(): Promise<void> {
     console.error("[worker] customer worker ops principal check failed:", error);
     await holdPlatformNotReady("CUSTOMER_WORKER_OPS_DATABASE_UNAVAILABLE");
   }
-  const budgetStore = new PostgresBudgetStore(prisma);
+  const budgetStore = createWorkspaceBudgetStore(prisma);
   // 部署期已通过 seed-platform-catalogs 写入平台目录；worker 启动只经 app_user 做只读就绪校验。
   try {
     const catalogSummary = await verifyPlatformCatalogsReadOnly(prisma, {

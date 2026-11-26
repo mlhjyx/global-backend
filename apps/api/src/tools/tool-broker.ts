@@ -5,6 +5,12 @@ import { assertPlatformEgressPaidContext, assertPlatformEgressReservation, creat
 import { createPlatformToolWireDispatcher } from "../platform-authority/platform-tool-wire-dispatcher";
 import { ExecutionControlError } from "../execution-budget/execution-control-error";
 import {
+  assertStatelessTaskCallBudget,
+  resolveLegacyExecutionBudgetMode,
+  TechnicalTaskLimitExceededError,
+  type LegacyExecutionBudgetMode,
+} from "../execution-budget/legacy-execution-budget-mode";
+import {
   ExecutionBroker,
   ExternalToolActionDeniedError,
   SourcePolicyDenyReason,
@@ -144,6 +150,10 @@ export interface BrokerDeps {
   paidLedger?: SiteBuildCostLedger;
   /** G3 subject-bound artifact execution. Absent → subject-bound calls stay held. */
   artifactExecution?: ArtifactExecutionPort;
+  /** Optional explicit override for LEGACY_EXECUTION_BUDGET_MODE (default reads process.env). */
+  legacyBudgetMode?: LegacyExecutionBudgetMode;
+  /** Optional override for stateless per-task tool call ceiling in bypass mode (tests). */
+  maxBypassToolCallsPerAccount?: number;
 }
 
 export interface ToolTrace {
@@ -164,6 +174,7 @@ export class ToolBroker implements ExecutionBroker {
   private readonly budget: BudgetStore;
   private readonly limiter: RateLimitStore;
   private readonly deps: BrokerDeps;
+  private readonly bypassCallCounts = new Map<string, number>();
   private readonly projectionRegistry = registerContactEmailVerificationProjections(registerSourceResultProjections(
     registerCatalogResultProjections(new TypedProjectionRegistry()),
   ));
@@ -249,6 +260,25 @@ export class ToolBroker implements ExecutionBroker {
     return (process.env.SOURCE_COMPLIANCE_GATE ?? "").trim().toLowerCase() === "enforce"
       ? "enforce"
       : "off";
+  }
+
+  private legacyBudgetMode(): LegacyExecutionBudgetMode {
+    return this.deps.legacyBudgetMode ?? resolveLegacyExecutionBudgetMode();
+  }
+
+  private recordBypassToolCall(workspaceId: string, accountKey: string): void {
+    const key = `${workspaceId}\0${accountKey}`;
+    const next = (this.bypassCallCounts.get(key) ?? 0) + 1;
+    assertStatelessTaskCallBudget(
+      "tool",
+      next,
+      this.deps.maxBypassToolCallsPerAccount,
+    );
+    if (!this.bypassCallCounts.has(key) && this.bypassCallCounts.size >= 2_048) {
+      const oldest = this.bypassCallCounts.keys().next().value;
+      if (oldest !== undefined) this.bypassCallCounts.delete(oldest);
+    }
+    this.bypassCallCounts.set(key, next);
   }
 
   /**
@@ -371,8 +401,15 @@ export class ToolBroker implements ExecutionBroker {
     await this.assertSourceCompliance(tool, ctx, now, started);
 
     // 3) 预算 reserve（reserve-then-settle）。R4-B paidCost uses the Site Builder
-    // ledger; every other product caller uses the injected durable BudgetStore.
+    // ledger; every other product caller uses the injected durable BudgetStore,
+    // unless LEGACY_EXECUTION_BUDGET_MODE=bypass is enabled for workspace calls
+    // (pure stateless per-task technical hard limit + existing rate limiter).
     const runId = ctx.runId ?? ctx.workspaceId;
+    const bypassWorkspaceBudget =
+      !ctx.paidCost &&
+      !ctx.platformEgress &&
+      ctx.workspaceId !== "platform" &&
+      this.legacyBudgetMode() === "bypass";
     let reservation: BudgetReservation | undefined;
     let budgetOperationKey: string | undefined;
     let paidScope: PaidOperationReservation | undefined;
@@ -434,6 +471,22 @@ export class ToolBroker implements ExecutionBroker {
         throw new Error(
           `paid tool operation replayed ${paidDecision.status}: ${paidDecision.errorCode ?? "recorded_failure"}`,
         );
+      }
+    } else if (bypassWorkspaceBudget) {
+      try {
+        this.recordBypassToolCall(ctx.workspaceId, runId);
+      } catch (err) {
+        if (err instanceof TechnicalTaskLimitExceededError) {
+          this.trace(
+            ctx,
+            tool,
+            "DENIED",
+            `technical limit exceeded: ${err.message.slice(0, 150)}`,
+            0,
+            now() - started,
+          );
+        }
+        throw err;
       }
     } else {
       try {

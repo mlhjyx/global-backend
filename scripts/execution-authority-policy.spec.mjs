@@ -51,12 +51,12 @@ test('inventory is locked to 33 Tools and 16 product Model tasks', () => {
   ]);
 });
 
-test('an empty or incomplete protected-path fence cannot self-disable the guard', async () => {
+test('an empty or incomplete protected-path fence or legacy sha256 pin is rejected', async () => {
   const manifest = JSON.parse(await readFile(
     new URL('../docs/governance/durable-result-strategies.json', import.meta.url),
     'utf8',
   ));
-  const result = await verifyExecutionAuthorityPolicy({
+  const emptyResult = await verifyExecutionAuthorityPolicy({
     repoRoot: repositoryRoot,
     manifest: {
       ...manifest,
@@ -66,7 +66,23 @@ test('an empty or incomplete protected-path fence cannot self-disable the guard'
       },
     },
   });
-  assert.ok(result.issues.some((entry) =>
+  assert.ok(emptyResult.issues.some((entry) =>
+    entry.code === 'EXECUTION_AUTHORITY_WIRING_FENCE_INVALID'));
+
+  const legacyPinResult = await verifyExecutionAuthorityPolicy({
+    repoRoot: repositoryRoot,
+    manifest: {
+      ...manifest,
+      physicalExecutionWiring: {
+        status: 'PARTIAL_HOLD',
+        protectedFiles: EXPECTED_PROTECTED_WIRING_PATHS.map((filePath) => ({
+          path: filePath,
+          sha256: '0'.repeat(64),
+        })),
+      },
+    },
+  });
+  assert.ok(legacyPinResult.issues.some((entry) =>
     entry.code === 'EXECUTION_AUTHORITY_WIRING_FENCE_INVALID'));
 });
 
@@ -275,13 +291,13 @@ test('artifact bounds are read only from the durableResultStrategy object and mu
   assert.equal(privacy.privacyClass, undefined);
 });
 
-test('pure contracts preserve typed authority wiring and the artifact pre-wire hold', async () => {
+test('pure contracts preserve typed authority wiring under REVIEW_ONLY and the artifact pre-wire hold', async () => {
   const result = await verifyExecutionAuthorityPolicy({ repoRoot: repositoryRoot });
   assert.deepEqual(result.issues, []);
   // 获客 vNext W4 + contact-enrichment safety (含 Prospeo v2) + L0 实时搜索 4 工具 + Batch 1.7B-1 EU VIES (vies.check) = 33 tools，按 policy 源真值锁定。
   assert.equal(result.toolCount, 33);
   assert.equal(result.modelTaskCount, 16);
-  assert.equal(result.physicalExecutionWiring, 'PARTIAL_HOLD');
+  assert.equal(result.physicalExecutionWiring, 'REVIEW_ONLY');
   assert.ok(result.physicalToolCallsiteCount >= EXPECTED_TOOL_CALLSITES.length);
   assert.equal(result.modelGatewayBoundaryCount, 2);
 });

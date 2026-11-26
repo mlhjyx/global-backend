@@ -10,7 +10,8 @@ import { ModelGateway } from '../model-gateway/model-gateway';
 import { PrismaService } from '../prisma/prisma.service';
 import { buildToolBroker, sourcePolicyReaderFrom } from '../tools/tool-broker.factory';
 import { LangfuseRuntimeTelemetryService } from '../model-runtime';
-import { PostgresBudgetStore, TOOL_BUDGET_STORE, type BudgetStore } from '../tools/budget-store';
+import { TOOL_BUDGET_STORE, type BudgetStore } from '../tools/budget-store';
+import { createWorkspaceBudgetStore } from '../execution-budget/legacy-execution-budget-mode';
 import { TOOL_BROKER } from '../tools/tool-broker.tokens';
 import type { ExecutionBroker } from '../tools/tool-contract';
 import { ExecutionBudgetModule } from '../execution-budget/execution-budget.module';
@@ -27,7 +28,7 @@ const CONTACT_ENRICHMENT_SAFETY_COMPOSITION = Symbol('CONTACT_ENRICHMENT_SAFETY_
   providers: [
     {
       provide: TOOL_BUDGET_STORE,
-      useFactory: (prisma: PrismaService) => new PostgresBudgetStore(prisma),
+      useFactory: (prisma: PrismaService) => createWorkspaceBudgetStore(prisma),
       inject: [PrismaService],
     },
     {

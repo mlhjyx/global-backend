@@ -27,6 +27,7 @@ import { queryTaxonomyTerms, queryableIndustryNodes } from '../discovery/query-t
 import { discoverContactsCore } from '../discovery/contact-discovery-core';
 import { guessEmailsForRunCompany } from '../discovery/contact-stage-email-guess';
 import { createContactDiscoverySubBudget } from '../execution-budget/contact-discovery-budget';
+import { isLegacyExecutionBudgetBypass } from '../execution-budget/legacy-execution-budget-mode';
 import { parseConfiguredLawfulBasis } from './backlog.activities';
 import { stampLawfulBasis } from '../discovery/compliance/email-verification-gate';
 import { artifactSubjectSkipReason } from '../tools/artifact-subject-denial';
@@ -1360,7 +1361,7 @@ export function createDiscoveryActivities(deps: {
         }
       }
       const governedExecutionPlan = buildGovernedDiscoveryQueryExecutionPlan({
-        lineageEnabled: lineageLookup !== null,
+        lineageEnabled: lineageLookup !== null && !isLegacyExecutionBudgetBypass(),
         adapters,
         settled,
       });

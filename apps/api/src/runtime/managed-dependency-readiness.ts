@@ -24,6 +24,7 @@ import {
   validateExecutionBudgetGrantVerifierConfiguration,
   type ExecutionBudgetJwksFetch,
 } from "../execution-budget/execution-budget-grant.verifier";
+import { isLegacyExecutionBudgetBypass } from "../execution-budget/legacy-execution-budget-mode";
 import { S3GenericOperationArtifactStore } from "../durable-results/artifact/generic-operation-artifact.store";
 import {
   genericArtifactStorageConfig,
@@ -240,6 +241,9 @@ export async function checkExecutionBudgetJwksReadiness(
   env: NodeJS.ProcessEnv,
   fetcher: ExecutionBudgetJwksFetch = fetch,
 ): Promise<RuntimeComponentStatus> {
+  if (isLegacyExecutionBudgetBypass(env)) {
+    return { status: "ok" };
+  }
   try {
     const config = validateExecutionBudgetGrantVerifierConfiguration(env);
     await loadExecutionBudgetJwks(config, fetcher);
