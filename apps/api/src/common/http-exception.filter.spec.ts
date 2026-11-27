@@ -99,6 +99,42 @@ describe('unknown HTTP exception diagnostics', () => {
     expect(response.status).toHaveBeenCalledWith(500);
   });
 
+  it('logs TimeoutError name and redacted app frames for native DOMException without leaking message', () => {
+    const log = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const { response, host } = responseHost('/api/v1/companies/123/icps', {
+      method: 'POST',
+      route: { path: '/api/v1/companies/:companyId/icps' },
+    });
+    const domError = new DOMException('private-timeout-canary', 'TimeoutError');
+    new GlobalHttpExceptionFilter().catch(domError, host);
+    expect(log).toHaveBeenCalledTimes(1);
+    const logged = log.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(logged).toMatchObject({
+      code: 'INTERNAL',
+      status: 500,
+      errorName: 'TimeoutError',
+      path: '/api/v1/companies/:companyId/icps',
+      method: 'POST',
+      errorCode: null,
+    });
+    expect(JSON.stringify(logged)).not.toContain('private-timeout-canary');
+    expect(logged.topFrames).toEqual(expect.arrayContaining([
+      expect.stringMatching(/^common\/http-exception\.filter\.spec\.ts:\d+:\d+$/u),
+    ]));
+    expect(response.status).toHaveBeenCalledWith(500);
+  });
+
+  it('does not invoke an untrusted own getter on DOMException', () => {
+    vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const { response, host } = responseHost();
+    const read = vi.fn(() => { throw new Error('must not run'); });
+    const domError = new DOMException('canary', 'TimeoutError');
+    Object.defineProperty(domError, 'name', { get: read });
+    expect(() => new GlobalHttpExceptionFilter().catch(domError, host)).not.toThrow();
+    expect(read).not.toHaveBeenCalled();
+    expect(response.status).toHaveBeenCalledWith(500);
+  });
+
   it('preserves explicit validation responses', () => {
     const log = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
     const { response, host } = responseHost();

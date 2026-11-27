@@ -1,8 +1,12 @@
 import type { ModelGateway } from "../model-gateway/model-gateway";
 import { hasNativeDiscoveryModelScope } from "../model-gateway/discovery-v3-model-scope";
 import { definiteModelFailureCode } from "../model-gateway/definite-model-failure";
-import { resolveCrossChannelFallbackModels } from "../model-gateway/model-fallback";
+import {
+  isCrossChannelTimeoutFallbackEnabled,
+  resolveCrossChannelFallbackModels,
+} from "../model-gateway/model-fallback";
 import { checkAgainstSchema } from "../model-gateway/schema-validate";
+import { withOptionalSignal, withTaskTimeoutSignal } from "../model-gateway/task-timeout";
 import type {
   AiContext,
   GenerateStructuredInput,
@@ -31,6 +35,51 @@ import {
 
 const STRUCTURED_CONTEXT_WINDOW = 128_000;
 const MAX_PROVIDER_OUTPUT_TOKENS = 16_000;
+const BYPASS_PRIMARY_FALLBACK_TIMEOUT_MS = 100_000;
+
+function isModelTimeoutError(error: unknown): boolean {
+  if (typeof DOMException !== "undefined" && error instanceof DOMException) {
+    return error.name === "TimeoutError";
+  }
+  return error instanceof Error && error.name === "TimeoutError";
+}
+
+function buildAttemptInput<T extends GenerateStructuredInput>(
+  boundedInput: T,
+  idx: number,
+  candidateModel: string | undefined,
+  bypassTimeoutFallback: boolean,
+  taskTimeoutMs: number | undefined,
+): T {
+  if (idx === 0) {
+    if (
+      !bypassTimeoutFallback ||
+      taskTimeoutMs === undefined ||
+      taskTimeoutMs <= BYPASS_PRIMARY_FALLBACK_TIMEOUT_MS
+    ) {
+      return boundedInput;
+    }
+    return withOptionalSignal(
+      boundedInput,
+      withTaskTimeoutSignal(boundedInput.signal, BYPASS_PRIMARY_FALLBACK_TIMEOUT_MS),
+    );
+  }
+  return candidateModel === undefined
+    ? boundedInput
+    : { ...boundedInput, model: candidateModel };
+}
+
+function shouldRetryCrossChannel(
+  unwrapped: unknown,
+  hasMore: boolean,
+  canCrossChannelFallback: boolean,
+  bypassTimeoutFallback: boolean,
+  callerAborted: boolean,
+): boolean {
+  if (!hasMore || !canCrossChannelFallback) return false;
+  if (definiteModelFailureCode(unwrapped) !== undefined) return true;
+  return bypassTimeoutFallback && !callerAborted && isModelTimeoutError(unwrapped);
+}
 
 export interface StructuredTaskRuntimeMetadata {
   contractVersion: string;
@@ -328,6 +377,8 @@ export async function executeStructuredTaskWithRuntime<Output>(
     ? resolveCrossChannelFallbackModels(primaryModel, boundedInput.task)
     : [];
   const attemptModels: Array<string | undefined> = [boundedInput.model, ...fallbackModels];
+  const bypassTimeoutFallback =
+    isCrossChannelTimeoutFallbackEnabled() && fallbackModels.length > 0;
 
   let activeResolvedAlias = requestedAlias;
   let activeAttemptInput = boundedInput;
@@ -366,10 +417,13 @@ export async function executeStructuredTaskWithRuntime<Output>(
   for (let idx = 0; idx < attemptModels.length; idx += 1) {
     const candidateModel = attemptModels[idx];
     activeResolvedAlias = idx === 0 || !candidateModel ? requestedAlias : candidateModel;
-    activeAttemptInput =
-      idx === 0 || candidateModel === undefined
-        ? boundedInput
-        : { ...boundedInput, model: candidateModel };
+    activeAttemptInput = buildAttemptInput(
+      boundedInput,
+      idx,
+      candidateModel,
+      bypassTimeoutFallback,
+      registeredTask?.timeoutMs,
+    );
     activeAttemptCtx =
       idx === 0 || !candidateModel
         ? context
@@ -405,7 +459,15 @@ export async function executeStructuredTaskWithRuntime<Output>(
     } catch (error) {
       const unwrapped = unwrapModelExecutionError(error);
       const hasMore = idx + 1 < attemptModels.length;
-      if (!hasMore || !canCrossChannelFallback || definiteModelFailureCode(unwrapped) === undefined) {
+      if (
+        !shouldRetryCrossChannel(
+          unwrapped,
+          hasMore,
+          canCrossChannelFallback,
+          bypassTimeoutFallback,
+          boundedInput.signal?.aborted === true,
+        )
+      ) {
         throw unwrapped;
       }
     }

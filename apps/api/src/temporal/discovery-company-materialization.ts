@@ -13,6 +13,7 @@ import {
   parseExecutionBudgetBinding,
   type ExecutionBudgetBinding,
 } from '../execution-budget/execution-budget-binding';
+import { isLegacyExecutionBudgetBypass } from '../execution-budget/legacy-execution-budget-mode';
 import { appendRunEvent } from '../discovery/run2/run-events';
 import {
   createRunPoolGate,
@@ -669,6 +670,9 @@ export async function executeDiscoveryCompanyMaterialization(
     });
   } catch {
     fail('EXECUTION_BUDGET_LEGACY_HISTORY_PARKED');
+  }
+  if (isLegacyExecutionBudgetBypass()) {
+    return canonicalizeLegacyDiscoveryRun(input);
   }
   const admission = await admitDiscoveryCompanyMaterialization(input, binding, deps);
   const finalizeDiscoveryCompanyMaterializationQuery = (

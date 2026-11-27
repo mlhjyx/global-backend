@@ -37,11 +37,19 @@ const SETTLED_UNREGISTERED_PROTOTYPES: ReadonlySet<object> = new Set<object>([
   ProviderTransportError.prototype,
 ]);
 
+function isModelUpstreamTimeoutError(error: unknown): boolean {
+  if (typeof DOMException !== 'undefined' && error instanceof DOMException) {
+    return error.name === 'TimeoutError';
+  }
+  return error instanceof Error && error.name === 'TimeoutError';
+}
+
 /**
  * The gateway reason code of a model call settled without a usable answer, or
  * undefined when the error does not prove that. Recognised: a recoverable
  * ProviderOutputError (bad JSON, schema miss, task-gate rejection), an exact
- * identity or transport error with no control error behind it, and an exact
+ * identity or transport error with no control error behind it, a request
+ * timeout (AbortSignal.timeout DOMException TimeoutError), and an exact
  * HTTP error status from the gateway on an unpaid wire (429, 5xx: the gateway
  * answered and the router settled the reservation). Everything else, control
  * errors and unknown settlements above all, is left to its own boundary.
@@ -51,6 +59,7 @@ export function settledModelUpstreamFailureReason(error: unknown): string | unde
   // was consumed and charged, so the client needs the documented 502 contract.
   if (error instanceof ModelDurableResultProjectionError) return error.code;
   if (isRecoverableModelFailure(error)) return error.reasonCode;
+  if (isModelUpstreamTimeoutError(error)) return 'MODEL_UPSTREAM_TIMEOUT';
   if (
     error instanceof ProviderHttpError &&
     Object.getPrototypeOf(error) === ProviderHttpError.prototype &&
