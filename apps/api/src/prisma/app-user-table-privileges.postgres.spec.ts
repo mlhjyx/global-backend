@@ -523,6 +523,7 @@ describe.runIf(Boolean(ownerUrl && appUrl))('app_user table privileges on Postgr
         contentHash: 'a'.repeat(64),
         etag: '"v1"',
         lastModified: null,
+        fetchedAt: expect.any(Date),
       });
 
       await llmCache.put(workspaceA, cacheKey, 'discovery.extract_list', { is_directory: true }, 24);
