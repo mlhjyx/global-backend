@@ -262,15 +262,31 @@ describe('GenericOperationArtifactExecution.persist', () => {
 
   it('round-trips an http.get response', async () => {
     const { execution, persisted } = harness();
+    const tool = toolFor('http-get/v1', 'http.get');
     const result = await execution.persist({
-      reservation: reservation(), tool: toolFor('http-get/v1', 'http.get'), subjectRef,
-      input: { url: 'https://pumpen.example/karriere' },
+      reservation: reservation(), tool, subjectRef,
+      input: { url: 'https://pumpen.example/' },
       result: {
         data: { status: 200, ok: true, mediaType: 'text/plain', text: 'Stellen', finalUrl: 'https://pumpen.example/karriere' },
         costCents: 0,
       },
     });
     expect(result.data).toEqual(await replayedData('http-get/v1', persisted[0]!));
+    expect(result.provenance).toEqual({
+      sourceUrl: 'https://pumpen.example/karriere',
+      fetchedAt: '2026-08-21T00:00:00.000Z',
+      artifactExpiresAt: '2026-08-22T00:00:00.000Z',
+      parserVersion: 'artifact/http-get/v1',
+    });
+    const replay = await execution.replay({
+      reservation: reservation({
+        replay: true,
+        replayResult: { resultStrategy: 'artifact_reference', reference: { resultSchema: 'http-get/v1' } } as never,
+        receipt: receipt('http-get/v1'),
+      }),
+      tool,
+    });
+    expect(replay.provenance).toEqual(result.provenance);
   });
 
   it('refuses to persist without the reservation authority or an unsupported schema', async () => {

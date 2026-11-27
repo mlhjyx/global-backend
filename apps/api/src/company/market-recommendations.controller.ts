@@ -24,7 +24,7 @@ export class MarketRecommendationsController {
   @ApiOperation({
     summary: 'UN Comtrade / HS 贸易流目标国推荐（只读，不消费 Grant，不自动写入确认市场）',
     description:
-      '根据显式传入的 4-6 位 HS 码，或按卖家已勾选产品与行业确定性反推的 HS 码，返回基于 UN Comtrade 贸易流基线的目标出口国排序建议（进口规模、同比增速、全球份额与业务理由）。本接口纯只读、零预算消耗，固定返回 isRecommendationOnly=true，绝不自动写入公司确认目标市场。',
+      '按显式 HS 码或卖家已选产品与行业，使用 UN Comtrade 官方同月快照计算进口额、同比和可比申报国份额。只纳入所选各 HS 码在两个期间均有正额申报的国家或地区。接口只读，固定返回 isRecommendationOnly=true。',
   })
   @ApiQuery({
     name: 'hsCodes',
@@ -64,6 +64,11 @@ export class MarketRecommendationsController {
           inferredFrom: { type: 'string', enum: ['query_hs', 'offerings_and_industry', 'fallback_general'] },
           dataSource: { type: 'string', enum: ['un_comtrade_baseline_v1', 'un_comtrade_live'] },
           referenceYear: { type: 'integer' },
+          referencePeriod: {
+            type: 'string', pattern: '^[0-9]{6}$', example: '202608', description: '进口额参考月份（YYYYMM），同比使用上年同月',
+          },
+          coverage: { type: 'integer', minimum: 0, description: '两期均完整覆盖所选 HS 码的申报者数量，包含未显示在推荐列表中的申报者' },
+          shareBasis: { type: 'string', enum: ['comparable_reporters'], description: '同一批完整可比申报者的当期进口额之和' },
         },
       },
       recommendations: {
@@ -83,7 +88,7 @@ export class MarketRecommendationsController {
             hsCodes: { type: 'array', items: { type: 'string' } },
             importVolumeUsd: { type: 'number' },
             yoyGrowthPct: { type: 'number' },
-            globalImportSharePct: { type: 'number' },
+            globalImportSharePct: { type: 'number', description: '占完整可比申报者当期进口额合计的百分比，沿用既有字段名' },
             rationale: { type: 'string' },
             confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
             alreadySelected: { type: 'boolean' },

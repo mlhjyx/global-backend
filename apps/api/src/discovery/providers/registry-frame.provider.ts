@@ -28,7 +28,7 @@ import {
   registryQueryDigest,
 } from '../../registry/local-query-receipt';
 import { RegistryQueryError, parseRegistryQueryFilters, queryRegistryEntities } from '../../registry/query';
-import { isIso3166Alpha2 } from '../iso3166';
+import { isIso3166Alpha2 } from '../../common/iso3166';
 import { targetCountryCodes } from '../search-localization';
 import { isExecutionControlError } from '../../execution-budget/execution-control-error';
 import type {
