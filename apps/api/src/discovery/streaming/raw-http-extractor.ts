@@ -1,3 +1,10 @@
+import { captureCompanyContactNavigation } from '../../adapters/company-contact-navigation';
+import { COMPANY_NAVIGATION_RECIPE } from '../../adapters/company-navigation';
+import {
+  DEFAULT_HTTP_FIRST_CACHE_MAX_CHARS,
+  extractHttpFirstPageFromHtml,
+  type HttpFirstCachePort,
+} from '../../adapters/http-first-fetch';
 import { isPdfDocumentUrl } from '../../adapters/pdf-url-guard';
 import { parseWildcardDisallow } from '../../adapters/robots';
 import { isCrawl4aiRenderEmptyHtml, type CrawlHtmlResult } from '../../adapters/web-crawler';
@@ -80,6 +87,7 @@ export interface ExtractCompanyWebsiteStreamingInput {
   readonly robotsCache?: Map<string, readonly string[]>;
   readonly authorizeExternalAction?: () => Promise<boolean>;
   readonly inspectPassiveDns?: typeof inspectPassiveDns;
+  readonly urlContentCache?: HttpFirstCachePort;
 }
 
 interface PageFetchOutcome {
@@ -426,6 +434,37 @@ function mergeUniqueDirectors(
   return out;
 }
 
+async function warmUrlContentCachePage(
+  cache: HttpFirstCachePort | undefined,
+  workspaceId: string,
+  urls: readonly string[],
+  html: string,
+  companyUrl: string,
+): Promise<void> {
+  if (!cache || !html) return;
+  const primaryUrl = urls[0];
+  if (!primaryUrl) return;
+  const page = extractHttpFirstPageFromHtml(html, primaryUrl, {
+    companyUrl,
+    captureNavigation: captureCompanyContactNavigation,
+  });
+  if (!page) return;
+  const markdown = page.markdown.slice(0, DEFAULT_HTTP_FIRST_CACHE_MAX_CHARS);
+  const uniqueUrls = [...new Set(urls.filter((u) => /^https?:\/\//iu.test(u)))];
+  for (const targetUrl of uniqueUrls) {
+    try {
+      await cache.put(
+        workspaceId,
+        targetUrl,
+        { markdown, contentHash: page.contentHash, etag: null, lastModified: null },
+        COMPANY_NAVIGATION_RECIPE,
+      );
+    } catch {
+      // Cache warming is best-effort and must never fail L1 extraction.
+    }
+  }
+}
+
 /**
  * Plan B single-activity extractor: Raw HTTP first -> in-memory HTML parse ->
  * thin-page (<200 visible chars) Crawl4AI fallback -> bounded 1-hop contact/statutory page merge + passive DNS.
@@ -490,6 +529,13 @@ export async function extractCompanyWebsiteStreaming(
   let statutoryDirectors = isCompanyWebsitePageUrl(home.finalUrl, input.domain)
     ? extractStatutoryDirectorsFromHtml(home.html, home.finalUrl)
     : [];
+  await warmUrlContentCachePage(
+    input.urlContentCache,
+    input.workspaceId,
+    isCompanyWebsitePageUrl(home.finalUrl, input.domain) ? [home.finalUrl, initialUrl] : [home.finalUrl],
+    home.html,
+    initialUrl,
+  );
   const homeText = extractVisibleBodyText(home.html);
   const homeJsonLd = extractJsonLdFacts(home.html);
   const homeChannels = extractHtmlChannelsAndLinks(home.html, home.finalUrl, input.domain);
@@ -522,6 +568,13 @@ export async function extractCompanyWebsiteStreaming(
     if (contact.html && isCompanyWebsitePageUrl(contact.finalUrl, input.domain) &&
       (!contactIsDisclosure || isStatutoryDisclosurePageUrl(contact.finalUrl))) {
       pagesFetched.push(contact.finalUrl);
+      await warmUrlContentCachePage(
+        input.urlContentCache,
+        input.workspaceId,
+        [contact.finalUrl, homeChannels.contactPageUrl],
+        contact.html,
+        home.finalUrl,
+      );
       statutoryDirectors = mergeUniqueDirectors(
         statutoryDirectors,
         extractStatutoryDirectorsFromHtml(contact.html, contact.finalUrl),

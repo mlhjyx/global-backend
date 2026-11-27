@@ -84,6 +84,28 @@ describe('createPrismaUrlContentCache', () => {
     expect(queries[0]!.values).toContain(urlContentCacheKey('https://acme.example/about'));
   });
 
+  it('maps fetched_at onto fetchedAt when present on unexpired rows', async () => {
+    const fetchedAt = new Date('2026-11-28T00:00:00.000Z');
+    const { db } = fakeDb([
+      {
+        markdown: 'fresh cached body',
+        content_hash: 'e'.repeat(64),
+        etag: null,
+        last_modified: null,
+        fetched_at: fetchedAt,
+      },
+    ]);
+    const cache = createPrismaUrlContentCache(db);
+    const hit = await cache.get(WORKSPACE_ID, 'https://acme.example/');
+    expect(hit).toEqual({
+      markdown: 'fresh cached body',
+      contentHash: 'e'.repeat(64),
+      etag: null,
+      lastModified: null,
+      fetchedAt,
+    });
+  });
+
   it('returns null when no unexpired row exists', async () => {
     const { db } = fakeDb([]);
     const cache = createPrismaUrlContentCache(db);

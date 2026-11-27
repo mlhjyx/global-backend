@@ -449,4 +449,38 @@ describe('extractCompanyWebsiteStreaming single-activity flow', () => {
     expect(result.passiveDns?.mxProvider).toBe('google_workspace');
     expect(result.passiveDns?.techSignals).toEqual(['hubspot']);
   });
+
+  it('warms urlContentCache with homepage and contact pages for L2 reuse', async () => {
+    const put = vi.fn(async () => undefined);
+    const cache = { get: vi.fn(async () => null), put };
+    const broker = createMockBroker(async (_toolId, input) => {
+      const url = String(input.url);
+      if (url.endsWith('/robots.txt')) {
+        return { data: { status: 404, ok: false, mediaType: 'text/plain', text: '' } };
+      }
+      if (url === 'https://solare-italia.it/') {
+        return { data: { status: 200, ok: true, mediaType: 'text/html', text: RICH_HTML, finalUrl: 'https://www.solare-italia.it/' } };
+      }
+      if (url === 'https://www.solare-italia.it/contatti') {
+        return { data: { status: 200, ok: true, mediaType: 'text/html', text: CONTACT_PAGE_HTML, finalUrl: url } };
+      }
+      throw new Error(`unexpected url ${url}`);
+    });
+
+    await extractCompanyWebsiteStreaming({
+      broker,
+      workspaceId: WORKSPACE_ID,
+      companyId: COMPANY_ID,
+      runId: RUN_ID,
+      domain: 'solare-italia.it',
+      inspectPassiveDns: async () => null,
+      urlContentCache: cache,
+    });
+
+    const cachedUrls = put.mock.calls.map((call) => call[1]);
+    expect(cachedUrls).toContain('https://www.solare-italia.it/');
+    expect(cachedUrls).toContain('https://solare-italia.it/');
+    expect(put.mock.calls[0]?.[0]).toBe(WORKSPACE_ID);
+    expect(put.mock.calls[0]?.[3]).toBe('company-navigation/v2');
+  });
 });

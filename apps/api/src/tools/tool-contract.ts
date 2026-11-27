@@ -211,7 +211,7 @@ export interface ToolResult<T = unknown> {
     contentHash?: string;
     parserVersion: string;
     /** PR-B：HTTP-first 页面缓存结果（未启用缓存时不出现）。 */
-    cache?: "miss" | "conditional-304";
+    cache?: "miss" | "conditional-304" | "fresh-ttl";
   };
   degraded?: boolean; // 走了 fallback / 降级
   /** Ledger-authored durable receipt returned by authoritative settlement, when available. */

@@ -43,6 +43,7 @@ interface UrlContentCacheRow {
   content_hash: string;
   etag: string | null;
   last_modified: string | null;
+  fetched_at?: Date | string | null;
 }
 
 export interface UrlContentCacheTx {
@@ -69,7 +70,7 @@ export function createPrismaUrlContentCache(
       const urlHash = urlContentCacheKey(url, recipe);
       const rows = await db.withWorkspace(workspaceId, async (tx) =>
         tx.$queryRaw<UrlContentCacheRow[]>`
-          SELECT markdown, content_hash, etag, last_modified
+          SELECT markdown, content_hash, etag, last_modified, fetched_at
           FROM url_content_cache
           WHERE workspace_id = ${workspaceId}::uuid
             AND url_hash = ${urlHash}
@@ -79,11 +80,18 @@ export function createPrismaUrlContentCache(
       );
       const row = rows[0];
       if (!row) return null;
+      const fetchedAt =
+        row.fetched_at instanceof Date
+          ? row.fetched_at
+          : typeof row.fetched_at === 'string'
+            ? new Date(row.fetched_at)
+            : undefined;
       return {
         markdown: row.markdown,
         contentHash: row.content_hash,
         etag: row.etag,
         lastModified: row.last_modified,
+        ...(fetchedAt && !Number.isNaN(fetchedAt.getTime()) ? { fetchedAt } : {}),
       };
     },
 

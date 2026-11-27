@@ -56,6 +56,8 @@ export function httpFirstParserVersion(page: HttpFirstPage, exact: boolean): str
  * 200k 足够覆盖且把缓存行大小压到有界（3MB HTML 的正文可能远超此值）。
  */
 export const DEFAULT_HTTP_FIRST_CACHE_MAX_CHARS = 200_000;
+/** 缓存新鲜期上限（默认 6h）：同日 L1→L2 复抓免重走外网/渲染；env：URL_CONTENT_CACHE_FRESH_TTL_MS（0 关闭）。 */
+export const DEFAULT_HTTP_FIRST_FRESH_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 /** 单页 HTTP 抓取上限：15s / 3MB（与 http.get 产物上限一致）。 */
 export const HTTP_FIRST_TIMEOUT_MS = 15_000;
 const HTTP_FIRST_MAX_BYTES = 3_000_000;
@@ -87,8 +89,8 @@ export interface HttpFirstPage {
   markdown: string;
   title: string | null;
   contentHash: string;
-  /** 304 命中缓存时标记来源；普通抓取不带此字段。 */
-  fromCache?: "conditional-304";
+  /** 命中缓存时标记来源（304 条件复用或 6h 新鲜期免出网）；普通抓取不带此字段。 */
+  fromCache?: "conditional-304" | "fresh-ttl";
   /** Only fixed non-default recipes (navigation / Docling PDF) are tagged; legacy pages keep their original shape. */
   parserVersion?: typeof NAVIGATION_PARSER_VERSION | typeof DOCLING_PDF_PARSER_VERSION;
 }
@@ -99,6 +101,7 @@ export interface HttpFirstCachedPage {
   contentHash: string;
   etag: string | null;
   lastModified: string | null;
+  fetchedAt?: Date;
 }
 
 export interface HttpFirstCacheWrite {
@@ -169,6 +172,10 @@ export interface HttpFirstOptions {
   cache?: HttpFirstCacheOptions;
   /** 缓存写入截断上限（默认 {@link DEFAULT_HTTP_FIRST_CACHE_MAX_CHARS}）；主要供测试注入。 */
   cacheMaxChars?: number;
+  /** 覆盖新鲜缓存直出窗口（毫秒，0 关闭直出回到条件请求）；默认读取 URL_CONTENT_CACHE_FRESH_TTL_MS。 */
+  freshCacheTtlMs?: number;
+  /** 可注入时钟（供单测验证新鲜期判断）。 */
+  nowMs?: () => number;
   /** 与 ToolContext / guarded-http 同签名：出网授权与逐跳物理出口观测。 */
   hooks?: {
     authorizeExternalAction?: () => Promise<boolean>;
@@ -266,9 +273,18 @@ function defaultFetchHtml(
  * artifact 引用、不保存 provenance，所以命中率只能从 worker 日志聚合
  * `[http-cache] state=…` 行；URL 截断到 200 字符，避免日志膨胀。
  */
+function defaultFreshCacheTtlMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.URL_CONTENT_CACHE_FRESH_TTL_MS?.trim();
+  if (!raw) return DEFAULT_HTTP_FIRST_FRESH_CACHE_TTL_MS;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed >= 0
+    ? Math.trunc(parsed)
+    : DEFAULT_HTTP_FIRST_FRESH_CACHE_TTL_MS;
+}
+
 function logPageCacheState(
   url: string,
-  state: "miss" | "conditional-304",
+  state: "miss" | "conditional-304" | "fresh-ttl",
 ): void {
   console.log(`[http-cache] state=${state} url=${url.slice(0, 200)}`);
 }
@@ -355,9 +371,46 @@ function extractResponsePage(
 function responseContext(companyUrl: string, response: HttpFirstHtmlResponse) {
   return { companyUrl, pageUrl: response.finalUrl ?? companyUrl };
 }
-function cachedPage(cached: HttpFirstCachedPage, recipe?: CompanyNavigationRecipe): HttpFirstPage {
-  return { markdown: cached.markdown, title: null, contentHash: cached.contentHash, fromCache: 'conditional-304',
-    ...(recipe ? { parserVersion: NAVIGATION_PARSER_VERSION } : {}) };
+/** Reusable HTML→Markdown extractor matching crawl4ai.fetch's navigation recipe for L1 cache warming. */
+export function extractHttpFirstPageFromHtml(
+  html: string,
+  pageUrl: string,
+  options: {
+    companyUrl?: string;
+    minChars?: number;
+    captureNavigation?: CompanyNavigationCapture;
+  } = {},
+): HttpFirstPage | null {
+  try {
+    const minChars = options.minChars ?? defaultMinChars();
+    return extractPage(
+      html,
+      minChars,
+      options.captureNavigation
+        ? {
+            capture: options.captureNavigation,
+            companyUrl: options.companyUrl ?? pageUrl,
+            pageUrl,
+          }
+        : undefined,
+    );
+  } catch {
+    return null;
+  }
+}
+
+function cachedPage(
+  cached: HttpFirstCachedPage,
+  recipe?: CompanyNavigationRecipe,
+  fromCache: "conditional-304" | "fresh-ttl" = "conditional-304",
+): HttpFirstPage {
+  return {
+    markdown: cached.markdown,
+    title: null,
+    contentHash: cached.contentHash,
+    fromCache,
+    ...(recipe ? { parserVersion: NAVIGATION_PARSER_VERSION } : {}),
+  };
 }
 function readCache(cache: HttpFirstCacheOptions, url: string, recipe?: CompanyNavigationRecipe) {
   return recipe ? cache.port.get(cache.workspaceId, url, recipe) : cache.port.get(cache.workspaceId, url);
@@ -413,6 +466,18 @@ async function extractFetchedResponse(
   }
 }
 
+function freshCachedPage(
+  cached: HttpFirstCachedPage | null,
+  options: HttpFirstOptions,
+  cacheRecipe?: CompanyNavigationRecipe,
+): HttpFirstPage | null {
+  if (!cached?.fetchedAt) return null;
+  const freshTtlMs = options.freshCacheTtlMs ?? defaultFreshCacheTtlMs();
+  if (freshTtlMs <= 0) return null;
+  if ((options.nowMs ?? Date.now)() - cached.fetchedAt.getTime() >= freshTtlMs) return null;
+  return cachedPage(cached, cacheRecipe, "fresh-ttl");
+}
+
 /**
  * 抓一页并抽成 Markdown。返回 null 表示「应回落浏览器渲染」：
  * 非 HTML、非 2xx、抓取失败、或可读正文低于阈值。安全拦截与 robots 重定向拒绝向上抛。
@@ -431,6 +496,11 @@ export async function fetchPageHttpFirst(
     } catch {
       cached = null;
     }
+  }
+  const freshHit = freshCachedPage(cached, options, cacheRecipe);
+  if (freshHit) {
+    logPageCacheState(url, "fresh-ttl");
+    return freshHit;
   }
   const validators: HttpFirstRequestValidators | undefined = cached
     ? { ifNoneMatch: cached.etag, ifModifiedSince: cached.lastModified }

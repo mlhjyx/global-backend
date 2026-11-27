@@ -28,10 +28,9 @@ import {
   type CompanyWebsiteOverview,
 } from '../discovery/website-profile/company-overview';
 import { appendRunEvent } from '../discovery/run2/run-events';
-import {
-  extractCompanyWebsiteStreaming,
-  type StreamingCompanyExtraction,
-} from '../discovery/streaming/raw-http-extractor';
+import type { HttpFirstCachePort } from '../adapters/http-first-fetch';
+import type { StreamingCompanyExtraction } from '../discovery/streaming/raw-http-extractor';
+import { resolveL1ExtractionWithSharedFacts } from '../discovery/streaming/domain-resolver';
 import {
   createSharedFactsHookFromEnv,
   normalizeCompanyDomain,
@@ -261,76 +260,6 @@ function buildL0CandidateSnapshot(
   };
 }
 
-async function resolveL1ExtractionWithSharedFacts(input: {
-  sharedFacts: SharedFactsStreamingHook;
-  broker: ExecutionBroker;
-  prisma: PrismaService;
-  workspaceId: string;
-  companyId: string;
-  runAccountKey: string;
-  company: {
-    name: string;
-    domain: string | null;
-    country: string | null;
-    attributes: unknown;
-  };
-  isImportedBuyer: boolean;
-}): Promise<{
-  extraction: StreamingCompanyExtraction | null;
-  sharedFactHit: boolean;
-  cooldownFlagged: boolean;
-  cooldownRetryAfterDays: number | null;
-}> {
-  const preFetch = await input.sharedFacts.lookupL1PreFetch({
-    domain: input.company.domain,
-  });
-  const cooldownFlagged = preFetch.cooldown.cooledDown;
-  const cooldownRetryAfterDays = cooldownFlagged ? preFetch.cooldown.retryAfterDays : null;
-
-  if (preFetch.hit && preFetch.syntheticExtraction) {
-    return {
-      extraction: preFetch.syntheticExtraction,
-      sharedFactHit: true,
-      cooldownFlagged,
-      cooldownRetryAfterDays,
-    };
-  }
-
-  let extraction: StreamingCompanyExtraction | null = null;
-  if (input.company.domain) {
-    extraction = await extractCompanyWebsiteStreaming({
-      broker: input.broker,
-      workspaceId: input.workspaceId,
-      companyId: input.companyId,
-      runId: input.runAccountKey,
-      domain: input.company.domain,
-      authorizeExternalAction: () =>
-        input.prisma.withWorkspace(input.workspaceId, (tx) =>
-          companyMayUseExternalProcessing(tx, input.workspaceId, input.companyId),
-        ),
-    });
-    if (extraction.pagesFetched.length > 0) {
-      await input.sharedFacts.writeBackFromStreamingExtraction({
-        domain: input.company.domain,
-        legalName: input.company.name,
-        country: input.company.country,
-        extraction,
-        isImportedBuyer: input.isImportedBuyer,
-        companyAttributes: isPlainRecord(input.company.attributes)
-          ? input.company.attributes
-          : null,
-      });
-    }
-  }
-
-  return {
-    extraction,
-    sharedFactHit: false,
-    cooldownFlagged,
-    cooldownRetryAfterDays,
-  };
-}
-
 async function persistExtractionFacts(
   tx: Prisma.TransactionClient,
   workspaceId: string,
@@ -474,6 +403,7 @@ export function createStreamingDiscoveryActivities(deps: {
   budgetStore?: BudgetStore;
   sharedFactsHook?: SharedFactsStreamingHook;
   contactEnrichmentSafety?: Pick<ContactEnrichmentSafetyService, 'executeRun'>;
+  urlContentCache?: HttpFirstCachePort;
 }) {
   const budgets =
     deps.budgetStore ??
@@ -697,7 +627,9 @@ export function createStreamingDiscoveryActivities(deps: {
           runAccountKey: binding.accountKey,
           company: loaded.company,
           isImportedBuyer: loaded.isImportedBuyer,
+          ...(deps.urlContentCache ? { urlContentCache: deps.urlContentCache } : {}),
         });
+        const effectiveDomain = resolvedExtraction.domain ?? loaded.company.domain;
         const extraction = resolvedExtraction.extraction;
         const { sharedFactHit, cooldownFlagged, cooldownRetryAfterDays } = resolvedExtraction;
 
@@ -725,7 +657,7 @@ export function createStreamingDiscoveryActivities(deps: {
           company: {
             id: loaded.company.id,
             name: loaded.company.name,
-            domain: loaded.company.domain,
+            domain: effectiveDomain,
             country: loaded.company.country,
             industry: loaded.company.industry,
             title: extraction?.title ?? null,
@@ -743,9 +675,9 @@ export function createStreamingDiscoveryActivities(deps: {
         } : undefined);
 
         throwIfActivityCancelled();
-        if (loaded.company.domain && (fit.verdict === 'match' || fit.verdict === 'weak')) {
+        if (effectiveDomain && (fit.verdict === 'match' || fit.verdict === 'weak')) {
           await sharedFacts.recordQualifiedTouch({
-            domain: loaded.company.domain,
+            domain: effectiveDomain,
             workspaceId: args.workspaceId,
             isImportedBuyer: loaded.isImportedBuyer,
           });
@@ -797,7 +729,7 @@ export function createStreamingDiscoveryActivities(deps: {
                 recentCandidates: upsertStreamingCandidate(current.recentCandidates, {
                   companyId: loaded.company!.id,
                   name: loaded.company!.name,
-                  domain: loaded.company!.domain,
+                  domain: effectiveDomain,
                   country: loaded.company!.country,
                   stage: 'l1_scored',
                   fitVerdict: fit.verdict,
