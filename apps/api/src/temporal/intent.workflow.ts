@@ -1,4 +1,4 @@
-import { proxyActivities } from '@temporalio/workflow';
+import { patched, proxyActivities } from '@temporalio/workflow';
 import type { IntentActivities } from './intent.activities';
 import type { WatchResult } from '../intent/website-watch.service';
 import { isExecutionControlError } from '../execution-budget/execution-control-error';
@@ -38,6 +38,12 @@ export async function intentSweepWorkflow(input: ({ limit?: number } & PlatformS
   // 保留期清理（全局、廉价、fail-safe）：先删超期 web_watch 变更事件（GDPR 存储限制）。
   try { await acts.purgeStaleIntentEvents({ ...authorityArgs }); }
   catch (error) { if (isExecutionControlError(error)) throw error; }
+
+  // 跨进程自动纳管：在持有 platformWriter 的 platform-worker 内将各租户新匹配公司加入 web_watch。
+  if (patched('intent-sweep-auto-register-watches-v1')) {
+    try { await acts.syncQualifiedWatchesFromWorkspaces({ limit: 20, ...authorityArgs }); }
+    catch (error) { if (isExecutionControlError(error)) throw error; }
+  }
 
   const { sourceIds } = await acts.listDueWatches({
     limit: boundedPlatformIntentDueSourceLimit(input.limit),

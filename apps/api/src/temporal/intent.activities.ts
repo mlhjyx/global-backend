@@ -4,6 +4,7 @@ import type { ExecutionBroker } from '../tools/tool-contract';
 import { PageFetcher } from '../intent/page-fetcher';
 import { WebsiteWatchService, WatchResult, WEB_WATCH_KEY } from '../intent/website-watch.service';
 import { IntentProjectionService, ProjectIntentResult } from '../intent/intent-projection.service';
+import { normalizeDomain } from '../discovery/identity';
 import { type BudgetStore, UnavailableBudgetStore } from '../tools/budget-store';
 import { PLATFORM_WORKSPACE } from '../discovery/provider-contract';
 import type { PlatformScheduleAuthorityActivityInput } from './platform-schedule-authority';
@@ -12,7 +13,7 @@ import { platformEgressDispatcher } from './platform-schedule-authority.activiti
 import type { PlatformEgressFence } from '../platform-authority/platform-egress-fence';
 import { INTENT_SWEEP_SCHEDULE_ID } from './understanding.constants';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
-import { ExecutionControlError } from '../execution-budget/execution-control-error';
+import { ExecutionControlError, isExecutionControlError } from '../execution-budget/execution-control-error';
 import { boundedPlatformIntentDueSourceLimit } from '../platform-authority/platform-execution-contract';
 
 const DEFAULT_RETENTION_MS = 90 * 24 * 60 * 60 * 1000; // web_watch intent 事件保留 90 天（可 arg 覆盖）
@@ -45,6 +46,74 @@ export function createIntentActivities(deps: {
   const attest = (args: PlatformScheduleAuthorityActivityInput) =>
     attestPlatformScheduleActivity({ args, budgetStore: budgets, scheduleId: INTENT_SWEEP_SCHEDULE_ID, activityRunId: deps.activityRunId });
   return {
+    /**
+     * 跨进程收口：customer-worker 无 platformWriter 无法直接写 monitored_source，
+     * 由持有 platformWriter 的 platform-worker 在 intentSweep 启动时自动将各租户已匹配（fitVerdict=match）
+     * 且有官网域名的公司纳入 web_watch（幂等去重、遵守 web_watch 开关与每轮数量上限）。
+     */
+    async syncQualifiedWatchesFromWorkspaces(
+      args: ({ limit?: number } & PlatformScheduleAuthorityActivityInput) = {},
+    ): Promise<{ workspaces: number; registered: number; skipped: number }> {
+      await attest(args);
+      if (!deps.platformWriter) return { workspaces: 0, registered: 0, skipped: 0 };
+      const provider = await deps.prisma.dataProvider.findUnique({
+        where: { key: WEB_WATCH_KEY },
+        select: { status: true },
+      });
+      if (provider && provider.status !== 'ENABLED') {
+        return { workspaces: 0, registered: 0, skipped: 0 };
+      }
+      const workspaces = await deps.platformWriter.$queryRaw<Array<{ id: string }>>(
+        Prisma.sql`SELECT id::text AS id FROM public.list_platform_workspace_ids_v1()`,
+      );
+      if (workspaces.length === 0) return { workspaces: 0, registered: 0, skipped: 0 };
+
+      const existing = await deps.prisma.monitoredSource.findMany({
+        where: { providerKey: WEB_WATCH_KEY },
+        select: { sourceKey: true },
+      });
+      const watchedKeys = new Set(existing.map((row) => row.sourceKey));
+      const maxToRegister = Math.min(Math.max(1, Math.trunc(args?.limit ?? 20)), 50);
+      let registered = 0;
+      let skipped = 0;
+
+      for (const ws of workspaces) {
+        if (registered >= maxToRegister) break;
+        const candidates = await deps.prisma
+          .withWorkspace(ws.id, (tx) =>
+            tx.canonicalCompany.findMany({
+              where: {
+                status: { not: 'SUPPRESSED' },
+                domain: { not: null },
+                leads: { some: { fitVerdict: 'match' } },
+              },
+              select: { id: true, domain: true },
+              orderBy: { updatedAt: 'desc' },
+              take: Math.min(20, maxToRegister - registered + 5),
+            }),
+          )
+          .catch(() => []);
+        for (const company of candidates) {
+          if (registered >= maxToRegister) break;
+          const domain = company.domain ? normalizeDomain(company.domain) : null;
+          if (!domain) continue;
+          const sourceKey = `${WEB_WATCH_KEY}:${domain}`;
+          if (watchedKeys.has(sourceKey)) continue;
+          try {
+            await projSvc.registerWatch(ws.id, company.id, {
+              pages: [{ url: `https://${domain}/`, kind: 'generic' }],
+            });
+            watchedKeys.add(sourceKey);
+            registered += 1;
+          } catch (error) {
+            if (isExecutionControlError(error)) throw error;
+            skipped += 1;
+          }
+        }
+      }
+      return { workspaces: workspaces.length, registered, skipped };
+    },
+
     /** 到期的 web_watch 自动源（ACTIVE + cadence.everyMs>0 + nextFetchAt 到期）。cadence 过滤下推 DB。 */
     async listDueWatches(args: ({ limit?: number } & PlatformScheduleAuthorityActivityInput) = {}): Promise<{ sourceIds: string[] }> {
       await attest(args);

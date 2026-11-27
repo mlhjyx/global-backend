@@ -33,6 +33,24 @@ const EXCLUDED_OFFICIAL_HOST_SUFFIXES = [
   'solarquotes.com.au', 'pv-magazine.com', 'pv-tech.org', 'sec.gov', 'europa.eu',
 ] as const;
 
+const UTILITY_SUBDOMAIN_PREFIXES = new Set([
+  'app', 'docs', 'doc', 'support', 'help', 'status', 'api', 'login', 'signin', 'auth',
+  'portal', 'shop', 'store', 'blog', 'news', 'careers', 'jobs', 'investors', 'ir',
+  'mail', 'webmail', 'cdn', 'static', 'wiki', 'forum', 'community', 'my', 'dashboard',
+  'console', 'admin', 'account', 'accounts', 'client', 'clients', 'partner', 'partners',
+]);
+
+const ALLOWED_SLD_SUFFIX_WORDS = [
+  'technologies', 'technology', 'solutions', 'services', 'service', 'systems', 'system',
+  'distribution', 'distribuidora', 'engineering', 'industries', 'industrial', 'international',
+  'photovoltaik', 'photovoltaic', 'renewables', 'renewable', 'deutschland', 'netherlands',
+  'electrical', 'electric', 'holdings', 'holding', 'partners', 'ventures', 'energies',
+  'storage', 'battery', 'germany', 'nederland', 'trading', 'capital', 'europe', 'europa',
+  'energy', 'energie', 'global', 'direct', 'online', 'solar', 'power', 'group', 'clean',
+  'green', 'renew', 'infra', 'works', 'smart', 'world', 'grid', 'tech', 'bess', 'wind',
+  'labs', 'plus', 'corp', 'inc', 'ltd', 'eco', 'pro', 'net', 'web', 'hq', 'pv',
+] as const;
+
 const LEGAL_SUFFIX_TOKENS = new Set([
   'gmbh', 'mbh', 'ag', 'kg', 'ohg', 'ug', 'gbr', 'ev', 'ltd', 'limited', 'plc', 'llp',
   'inc', 'incorporated', 'llc', 'corp', 'corporation', 'co', 'company', 'bv', 'nv',
@@ -114,6 +132,8 @@ export function isExcludedOfficialHost(host: string): boolean {
   const lower = host.trim().toLowerCase().replace(/^www\./u, '');
   if (!lower || IPV4_RE.test(lower) || !lower.includes('.')) return true;
   if (lower.endsWith('.gov') || lower.includes('.gov.')) return true;
+  const labels = lower.split('.');
+  if (labels.length >= 3 && UTILITY_SUBDOMAIN_PREFIXES.has(labels[0] ?? '')) return true;
   return EXCLUDED_OFFICIAL_HOST_SUFFIXES.some(
     (suffix) => lower === suffix || lower.endsWith(`.${suffix}`),
   );
@@ -172,20 +192,49 @@ function matchesCountryCcTld(host: string, country?: string | null): boolean {
   return suffixes.some((suffix) => host.endsWith(suffix));
 }
 
+function isComposedOfKnownSuffixWords(remainder: string): boolean {
+  if (!remainder) return true;
+  let rest = remainder;
+  let guard = 0;
+  while (rest.length > 0 && guard < 8) {
+    guard += 1;
+    const match = ALLOWED_SLD_SUFFIX_WORDS.find((word) => rest.startsWith(word));
+    if (!match) return false;
+    rest = rest.slice(match.length);
+  }
+  return rest.length === 0;
+}
+
+function tokenMatchesSldCleanly(sld: string, token: string): boolean {
+  const idx = sld.indexOf(token);
+  if (idx === -1) return false;
+  if (sld === token) return true;
+  const prefix = sld.slice(0, idx);
+  const suffix = sld.slice(idx + token.length);
+  // Very long compound names (>=10 chars like "solarparken") are rarely accidental substrings;
+  // shorter tokens must sit alongside recognized corporate/industry words so "field" never
+  // matches "fieldwire" and "dispatch" never matches "dispatchit".
+  if (token.length >= 10) return true;
+  return isComposedOfKnownSuffixWords(prefix) && isComposedOfKnownSuffixWords(suffix);
+}
+
 function scoreHostAgainstTokens(
   sld: string,
   tokens: ReturnType<typeof extractCompanyTokens>,
 ): { score: number; matched: boolean } {
   if (!sld || sld.length < 3) return { score: 0, matched: false };
   const exactTargets = [tokens.joinedCore, tokens.joinedDistinctive].filter((t) => t.length >= 4);
-  if (exactTargets.some((target) => sld === target || sld.includes(target) || target.includes(sld) && sld.length >= 5)) {
-    return { score: 12, matched: true };
+  if (exactTargets.some((target) => sld === target)) {
+    return { score: 11, matched: true };
+  }
+  if (exactTargets.some((target) => tokenMatchesSldCleanly(sld, target) || (target.length >= 8 && target.includes(sld) && sld.length >= 6))) {
+    return { score: 10, matched: true };
   }
   const strongDistinctive = tokens.distinctiveTokens.filter((t) => t.length >= 4);
-  if (strongDistinctive.some((t) => sld.includes(t))) {
-    return { score: 8, matched: true };
+  if (strongDistinctive.some((t) => tokenMatchesSldCleanly(sld, t))) {
+    return { score: 9, matched: true };
   }
-  const matchingCore = tokens.coreTokens.filter((t) => t.length >= 4 && sld.includes(t));
+  const matchingCore = tokens.coreTokens.filter((t) => t.length >= 4 && tokenMatchesSldCleanly(sld, t));
   if (matchingCore.length >= 2) {
     return { score: 9, matched: true };
   }
@@ -202,11 +251,16 @@ function scoreTitleAgainstTokens(
   const titleTokens = tokenizeNormalized(title);
   if (titleTokens.length === 0) return { score: 0, fullCoreMatch: false };
   const joinedTitle = titleTokens.join('');
+  const titleSet = new Set(titleTokens);
   const fullCoreMatch =
     (tokens.joinedCore.length >= 4 && joinedTitle.includes(tokens.joinedCore)) ||
-    (tokens.joinedDistinctive.length >= 5 && joinedTitle.includes(tokens.joinedDistinctive));
+    (tokens.distinctiveTokens.length >= 2 &&
+      tokens.joinedDistinctive.length >= 5 &&
+      joinedTitle.includes(tokens.joinedDistinctive)) ||
+    (tokens.distinctiveTokens.length === 1 &&
+      tokens.distinctiveTokens[0]!.length >= 5 &&
+      titleSet.has(tokens.distinctiveTokens[0]!));
   if (fullCoreMatch) return { score: 6, fullCoreMatch: true };
-  const titleSet = new Set(titleTokens);
   const distinctiveHits = tokens.distinctiveTokens.filter((t) => t.length >= 3 && titleSet.has(t)).length;
   if (distinctiveHits >= 2 || (distinctiveHits === 1 && tokens.distinctiveTokens.length === 1)) {
     return { score: 3, fullCoreMatch: false };
@@ -247,6 +301,15 @@ export function buildDomainLookupQuery(companyName: string, country?: string | n
   return hint ? `"${cleanName}" ${hint} official website` : `"${cleanName}" official website`;
 }
 
+function rankBonusForIndex(index: number): number {
+  if (index === 0) return 5;
+  if (index === 1) return 4;
+  if (index === 2) return 3;
+  if (index <= 4) return 2;
+  if (index <= 7) return 1;
+  return 0;
+}
+
 /** Pure scorer: pick the highest-confidence official corporate domain from search results. */
 export function pickOfficialDomainFromSearchResults(
   results: readonly SearchResultCandidate[],
@@ -256,23 +319,35 @@ export function pickOfficialDomainFromSearchResults(
   const tokens = extractCompanyTokens(companyName);
   if (tokens.coreTokens.length === 0) return null;
 
-  const bestByHost = new Map<string, number>();
-  for (const item of results) {
+  const hostOccurrences = new Map<string, number>();
+  const parsedRows: Array<{ index: number; host: string; pathname: string; title: string }> = [];
+  for (let i = 0; i < results.length; i += 1) {
+    const item = results[i]!;
     const parsed = parseCandidateUrl(item.url);
     if (!parsed) continue;
-    const sld = domainLabelWithoutHyphens(parsed.host);
+    hostOccurrences.set(parsed.host, (hostOccurrences.get(parsed.host) ?? 0) + 1);
+    parsedRows.push({ index: i, host: parsed.host, pathname: parsed.pathname, title: item.title ?? '' });
+  }
+
+  const bestByHost = new Map<string, number>();
+  for (const row of parsedRows) {
+    const sld = domainLabelWithoutHyphens(row.host);
     const hostMatch = scoreHostAgainstTokens(sld, tokens);
-    const titleMatch = scoreTitleAgainstTokens(item.title ?? '', tokens);
-    const isHomepage = HOMEPAGE_PATH_RE.test(parsed.pathname);
+    const titleMatch = scoreTitleAgainstTokens(row.title, tokens);
+    const isHomepage = HOMEPAGE_PATH_RE.test(row.pathname);
     if (!hostMatch.matched && !(titleMatch.fullCoreMatch && isHomepage)) continue;
+    const occurrences = hostOccurrences.get(row.host) ?? 1;
+    const freqBonus = occurrences >= 3 ? 3 : occurrences === 2 ? 2 : 0;
     const score =
       hostMatch.score +
       titleMatch.score +
+      rankBonusForIndex(row.index) +
+      freqBonus +
       (isHomepage ? 2 : 0) +
-      (matchesCountryCcTld(parsed.host, country) ? 2 : 0);
-    if (score < 8) continue;
-    const prev = bestByHost.get(parsed.host) ?? 0;
-    if (score > prev) bestByHost.set(parsed.host, score);
+      (matchesCountryCcTld(row.host, country) ? 2 : 0);
+    if (score < 10) continue;
+    const prev = bestByHost.get(row.host) ?? 0;
+    if (score > prev) bestByHost.set(row.host, score);
   }
 
   let bestHost: string | null = null;
