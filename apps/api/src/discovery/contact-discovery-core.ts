@@ -1,3 +1,4 @@
+import type { CanonicalCompany, Prisma } from '@prisma/client';
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { DiscoveryProviderRegistry } from './provider.registry';
@@ -69,15 +70,134 @@ export interface ContactDiscoveryCoreInput {
    * Q25（2026-11-04）：个人数据访问/物化审计的归因——谁（用户 id 或 discovery-run:<runId>）
    * 在什么用途下访问了这家公司的联系人。
    */
-  audit: {
-    actorId: string;
-    actorKind: PersonalDataAccessActorKind;
-    purpose: Extract<
-      PersonalDataAccessPurpose,
-      'contact_discovery' | 'run_contact_materialization'
-    >;
-    correlationId?: string | null;
-  };
+  audit: ContactDiscoveryAudit;
+}
+
+export interface ContactDiscoveryAudit {
+  actorId: string;
+  actorKind: PersonalDataAccessActorKind;
+  purpose: Extract<
+    PersonalDataAccessPurpose,
+    'contact_discovery' | 'run_contact_materialization'
+  >;
+  correlationId?: string | null;
+}
+
+export async function assertContactDiscoveryCompanyProvenance(tx: Prisma.TransactionClient, companyId: string): Promise<void> {
+  const evidenceRows = await tx.fieldEvidence.findMany({
+    where: {
+      entityType: 'company',
+      entityId: companyId,
+    },
+    select: { providerKey: true, license: true },
+  });
+  if (evidenceRows.some(isSyntheticDiscoveryProvenance)) {
+    throw new ConflictException({
+      error: {
+        code: 'SYNTHETIC_PROVENANCE_QUARANTINED',
+        message: 'historical synthetic discovery evidence is quarantined from product actions',
+      },
+    });
+  }
+}
+
+export async function persistContactDiscoveryAdapter(tx: Prisma.TransactionClient, input: {
+  workspaceId: string;
+  company: Pick<CanonicalCompany, 'id' | 'dedupeKey' | 'name' | 'domain' | 'country' | 'attributes'>;
+  adapterKey: string;
+  contacts: ProviderContactRecord[];
+  companyChannels?: CompanyChannelInput[];
+  suppressedEmails: Set<string>;
+  lawfulBasis: LawfulBasis;
+}) {
+  const res = await persistDiscoveredContacts(tx, {
+    workspaceId: input.workspaceId,
+    company: {
+      id: input.company.id,
+      dedupeKey: input.company.dedupeKey,
+    },
+    adapterKey: input.adapterKey,
+    contacts: input.contacts,
+    suppressedEmails: input.suppressedEmails,
+    lawfulBasis: input.lawfulBasis,
+  });
+  // A1：公司级渠道在**同一事务**内落库；suppression 与联系人路径同纪律——按当前
+  // suppression_record 复读（email/domain 规范化后比对），命中即丢弃，不依赖抓取前快照。
+  // persist 已判定公司被抑制（SUPPRESSED / companyMatchesSuppression）时整批放弃——
+  // 联系人被拒而渠道照写的空窗不存在。
+  if (input.companyChannels?.length && res.suppressed !== true) {
+    const suppressions = await tx.suppressionRecord.findMany({
+      where: { type: { in: ['email', 'domain'] } },
+      select: { type: true, value: true },
+    });
+    const suppressedEmails = canonicalizeSuppressionValues(
+      'email',
+      suppressions.filter((s) => s.type === 'email').map((s) => s.value),
+    );
+    const suppressedDomains = canonicalizeSuppressionValues(
+      'domain',
+      suppressions.filter((s) => s.type === 'domain').map((s) => s.value),
+    );
+    // 防御性上限：适配器不得在单事务里无界写入（装配器自身 cap=8）。
+    const boundedChannels = input.companyChannels.slice(0, 32);
+    if (input.companyChannels.length > boundedChannels.length) {
+      console.warn(
+        `[discoverContacts] adapter ${input.adapterKey} returned ${input.companyChannels.length} company channels; writing the first ${boundedChannels.length}`,
+      );
+    }
+    const channels = boundedChannels.filter((channel) => {
+      if (channel.channel !== 'email') return true;
+      const key = canonicalizeSuppressionValue('email', channel.value);
+      if (!key || suppressedEmails.has(key)) return false;
+      const at = key.lastIndexOf('@');
+      const domain = at >= 0 ? key.slice(at + 1) : '';
+      return !suppressedDomains.has(domain);
+    });
+    if (channels.length) {
+      await upsertCompanyContactChannels(tx, {
+        workspaceId: input.workspaceId,
+        companyId: input.company.id,
+        channels,
+      });
+      if (!input.company.country) {
+        await backfillCompanyCountryFromChannels(tx, {
+          workspaceId: input.workspaceId,
+          company: {
+            id: input.company.id,
+            name: input.company.name,
+            domain: input.company.domain,
+            country: input.company.country,
+            attributes: input.company.attributes,
+          },
+          extraChannels: channels.filter((c) => c.channel === 'phone'),
+        });
+      }
+    }
+  }
+  return res;
+}
+
+export async function readAndAuditContactDiscovery(
+  tx: Prisma.TransactionClient,
+  input: Readonly<{ workspaceId: string; companyId: string; lawfulBasis: LawfulBasis; audit: ContactDiscoveryAudit }>,
+) {
+  const contacts = await tx.canonicalContact.findMany({
+    where: { companyId: input.companyId },
+    include: { contactPoints: true },
+  });
+  // Q25：物化与审计同事务——物化了联系人却没有审计行的情况不出现。
+  await recordPersonalDataAccess(tx, {
+    workspaceId: input.workspaceId,
+    actorId: input.audit.actorId,
+    actorKind: input.audit.actorKind,
+    purpose: input.audit.purpose,
+    companyId: input.companyId,
+    fieldClasses: fieldClassesForContacts(contacts),
+    subjectCount: contacts.length,
+    lawfulBasisRef: input.lawfulBasis.ref ?? null,
+    correlationId: input.audit.correlationId ?? null,
+  });
+  return contacts;
 }
 
 /**
@@ -99,21 +219,7 @@ export async function discoverContactsCore(
         throw new NotFoundException({
           error: { code: 'NOT_FOUND', message: 'company not found' },
         });
-      const evidenceRows = await tx.fieldEvidence.findMany({
-        where: {
-          entityType: 'company',
-          entityId: input.companyId,
-        },
-        select: { providerKey: true, license: true },
-      });
-      if (evidenceRows.some(isSyntheticDiscoveryProvenance)) {
-        throw new ConflictException({
-          error: {
-            code: 'SYNTHETIC_PROVENANCE_QUARANTINED',
-            message: 'historical synthetic discovery evidence is quarantined from product actions',
-          },
-        });
-      }
+      await assertContactDiscoveryCompanyProvenance(tx, input.companyId);
       const companySuppressions = await tx.suppressionRecord.findMany({
         where: { type: { in: ['domain', 'company_name'] } },
         select: { type: true, value: true },
@@ -274,72 +380,17 @@ export async function discoverContactsCore(
       ): Promise<null> => {
         // 同一 tx 内顺序 persist：后一 adapter 的 resolve 看得到前一 adapter 刚插入的行 →
         // 同一人经 resolvePersonIdentity 合并（decision_maker 的 email + CH 的 officer_id 落同一条）。
-        const res = await persistDiscoveredContacts(transaction, {
+        const res = await persistContactDiscoveryAdapter(transaction, {
           workspaceId: input.workspaceId,
-          company: {
-            id: loaded.company.id,
-            dedupeKey: loaded.company.dedupeKey,
-          },
+          company: loaded.company,
           adapterKey: pa.key,
           contacts: pa.contacts,
+          companyChannels: pa.companyChannels,
           suppressedEmails: loaded.suppressedEmails,
           lawfulBasis: input.lawfulBasis,
         });
         skippedSuppressed += res.skippedSuppressed;
         skippedInvalid += res.skippedInvalid;
-        // A1：公司级渠道在**同一事务**内落库；suppression 与联系人路径同纪律——按当前
-        // suppression_record 复读（email/domain 规范化后比对），命中即丢弃，不依赖抓取前快照。
-        // persist 已判定公司被抑制（SUPPRESSED / companyMatchesSuppression）时整批放弃——
-        // 联系人被拒而渠道照写的空窗不存在。
-        if (pa.companyChannels?.length && res.suppressed !== true) {
-          const suppressions = await transaction.suppressionRecord.findMany({
-            where: { type: { in: ['email', 'domain'] } },
-            select: { type: true, value: true },
-          });
-          const suppressedEmails = canonicalizeSuppressionValues(
-            'email',
-            suppressions.filter((s) => s.type === 'email').map((s) => s.value),
-          );
-          const suppressedDomains = canonicalizeSuppressionValues(
-            'domain',
-            suppressions.filter((s) => s.type === 'domain').map((s) => s.value),
-          );
-          // 防御性上限：适配器不得在单事务里无界写入（装配器自身 cap=8）。
-          const boundedChannels = pa.companyChannels.slice(0, 32);
-          if (pa.companyChannels.length > boundedChannels.length) {
-            console.warn(
-              `[discoverContacts] adapter ${pa.key} returned ${pa.companyChannels.length} company channels; writing the first ${boundedChannels.length}`,
-            );
-          }
-          const channels = boundedChannels.filter((channel) => {
-            if (channel.channel !== 'email') return true;
-            const key = canonicalizeSuppressionValue('email', channel.value);
-            if (!key || suppressedEmails.has(key)) return false;
-            const at = key.lastIndexOf('@');
-            const domain = at >= 0 ? key.slice(at + 1) : '';
-            return !suppressedDomains.has(domain);
-          });
-          if (channels.length) {
-            await upsertCompanyContactChannels(transaction, {
-              workspaceId: input.workspaceId,
-              companyId: loaded.company.id,
-              channels,
-            });
-            if (!loaded.company.country) {
-              await backfillCompanyCountryFromChannels(transaction, {
-                workspaceId: input.workspaceId,
-                company: {
-                  id: loaded.company.id,
-                  name: loaded.company.name,
-                  domain: loaded.company.domain,
-                  country: loaded.company.country,
-                  attributes: loaded.company.attributes,
-                },
-                extraChannels: channels.filter((c) => c.channel === 'phone'),
-              });
-            }
-          }
-        }
         if (pa.costCents > 0) {
           await transaction.usageLedger.create({
             data: {
@@ -387,22 +438,7 @@ export async function discoverContactsCore(
           data: { contactDiscoveryAttemptedAt: new Date() },
         });
       }
-      const contacts = await tx.canonicalContact.findMany({
-        where: { companyId: loaded.company.id },
-        include: { contactPoints: true },
-      });
-      // Q25：物化与审计同事务——物化了联系人却没有审计行的情况不出现。
-      await recordPersonalDataAccess(tx, {
-        workspaceId: input.workspaceId,
-        actorId: input.audit.actorId,
-        actorKind: input.audit.actorKind,
-        purpose: input.audit.purpose,
-        companyId: loaded.company.id,
-        fieldClasses: fieldClassesForContacts(contacts),
-        subjectCount: contacts.length,
-        lawfulBasisRef: input.lawfulBasis.ref ?? null,
-        correlationId: input.audit.correlationId ?? null,
-      });
+      const contacts = await readAndAuditContactDiscovery(tx, { ...input, companyId: loaded.company.id });
       return {
         contacts,
         skippedSuppressed,

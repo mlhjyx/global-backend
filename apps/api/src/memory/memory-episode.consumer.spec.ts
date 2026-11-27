@@ -16,6 +16,7 @@ interface StoredEpisode {
   phase: string;
   occurredAt: Date;
   sourceEventId: string;
+  payload?: unknown;
 }
 
 class FakeStore {
@@ -130,6 +131,7 @@ function event(
     producer: 'global-backend',
     correlationId: null,
     causationId: null,
+    aggregateType: 'DiscoveryRun',
     aggregateId: RUN_ID,
     payload: {
       planId: PLAN_ID,
@@ -189,6 +191,41 @@ describe('MemoryEpisodeConsumer', () => {
     expect(first).toEqual({ scanned: 1, inserted: 1, failed: 0 });
     expect(second).toEqual({ scanned: 1, inserted: 0, failed: 0 });
     expect(store.episodes.size).toBe(1);
+  });
+
+  it('accepts v3 completion without adding technical binding fields to episodic memory', async () => {
+    const store = new FakeStore();
+    store.runs.set(RUN_ID, { id: RUN_ID, icpId: ICP_ID, completedAt: RUN_COMPLETED_AT });
+    const taskRunId = '77777777-7777-4777-8777-777777777777';
+    const attemptId = '88888888-8888-4888-8888-888888888888';
+    const payload = {
+      planId: PLAN_ID, status: 'DONE', stats: { discovered: 3 },
+      executionContractVersion: 3, executionOrigin: 'SAAS_TASK', icpId: ICP_ID,
+      taskRef: {
+        workspaceId: WORKSPACE_ID, planId: PLAN_ID, taskId: EVENT_ID, taskRunId,
+        attemptId, requestSha256: 'a'.repeat(64),
+      },
+    };
+    const { consumer } = build([event({ payload })], store);
+
+    await expect(consumer.runOnce(new Date('2026-11-08T11:00:00Z')))
+      .resolves.toEqual({ scanned: 1, inserted: 1, failed: 0 });
+    expect([...store.episodes.values()][0]?.payload).toEqual({
+      planId: PLAN_ID, status: 'DONE', stats: { discovered: 3 }, cost: 0, costBasis: 'usage_ledger-runid/v1',
+      taskRef: { taskId: EVENT_ID, taskRunId },
+    });
+  });
+
+  it('accepts a version 3 event with no optional stats and stores an empty snapshot', async () => {
+    const store = new FakeStore();
+    store.runs.set(RUN_ID, { id: RUN_ID, icpId: ICP_ID, completedAt: RUN_COMPLETED_AT });
+    const { consumer } = build([event({ payload: {
+      planId: PLAN_ID, status: 'PARTIAL', executionContractVersion: 3, executionOrigin: 'DIRECT', icpId: ICP_ID,
+    } })], store);
+
+    await expect(consumer.runOnce(new Date('2026-11-08T11:00:00Z')))
+      .resolves.toEqual({ scanned: 1, inserted: 1, failed: 0 });
+    expect([...store.episodes.values()][0]?.payload).toMatchObject({ stats: {} });
   });
 
   it('writes results_backfilled only when phase one exists, once', async () => {

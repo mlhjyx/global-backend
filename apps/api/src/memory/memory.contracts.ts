@@ -1,3 +1,9 @@
+import {
+  hasVersionedDiscoveryCompletion,
+  matchesDiscoveryCompletionV3,
+  type DiscoveryCompletionEnvelope,
+} from '../runtime/discovery-completion-contract';
+
 /**
  * D-MA-7 memory layer v0 contracts.
  *
@@ -224,13 +230,21 @@ function exactKeys(
 
 export function parseRunCompletedPayload(
   payload: unknown,
+  envelope?: DiscoveryCompletionEnvelope,
 ): RunCompletedPayload {
   const object = record(payload);
   if (!object) throw new MemoryPayloadError('run payload is not an object');
+  const versioned = hasVersionedDiscoveryCompletion(object);
+  if (versioned && (!envelope || !matchesDiscoveryCompletionV3(object, envelope))) {
+    throw new MemoryPayloadError('v3 run completion does not match its envelope');
+  }
   exactKeys(
     object,
-    ['planId', 'status', 'stats'],
-    ['cost', 'costBasis', 'taskRef'],
+    versioned ? ['planId', 'status'] : ['planId', 'status', 'stats'],
+    [
+      'cost', 'costBasis', 'taskRef',
+      ...(versioned ? ['stats', 'executionContractVersion', 'executionOrigin', 'icpId', 'runId', 'run_id'] : []),
+    ],
   );
   if (typeof object.planId !== 'string' || !UUID_RE.test(object.planId)) {
     throw new MemoryPayloadError('planId is not a UUID');
@@ -263,7 +277,7 @@ export function parseRunCompletedPayload(
     }
     taskRef = { taskId: ref.taskId, taskRunId: ref.taskRunId };
   }
-  const stats = record(object.stats);
+  const stats = versioned && object.stats === undefined ? {} : record(object.stats);
   if (!stats) throw new MemoryPayloadError('stats is not an object');
   const summarized = summarizeStats(stats);
   assertNoPersonalData(summarized, 'stats');

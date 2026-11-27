@@ -5,12 +5,14 @@ import {
   NEW_API_SETTLEMENT_READBACK_CONTRACT,
   type NewApiRequestBoundSettlement,
   type NewApiRequestBoundSettlementInput,
+  type NewApiRequestBoundSettlementReceipt,
   type NewApiRequestBoundSettlementResolverPort,
   type NewApiRequestBoundSettlementResolverSettings,
   type NewApiRequestBoundSettlementUnknownReason as UnknownReason,
   type NewApiSettlementReadbackCapability,
   type NewApiSettlementReadbackProbe,
   type NewApiSettlementReadbackProbePhase,
+  type NewApiReportedMonetaryCharge,
 } from "./settlement-readback-contract";
 
 export {
@@ -61,6 +63,7 @@ interface ReadbackReceipt {
   cache_creation_tokens: unknown;
   cache_read_tokens: unknown;
   upstream_id_state: unknown;
+  actual_charge?: unknown;
 }
 
 const RECEIPT_KEYS = [
@@ -377,20 +380,45 @@ type ReceiptValidation =
       inputTokens: number;
       outputTokens: number;
       upstreamIdState: "observed" | "absent";
+      actualCharge?: NewApiReportedMonetaryCharge;
     }
   | {
       status: "invalid";
       reason: "log_invalid" | "model_mismatch" | "channel_mismatch";
     };
 
+function parseActualCharge(value: unknown): NewApiReportedMonetaryCharge | null | undefined {
+  if (value === undefined) return undefined;
+  if (!plainRecord(value) || !exactKeys(value, ["currency", "amount_micros"]) ||
+    typeof value.currency !== "string" || !/^[A-Z]{3}$/u.test(value.currency) ||
+    typeof value.amount_micros !== "string" || !CANONICAL_NON_NEGATIVE_DECIMAL.test(value.amount_micros)) {
+    return null;
+  }
+  const amountMicros = Number(value.amount_micros);
+  return safeInteger(amountMicros, 0) ? Object.freeze({ currency: value.currency, amountMicros }) : null;
+}
+
+function hasReceiptShape(value: unknown, discovery: boolean): value is ReadbackReceipt {
+  if (!plainRecord(value)) return false;
+  const keys = discovery && Object.hasOwn(value, "actual_charge")
+    ? [...RECEIPT_KEYS, "actual_charge"]
+    : RECEIPT_KEYS;
+  return exactKeys(value, keys);
+}
+
+function boundedReceiptTokenCount(value: unknown): value is number {
+  return safeInteger(value, 0) && value <= MAXIMUM_DURABLE_MODEL_NUMBER;
+}
+
 function validateReceipt(
   value: unknown,
   input: NewApiRequestBoundSettlementInput & { requestId: string },
 ): ReceiptValidation {
-  if (!plainRecord(value) || !exactKeys(value, RECEIPT_KEYS)) {
+  const discovery = input.profile === "discovery-v3";
+  if (!hasReceiptShape(value, discovery)) {
     return { status: "invalid", reason: "log_invalid" };
   }
-  const receipt = value as unknown as ReadbackReceipt;
+  const receipt = value;
   if (
     receipt.request_id !== input.requestId ||
     receipt.type !== "consume" ||
@@ -402,14 +430,10 @@ function validateReceipt(
     typeof receipt.quota !== "string" ||
     !CANONICAL_NON_NEGATIVE_DECIMAL.test(receipt.quota) ||
     BigInt(receipt.quota) > MAXIMUM_SIGNED_64 ||
-    !safeInteger(receipt.prompt_tokens, 0) ||
-    !safeInteger(receipt.completion_tokens, 0) ||
-    !safeInteger(receipt.cache_creation_tokens, 0) ||
-    !safeInteger(receipt.cache_read_tokens, 0) ||
-    receipt.prompt_tokens > MAXIMUM_DURABLE_MODEL_NUMBER ||
-    receipt.completion_tokens > MAXIMUM_DURABLE_MODEL_NUMBER ||
-    receipt.cache_creation_tokens > MAXIMUM_DURABLE_MODEL_NUMBER ||
-    receipt.cache_read_tokens > MAXIMUM_DURABLE_MODEL_NUMBER ||
+    !boundedReceiptTokenCount(receipt.prompt_tokens) ||
+    !boundedReceiptTokenCount(receipt.completion_tokens) ||
+    !boundedReceiptTokenCount(receipt.cache_creation_tokens) ||
+    !boundedReceiptTokenCount(receipt.cache_read_tokens) ||
     (receipt.upstream_id_state !== "observed" &&
       receipt.upstream_id_state !== "absent")
   ) {
@@ -418,14 +442,13 @@ function validateReceipt(
   if (receipt.model_name !== input.alias) {
     return { status: "invalid", reason: "model_mismatch" };
   }
-  if (receipt.channel_id !== input.expectedChannelId) {
+  if (!discovery && receipt.channel_id !== input.expectedChannelId) {
     return { status: "invalid", reason: "channel_mismatch" };
   }
+  const actualCharge = parseActualCharge(receipt.actual_charge);
+  if (actualCharge === null) return { status: "invalid", reason: "log_invalid" };
   const anthropic = input.protocol === "anthropic-messages";
-  if (
-    (anthropic && receipt.usage_semantic !== "anthropic") ||
-    (!anthropic && receipt.usage_semantic !== "openai")
-  ) {
+  if (receipt.usage_semantic !== (anthropic ? "anthropic" : "openai")) {
     return { status: "invalid", reason: "log_invalid" };
   }
   const inputTokens = anthropic
@@ -435,7 +458,7 @@ function validateReceipt(
     : receipt.prompt_tokens;
   const quota = BigInt(receipt.quota);
   if (
-    !safeInteger(inputTokens, 1) ||
+    !safeInteger(inputTokens, discovery ? 0 : 1) ||
     inputTokens > MAXIMUM_DURABLE_MODEL_NUMBER ||
     quota > BigInt(input.maximumQuotaPoints) ||
     receipt.completion_tokens > input.maxOutputTokens ||
@@ -453,6 +476,7 @@ function validateReceipt(
     inputTokens,
     outputTokens: receipt.completion_tokens,
     upstreamIdState: receipt.upstream_id_state,
+    ...(actualCharge ? { actualCharge } : {}),
   };
 }
 
@@ -460,8 +484,8 @@ function validInput(input: NewApiRequestBoundSettlementInput): boolean {
   return (
     MODEL_IDENTIFIER.test(input.alias) &&
     PROTOCOLS.has(input.protocol) &&
-    safeInteger(input.expectedChannelId, 1) &&
-    input.expectedChannelId <= 1_000_000_000 &&
+    (input.profile === "discovery-v3" ? input.expectedChannelId === undefined :
+      input.profile === undefined && safeInteger(input.expectedChannelId, 1) && input.expectedChannelId <= 1_000_000_000) &&
     safeInteger(input.maxOutputTokens, 1) &&
     input.maxOutputTokens <= MAXIMUM_DURABLE_MODEL_NUMBER &&
     safeInteger(input.maximumQuotaPoints, 1) &&
@@ -543,12 +567,14 @@ export class NewApiRequestBoundSettlementResolver {
     input: NewApiRequestBoundSettlementInput,
     probeId: string,
     probe: NewApiSettlementReadbackProbe,
+    receipt?: NewApiRequestBoundSettlementReceipt,
   ): Promise<boolean> {
     try {
       await input.probeAuthority.record({
         probeId,
         probe,
         observedAt: new Date(),
+        ...(receipt ? { receipt } : {}),
       });
       return true;
     } catch {
@@ -781,29 +807,7 @@ export class NewApiRequestBoundSettlementResolver {
         }
         return this.unknown(requestId, validated.reason, probes);
       }
-      const probe = frozenProbe(sequence, "gateway_log_observed", 2);
-      probes.push(probe);
-      if (!(await this.recordProbe(input, probeId, probe))) {
-        return this.unknown(requestId, "gateway_log_unavailable", probes);
-      }
-      const receipt = Object.freeze({
-        requestId,
-        resolverId: NEW_API_REQUEST_BOUND_RESOLVER_ID,
-        alias: input.alias,
-        protocol: input.protocol,
-        channelId: validated.channelId,
-        quota: validated.quota,
-        inputTokens: validated.inputTokens,
-        outputTokens: validated.outputTokens,
-        upstreamIdState: validated.upstreamIdState,
-      });
-      return Object.freeze({
-        status: "settled" as const,
-        ...receipt,
-        receiptDigest: digest(receipt),
-        physicalCallCount: 0 as const,
-        readbackProbes: freezeProbes(probes),
-      });
+      return this.settleObservedReceipt(input, requestId, validated, probeId, sequence, probes);
     }
 
     return this.unknown(
@@ -813,5 +817,40 @@ export class NewApiRequestBoundSettlementResolver {
         : "gateway_log_unavailable",
       probes,
     );
+  }
+
+  private async settleObservedReceipt(
+    input: NewApiRequestBoundSettlementInput,
+    requestId: string,
+    validated: Extract<ReceiptValidation, { status: "valid" }>,
+    probeId: string,
+    sequence: 1 | 2,
+    probes: NewApiSettlementReadbackProbe[],
+  ): Promise<NewApiRequestBoundSettlement> {
+    const probe = frozenProbe(sequence, "gateway_log_observed", 2);
+    probes.push(probe);
+    const receipt = Object.freeze({
+      requestId,
+      resolverId: NEW_API_REQUEST_BOUND_RESOLVER_ID,
+      alias: input.alias,
+      protocol: input.protocol,
+      channelId: validated.channelId,
+      quota: validated.quota,
+      inputTokens: validated.inputTokens,
+      outputTokens: validated.outputTokens,
+      upstreamIdState: validated.upstreamIdState,
+      ...(validated.actualCharge ? { actualCharge: validated.actualCharge } : {}),
+    });
+    const settled = Object.freeze({
+      status: "settled" as const,
+      ...receipt,
+      receiptDigest: digest(receipt),
+      physicalCallCount: 0 as const,
+      readbackProbes: freezeProbes(probes),
+    });
+    const evidence = input.profile === "discovery-v3" ? settled : undefined;
+    return await this.recordProbe(input, probeId, probe, evidence)
+      ? settled
+      : this.unknown(requestId, "gateway_log_unavailable", probes);
   }
 }

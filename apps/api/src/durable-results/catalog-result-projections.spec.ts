@@ -808,6 +808,9 @@ const EXPECTED_BOUNDS: Readonly<Record<string, JsonRecord>> = {
     '$.data.exhibitors[].description.maxLength': 500,
     '$.data.exhibitors[].products.maxItems': 12,
     '$.data.exhibitors[].products[].maxLength': 500,
+    '$.data.pagination.fairSlug.maxLength': 100,
+    '$.data.pagination.page.minimum': 0,
+    '$.data.pagination.page.maximum': 9,
   },
   'mapyourshow-fetch/v1': {
     ...COMMON_RESULT_BOUNDS,

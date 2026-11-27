@@ -10754,6 +10754,72 @@
         "description": "人工确认查询计划：DRAFT → READY，确认后才能执行发现。需要 acquisition:review。"
       }
     },
+    "/api/v1/query-plans/{planId}/execution-context": {
+      "get": {
+        "operationId": "DiscoveryController_v3PlanContext_v1",
+        "parameters": [
+          {
+            "name": "planId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "icpId",
+                        "status"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "icpId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "status": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "读取租户计划归属与寻源受理状态",
+        "tags": [
+          "Discovery"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ],
+        "description": "只读查询当前租户内的计划 ID、所属 ICP 和计划状态。SaaS 在写入寻源受理意图前以此核对任务和计划的归属。"
+      }
+    },
     "/api/v1/query-plans/{planId}/execute": {
       "post": {
         "operationId": "DiscoveryController_execute_v1",
@@ -10769,8 +10835,8 @@
           {
             "name": "X-Execution-Budget-Grant",
             "in": "header",
-            "description": "SaaS signed authority bound to this exact workspace mutation",
-            "required": true,
+            "description": "SaaS signed authority for legacy requests. Discovery execution contract v3 uses the authenticated tenant identity.",
+            "required": false,
             "schema": {
               "type": "string",
               "minLength": 1,
@@ -10812,6 +10878,31 @@
                         },
                         "status": {
                           "type": "string"
+                        },
+                        "executionContractVersion": {
+                          "type": "integer",
+                          "enum": [
+                            3
+                          ]
+                        },
+                        "planId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "icpId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "attemptId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "requestSha256": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$"
+                        },
+                        "replayed": {
+                          "type": "boolean"
                         }
                       }
                     }
@@ -10885,7 +10976,7 @@
             }
           },
           "409": {
-            "description": "EXECUTION_BUDGET_GRANT_REUSED, INVALID_STATE or RERUN_REQUIRES_ATTEMPT",
+            "description": "EXECUTION_BUDGET_GRANT_REUSED, INVALID_STATE, RERUN_REQUIRES_ATTEMPT, DISCOVERY_ATTEMPT_REQUEST_CONFLICT, DISCOVERY_EXECUTION_IN_PROGRESS, DISCOVERY_LEGACY_EXECUTION_UNRESOLVED, DISCOVERY_LEGACY_ADMISSION_CLOSED or DISCOVERY_V3_DISPATCH_AUTHORIZATION_EXPIRED",
             "content": {
               "application/json": {
                 "schema": {
@@ -10961,7 +11052,7 @@
         "x-required-scopes": [
           "acquisition:write"
         ],
-        "description": "执行一个查询计划：READY 首跑；EXECUTED 计划携带新 attemptId 即重跑（新请求哈希/新预算 Grant，同一 attempt 重放报 EXECUTION_BUDGET_GRANT_REUSED，缺 attemptId 报 RERUN_REQUIRES_ATTEMPT）。多源发现 → Raw → Canonical，由 Temporal 异步编排，返回 202 与 runId。"
+        "description": "异步受理寻源，返回 202 与 runId。READY 计划可以首跑，重跑使用新的 attemptId。v3 依据已认证的租户和调用者受理，同一 attemptId 与同一请求摘要返回原运行，admissionReadOnly 可用来恢复已受理的尝试。旧合同要求执行预算 Grant，并按旧合同核对 Grant 重放。"
       }
     },
     "/api/v1/discovery-runs/{runId}/cancel": {
@@ -33218,6 +33309,17 @@
       "ExecuteQueryPlanDto": {
         "type": "object",
         "properties": {
+          "admissionReadOnly": {
+            "type": "boolean",
+            "description": "Retrieves only a previously admitted v3 attempt using the same request identity."
+          },
+          "executionContractVersion": {
+            "type": "number",
+            "enum": [
+              3
+            ],
+            "description": "Selects the native discovery execution contract when the Worker is available."
+          },
           "manufacturerNetworkRevision": {
             "type": "string",
             "enum": [

@@ -1,10 +1,13 @@
 import { prepareDiscoveryExecutionMetadata } from './discovery-execution-metadata';
+import { admitDiscoveryV3, DISCOVERY_V3_RUNTIME, getDiscoveryV3PlanContext, lockLegacyDiscoveryPlan,
+  type DiscoveryV3AdmissionRequest, type DiscoveryV3Runtime } from './discovery-v3-admission';
+import { cancelDiscoveryRun } from './discovery-run-cancellation';
 import { filterDecisionMakerContacts, loadCanonicalCompanyChannels } from './company-channels';
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
-import { cancelTenantOrLegacyWorkflow } from '../temporal/tenant-workflow-id';
+import { resolveCustomerTaskQueue } from '../temporal/tenant-task-queues';
 import { RequestContext } from '../auth/request-context';
 import { DiscoveryProviderRegistry } from './provider.registry';
 import { persistDiscoveredContacts } from './contact-persist';
@@ -26,6 +29,7 @@ import {
   canonicalizeSuppressionValue,
   canonicalizeSuppressionValues,
   companyMatchesSuppression,
+  emailOrDomainMatchesSuppression,
 } from './suppression-value';
 import { lockWorkspaceSuppressionPolicy } from './suppression-policy-lock';
 import {
@@ -98,7 +102,23 @@ export class DiscoveryService {
     private readonly authority: ExecutionBudgetAuthorityService,
     @Optional() @Inject(TOOL_BUDGET_STORE) private readonly budgetStore?: BudgetStore,
     @Optional() private readonly temporal?: TemporalClient,
+    @Optional() @Inject(DISCOVERY_V3_RUNTIME) private readonly discoveryV3Runtime?: DiscoveryV3Runtime,
   ) {}
+
+  get usesDiscoveryV3(): boolean {
+    return this.discoveryV3Runtime?.legacyAdmissionDisabled === true;
+  }
+
+  executePlanV3(ctx: RequestContext, planId: string, input: DiscoveryV3AdmissionRequest) {
+    return admitDiscoveryV3(this.prisma, ctx, planId, input, {
+      taskQueue: resolveCustomerTaskQueue('batch'),
+      runtime: this.discoveryV3Runtime,
+    });
+  }
+
+  getV3PlanContext(ctx: RequestContext, planId: string) {
+    return getDiscoveryV3PlanContext(this.prisma, ctx.workspaceId, planId);
+  }
 
   private budgets(): BudgetStore {
     return this.budgetStore ?? new UnavailableBudgetStore('DiscoveryService requires an authoritative BudgetStore');
@@ -117,6 +137,9 @@ export class DiscoveryService {
     attemptId?: string,
     manufacturerNetworkRevision?: 'manufacturer-network/v1' | 'manufacturer-network/v2',
   ) {
+    if (this.usesDiscoveryV3) {
+      throw new ConflictException({ error: { code: 'DISCOVERY_LEGACY_ADMISSION_CLOSED', message: 'legacy discovery admission is closed' } });
+    }
     const { executeBody, executionSnapshot } = prepareDiscoveryExecutionMetadata(planId, attemptId, manufacturerNetworkRevision, taskRef);
     const verified = await this.authority.verifyWorkspaceGrant({
       compactJws,
@@ -129,6 +152,7 @@ export class DiscoveryService {
     });
     const runId = randomUUID();
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      await lockLegacyDiscoveryPlan(tx, ctx.workspaceId, planId);
       const binding = await this.authority.consumeVerifiedWorkspaceGrantInTransaction(
         verified,
         tx,
@@ -185,24 +209,8 @@ export class DiscoveryService {
    * History/RequestCancel——不发信号）。工作流在不可取消作用域里把未完成公司标 skipped(DEEP_STOPPED)
    * 并以 CANCELLED 收尾；已完成/部分完成的名单与结果保留，下一次 run 会把这批公司重新排队（可续）。
    */
-  async cancelRun(ctx: RequestContext, runId: string) {
-    const run = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
-      tx.discoveryRun.findUnique({ where: { id: runId }, select: { id: true, status: true } }),
-    );
-    if (!run) {
-      throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'run not found' } });
-    }
-    if (!['RUNNING', 'QUEUED'].includes(run.status)) {
-      // 已结束的 run：幂等返回当前状态，不重复发取消。
-      return { runId: run.id, status: run.status };
-    }
-    if (!this.temporal) {
-      throw new ConflictException({
-        error: { code: 'TEMPORAL_UNAVAILABLE', message: 'temporal client is not connected' },
-      });
-    }
-    await cancelTenantOrLegacyWorkflow(this.temporal.client.workflow, ctx.workspaceId, 'discovery', runId);
-    return { runId: run.id, status: 'CANCEL_REQUESTED' };
+  cancelRun(ctx: RequestContext, runId: string) {
+    return cancelDiscoveryRun(this.prisma, this.temporal, ctx.workspaceId, runId);
   }
 
   /** M0⑤：run 的进度事件，按 seq 增量拉取（after=已拉到的最大 seq）。 */
@@ -869,8 +877,6 @@ export class DiscoveryService {
         where: { type: { in: ['email', 'domain', 'company_name'] } },
         select: { type: true, value: true },
       });
-      const currentEmail = canonicalizeSuppressionValue('email', currentPoint.value);
-      const currentDomain = currentEmail ? canonicalizeSuppressionValue('domain', currentEmail.split('@')[1]) : null;
       const currentCompany = currentPoint.contact.company;
       const currentCompanySuppressed = companyMatchesSuppression(currentSuppressions, currentCompany);
       if (currentCompanySuppressed && currentCompany.status !== 'SUPPRESSED') {
@@ -882,16 +888,7 @@ export class DiscoveryService {
       const currentlySuppressed =
         currentCompany.status === 'SUPPRESSED' ||
         currentCompanySuppressed ||
-        (!!currentEmail &&
-          canonicalizeSuppressionValues(
-            'email',
-            currentSuppressions.filter((row) => row.type === 'email').map((row) => row.value),
-          ).has(currentEmail)) ||
-        (!!currentDomain &&
-          canonicalizeSuppressionValues(
-            'domain',
-            currentSuppressions.filter((row) => row.type === 'domain').map((row) => row.value),
-          ).has(currentDomain));
+        emailOrDomainMatchesSuppression(currentSuppressions, currentPoint.value);
       const committedVerdict: EmailVerdict = currentlySuppressed
         ? {
             status: 'BLOCKED',

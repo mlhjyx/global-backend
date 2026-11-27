@@ -83,6 +83,9 @@ export interface PromoteArtifactOptions {
   readonly retainUntil?: string;
   /** Scope binding required when promoting PERSONAL_DATA artifacts. */
   readonly scope?: ArtifactObjectScope;
+  /** Keep an ambiguous write unresolved even if an older version is visible. */
+  readonly requireAcknowledgedWrite?: boolean;
+  readonly signal?: AbortSignal;
 }
 
 export interface ArtifactObjectReadOptions {
@@ -225,20 +228,6 @@ function assertNotAborted(signal?: AbortSignal): void {
   }
 }
 
-function assertResultSchema(value: unknown): asserts value is string {
-  assertArtifactResultSchema(value, invalidArtifact);
-}
-
-function assertPrivacyClass(
-  value: unknown,
-): asserts value is ArtifactPrivacyClass {
-  assertArtifactPrivacyClass(value, invalidArtifact);
-}
-
-function assertMediaType(value: unknown): asserts value is string {
-  assertArtifactMediaType(value, invalidArtifact);
-}
-
 function isAsyncByteIterable(
   value: unknown,
 ): value is AsyncIterable<Uint8Array> {
@@ -263,19 +252,15 @@ function assertStageInput(input: StageArtifactInput): void {
   ) {
     invalidArtifact();
   }
-  assertResultSchema(input.resultSchema);
-  assertPrivacyClass(input.privacyClass);
-  assertMediaType(input.source.mediaType);
+  assertArtifactResultSchema(input.resultSchema, invalidArtifact);
+  assertArtifactPrivacyClass(input.privacyClass, invalidArtifact);
+  assertArtifactMediaType(input.source.mediaType, invalidArtifact);
   if (
     input.source.sourceDigest !== undefined &&
     !isCanonicalArtifactSha256(input.source.sourceDigest)
   ) {
     invalidArtifact();
   }
-}
-
-function snapshotStagedArtifact(value: StagedArtifact): StagedArtifact {
-  return parseStagedArtifactSnapshot(value, invalidArtifact);
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -407,9 +392,10 @@ export class S3GenericOperationArtifactStore implements GenericOperationArtifact
     input: StagedArtifact,
     options?: PromoteArtifactOptions,
   ): Promise<StoredArtifact> {
-    const staged = snapshotStagedArtifact(input);
+    const staged = parseStagedArtifactSnapshot(input, invalidArtifact);
     const retainUntil = parseRetainUntil(options);
     const scope = parseScopeOption(options?.scope);
+    const signal = options?.signal;
     const objectKey = resolveStorageObjectKey(
       staged.sha256,
       staged.privacyClass,
@@ -418,14 +404,14 @@ export class S3GenericOperationArtifactStore implements GenericOperationArtifact
     const existing = await this.inspectCurrent(
       staged.sha256,
       staged.privacyClass,
-      undefined,
+      signal,
       { scope },
     );
     if (existing) {
       if (!sameArtifact(existing.stored, staged)) {
         throw storageError('GENERIC_OPERATION_ARTIFACT_INVALID');
       }
-      await this.verifyFinalBody(staged, scope);
+      await this.verifyFinalBody(staged, scope, signal);
       if (
         retainUntil === null ||
         (existing.lifecycleExpiresAt !== null &&
@@ -433,7 +419,7 @@ export class S3GenericOperationArtifactStore implements GenericOperationArtifact
       ) {
         return existing.stored;
       }
-      return this.refreshRetention(existing.stored, scope);
+      return this.refreshRetention(existing.stored, scope, signal, options?.requireAcknowledgedWrite === true);
     }
     let body: AsyncIterable<Uint8Array>;
     try {
@@ -443,6 +429,7 @@ export class S3GenericOperationArtifactStore implements GenericOperationArtifact
             Bucket: this.bucket,
             Key: staged.stagingKey,
           }),
+          commandOptions(signal),
         ),
       );
       if (!isAsyncByteIterable(result?.Body)) {
@@ -457,8 +444,9 @@ export class S3GenericOperationArtifactStore implements GenericOperationArtifact
     let verified = false;
     const verifiedBody = this.verifiedStagingBody(body, staged, () => {
       verified = true;
-    });
+    }, signal);
     try {
+      assertNotAborted(signal);
       await this.client.send(
         new PutObjectCommand({
           Bucket: this.bucket,
@@ -471,11 +459,12 @@ export class S3GenericOperationArtifactStore implements GenericOperationArtifact
           ServerSideEncryption: 'AES256',
           IfNoneMatch: '*',
         }),
+        commandOptions(signal),
       );
       if (!verified) {
         throw storageError('GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE');
       }
-      return this.recoverPromote(staged, scope);
+      return this.recoverPromote(staged, scope, signal);
     } catch (error) {
       if (
         error instanceof ArtifactStorageError &&
@@ -483,9 +472,12 @@ export class S3GenericOperationArtifactStore implements GenericOperationArtifact
       ) {
         throw error;
       }
+      if (options?.requireAcknowledgedWrite === true) {
+        throw storageError('GENERIC_OPERATION_ARTIFACT_PROMOTE_ACK_UNKNOWN');
+      }
       // 不区分是否 412：只要 inspect 看不到对象（含并发赢家尚未可见的窗口）就是
       // ACK 未知，让持久层按「结果未知」保守记账（契约不符在 stored 分支已单独判 INVALID）。
-      return this.recoverPromote(staged, scope);
+      return this.recoverPromote(staged, scope, signal);
     }
   }
 
@@ -513,7 +505,7 @@ export class S3GenericOperationArtifactStore implements GenericOperationArtifact
     if (!isCanonicalArtifactSha256(sha256)) {
       throw storageError('GENERIC_OPERATION_ARTIFACT_INVALID');
     }
-    assertPrivacyClass(privacyClass);
+    assertArtifactPrivacyClass(privacyClass, invalidArtifact);
     assertNotAborted(signal);
     const key = resolveStorageObjectKey(sha256, privacyClass, options);
     const contractOptions = {
@@ -571,6 +563,8 @@ export class S3GenericOperationArtifactStore implements GenericOperationArtifact
   private async refreshRetention(
     existing: StoredArtifact,
     scope?: ArtifactObjectScope,
+    signal?: AbortSignal,
+    requireAcknowledgedWrite = false,
   ): Promise<StoredArtifact> {
     let copiedVersionId: string | null;
     try {
@@ -587,19 +581,23 @@ export class S3GenericOperationArtifactStore implements GenericOperationArtifact
             Tagging: `artifact-privacy=${encodeURIComponent(existing.privacyClass)}`,
             ServerSideEncryption: 'AES256',
           }),
+          commandOptions(signal),
         ),
       );
       copiedVersionId = isCanonicalArtifactObjectVersionId(result?.VersionId)
         ? result.VersionId
         : null;
     } catch {
+      if (signal?.aborted || requireAcknowledgedWrite) {
+        throw storageError('GENERIC_OPERATION_ARTIFACT_PROMOTE_ACK_UNKNOWN');
+      }
       this.logger.warn('GENERIC_OPERATION_ARTIFACT_RETENTION_REFRESH_FAILED');
       return existing;
     }
     const refreshed = await this.inspect(
       existing.sha256,
       existing.privacyClass,
-      undefined,
+      signal,
       { scope, objectKey: existing.objectKey },
     );
     if (!refreshed || !sameObjectContract(refreshed, existing)) {
@@ -619,7 +617,7 @@ export class S3GenericOperationArtifactStore implements GenericOperationArtifact
     if (!isCanonicalArtifactSha256(sha256)) {
       throw storageError('GENERIC_OPERATION_ARTIFACT_INVALID');
     }
-    assertPrivacyClass(privacyClass);
+    assertArtifactPrivacyClass(privacyClass, invalidArtifact);
     assertNotAborted(signal);
     const key = resolveStorageObjectKey(sha256, privacyClass, options);
     try {
@@ -672,16 +670,17 @@ export class S3GenericOperationArtifactStore implements GenericOperationArtifact
   private async recoverPromote(
     input: StagedArtifact,
     scope?: ArtifactObjectScope,
+    signal?: AbortSignal,
   ): Promise<StoredArtifact> {
     try {
       const stored = await this.inspect(
         input.sha256,
         input.privacyClass,
-        undefined,
+        signal,
         { scope },
       );
       if (stored && sameArtifact(stored, input)) {
-        await this.verifyFinalBody(input, scope);
+        await this.verifyFinalBody(input, scope, signal);
         return stored;
       }
       if (stored) {
@@ -744,6 +743,7 @@ export class S3GenericOperationArtifactStore implements GenericOperationArtifact
   private async verifyFinalBody(
     staged: StagedArtifact,
     scope?: ArtifactObjectScope,
+    signal?: AbortSignal,
   ): Promise<void> {
     let body: AsyncIterable<Uint8Array>;
     const key = resolveStorageObjectKey(staged.sha256, staged.privacyClass, {
@@ -756,9 +756,11 @@ export class S3GenericOperationArtifactStore implements GenericOperationArtifact
             Bucket: this.bucket,
             Key: key,
           }),
+          commandOptions(signal),
         ),
         this.client.send(
           new GetObjectTaggingCommand({ Bucket: this.bucket, Key: key }),
+          commandOptions(signal),
         ),
       ]);
       const result = asRecord(rawResult);
@@ -781,7 +783,7 @@ export class S3GenericOperationArtifactStore implements GenericOperationArtifact
     let verified = false;
     for await (const _chunk of this.verifiedStagingBody(body, staged, () => {
       verified = true;
-    })) {
+    }, signal)) {
       // Verification is streaming; never aggregate the final object in memory.
     }
     if (!verified) {
@@ -825,12 +827,14 @@ export class S3GenericOperationArtifactStore implements GenericOperationArtifact
     body: AsyncIterable<Uint8Array>,
     staged: StagedArtifact,
     recordVerified: () => void,
+    signal?: AbortSignal,
   ): AsyncIterable<Uint8Array> {
     const expectedSize = Number(staged.sizeBytes);
     const hash = createHash('sha256');
     let size = 0;
     try {
       for await (const chunk of body) {
+        assertNotAborted(signal);
         if (!(chunk instanceof Uint8Array)) {
           throw storageError('GENERIC_OPERATION_ARTIFACT_INVALID');
         }
@@ -845,6 +849,7 @@ export class S3GenericOperationArtifactStore implements GenericOperationArtifact
       if (error instanceof ArtifactStorageError) throw error;
       throw storageError('GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE');
     }
+    assertNotAborted(signal);
     if (size !== expectedSize || hash.digest('hex') !== staged.sha256) {
       throw storageError('GENERIC_OPERATION_ARTIFACT_INVALID');
     }

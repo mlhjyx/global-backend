@@ -2,8 +2,11 @@ import { S3Client } from "@aws-sdk/client-s3";
 import type { PrismaService } from "../../prisma/prisma.service";
 import type { BudgetStore } from "../../tools/budget-store";
 import type { ArtifactExecutionPort } from "../../tools/artifact-execution-port";
+import type { DiscoveryV3ArtifactExecutionPort } from "../../tools/discovery-v3-artifact-execution-port";
 import { ArtifactMaterializerRegistry } from "./artifact-materializer.registry";
 import { ArtifactSubjectBindingContract } from "./artifact-subject-binding.contract";
+import { DiscoveryV3ArtifactExecution } from "./discovery-v3-artifact.execution";
+import { DiscoveryV3ArtifactRepository } from "./discovery-v3-artifact.repository";
 import { GenericOperationArtifactExecution } from "./generic-operation-artifact.execution";
 import { GenericOperationArtifactRepository } from "./generic-operation-artifact.repository";
 import { GenericOperationArtifactService } from "./generic-operation-artifact.service";
@@ -97,6 +100,25 @@ export function createGenericOperationArtifactExecutionFromEnv(
       store,
       budgetStore,
     ),
+    materializers: productArtifactMaterializerRegistry(),
+  });
+}
+
+export function createDiscoveryV3ArtifactExecutionFromEnv(
+  prisma: PrismaService,
+  env: NodeJS.ProcessEnv = process.env,
+): DiscoveryV3ArtifactExecutionPort | undefined {
+  let config: GenericArtifactStorageConfig;
+  try {
+    config = genericArtifactStorageConfig(env);
+  } catch {
+    return undefined;
+  }
+  return new DiscoveryV3ArtifactExecution({
+    withWorkspace: (workspaceId, fn, options) => prisma.withWorkspace(workspaceId, fn, options),
+    binding: new ArtifactSubjectBindingContract(),
+    repository: new DiscoveryV3ArtifactRepository(),
+    storage: sharedGenericOperationArtifactStore(config),
     materializers: productArtifactMaterializerRegistry(),
   });
 }

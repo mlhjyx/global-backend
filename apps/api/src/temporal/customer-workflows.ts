@@ -2,6 +2,7 @@ export { campaignPlanningWorkflow } from "./campaign-planning.workflow";
 export { understandingWorkflow } from "./understanding.workflow";
 export { discoveryWorkflow } from "./discovery.workflow";
 export { discoveryStreamingWorkflow } from "./discovery.streaming.workflow";
+export { discoveryExecutionV3Workflow } from "./discovery-v3.workflow";
 export { companyPipelineWorkflow } from "./discovery.run2.pipeline.workflow";
 export { toolBudgetReconciliationWorkflow } from "./tool-budget-reconciliation.workflow";
 export { staleRunSweepWorkflow } from "./stale-run.workflow";

@@ -56,14 +56,18 @@ export function createPrismaTenantDailyCostReader(
   return {
     async readDailySpendUsd(workspaceId: string, dayStartUtc: Date): Promise<number> {
       return prisma.withWorkspace(workspaceId, async (tx) => {
-        const agg = await tx.usageLedger.aggregate({
-          where: {
-            workspaceId,
-            createdAt: { gte: dayStartUtc },
-          },
-          _sum: { costUsd: true },
-        });
-        const total = Number(agg._sum?.costUsd ?? 0);
+        // V3 records both estimates and non-model charges for reporting.
+        // Only its confirmed model charges contribute to this breaker.
+        const [spend] = await tx.$queryRaw<Array<{ total: number }>>`
+          SELECT COALESCE(sum(cost_usd), 0) AS total
+          FROM public.usage_ledger
+          WHERE workspace_id = ${workspaceId}::uuid AND created_at >= ${dayStartUtc}
+            AND (
+              (meta->>'executionContractVersion') IS DISTINCT FROM '3'
+              OR (resource_type = 'ai_tokens' AND meta->>'costSource' = 'provider')
+            )
+        `;
+        const total = Number(spend?.total ?? 0);
         return Number.isFinite(total) && total > 0 ? total : 0;
       });
     },

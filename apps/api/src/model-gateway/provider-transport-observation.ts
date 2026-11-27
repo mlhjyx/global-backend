@@ -2,6 +2,8 @@ import type {
   NewApiSettlementReadbackProbe,
   NewApiSettlementReadbackProbePhase,
 } from "./settlement-readback-contract";
+import { NEW_API_REQUEST_BOUND_RESOLVER_ID } from "./settlement-readback-contract";
+import type { GatewaySettlementObservation, PaidModelPhysicalWireRuntime } from "./paid-model-settlement";
 
 export const PROVIDER_TRANSPORT_FINAL_PHASES = [
   "gateway_unavailable",
@@ -29,6 +31,36 @@ export interface SiteBuildProviderTransportObservation {
   upstreamIdState: ProviderUpstreamIdState;
   payloadState: ProviderPayloadState;
   readbackProbes: readonly NewApiSettlementReadbackProbe[];
+}
+
+export async function resolveProviderPhysicalWire(
+  runtime: PaidModelPhysicalWireRuntime,
+  input: Parameters<PaidModelPhysicalWireRuntime["resolve"]>[0],
+): Promise<GatewaySettlementObservation> {
+  try {
+    return await runtime.resolve(input);
+  } catch {
+    const phase = input.payloadState === "unavailable"
+      ? "payload_unavailable"
+      : input.upstreamAckUnknown
+        ? "upstream_ack_unknown"
+        : "gateway_log_unavailable";
+    const { physicalWireAttempt } = runtime.identity;
+    return {
+      status: "unknown",
+      physicalWireAttempt,
+      resolverId: NEW_API_REQUEST_BOUND_RESOLVER_ID,
+      reason: phase,
+      transportObservation: createProviderTransportObservation({
+        physicalWireAttempt,
+        finalPhase: phase,
+        gatewayIdState: input.gatewayIdState,
+        upstreamIdState: "unknown",
+        payloadState: input.payloadState,
+        readbackProbes: [],
+      }),
+    };
+  }
 }
 
 export type ModelSettlementErrorCode =

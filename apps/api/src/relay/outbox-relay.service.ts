@@ -1,4 +1,5 @@
-import { discoveryManufacturerCommandArguments, NonRetryableOutboxCommandError, resolveDiscoveryWorkflowType } from './discovery-run-command';
+import { attestDiscoveryV3OutboxCommand, discoveryManufacturerCommandArguments, NonRetryableOutboxCommandError, resolveDiscoveryWorkflowType } from './discovery-run-command';
+import { DISCOVERY_V3_WORKFLOW } from '../runtime/discovery-v3-dispatch-contract';
 import { dispatchRejudgeCommand } from './rejudge-command';
 import { assertCandidateWorkspaceAllowed, assertRuntimeCandidateOperational, candidateWorkspaceWhere } from '../runtime/development-candidate';
 import { createHmac } from "node:crypto";
@@ -886,6 +887,12 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       this.logger.log(`started ${described}`);
     } catch (err) {
       if ((err as Error)?.name === "WorkflowExecutionAlreadyStartedError") {
+        if (workflowType === DISCOVERY_V3_WORKFLOW) {
+          const existing = await this.temporal.client.workflow.getHandle(options.workflowId).describe();
+          if (existing.type !== workflowType || existing.taskQueue !== options.taskQueue) {
+            throw new NonRetryableOutboxCommandError('DISCOVERY_V3_WORKFLOW_ID_OCCUPIED');
+          }
+        }
         this.logger.log(`${described} already started — merged`);
       } else throw err;
     }
@@ -929,6 +936,17 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       );
     }
     if (ev.eventType === "DiscoveryRunRequested") {
+      if (ev.schemaVersion === 3) {
+        const command = await attestDiscoveryV3OutboxCommand(() => this.requireDb(), ev);
+        await this.startWorkflowIdempotent(DISCOVERY_V3_WORKFLOW, {
+          taskQueue: command.taskQueue,
+          workflowId: formatTenantWorkflowId(ev.workspaceId, 'discovery', ev.aggregateId),
+          workflowIdReusePolicy: WorkflowIdReusePolicy.REJECT_DUPLICATE,
+          workflowExecutionTimeout: DISCOVERY_RUN_EXECUTION_TIMEOUT,
+          args: [command],
+        }, `v3 discovery workflow for run ${ev.aggregateId}`);
+        return;
+      }
       const payload = (ev.payload ?? {}) as {
         planId?: string;
         manufacturerNetworkExecution?: unknown;

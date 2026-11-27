@@ -2,6 +2,8 @@ export const GENERIC_OPERATION_ARTIFACT_REFERENCE_SCHEMA =
   'generic-operation-artifact-ref/v1' as const;
 export const GENERIC_OPERATION_ARTIFACT_MANIFEST_SCHEMA =
   'generic-operation-artifact/v1' as const;
+export const DISCOVERY_V3_ARTIFACT_MANIFEST_SCHEMA =
+  'discovery-v3-artifact-manifest/v1' as const;
 
 export type ArtifactPrivacyClass =
   | 'PUBLIC_ORGANIZATION'
@@ -35,6 +37,17 @@ export interface GenericOperationArtifactManifest {
   readonly expiresAt: string;
 }
 
+export interface DiscoveryV3ArtifactManifest extends Omit<
+  GenericOperationArtifactManifest, 'schemaVersion' | 'authorityId' | 'scopeKind' | 'workspaceId' | 'privacyClass'
+> {
+  readonly schemaVersion: typeof DISCOVERY_V3_ARTIFACT_MANIFEST_SCHEMA;
+  readonly scopeKind: 'workspace';
+  readonly workspaceId: string;
+  readonly privacyClass: 'PERSONAL_DATA';
+}
+
+export type ArtifactMaterializationManifest = GenericOperationArtifactManifest | DiscoveryV3ArtifactManifest;
+
 /**
  * The complete durable-operation result projection for a large artifact.
  * It deliberately carries no body, object key, credentials, headers, prompts,
@@ -55,7 +68,7 @@ export interface ArtifactMaterializer<T> {
   readonly resultSchema: string;
   materialize(
     input: AsyncIterable<Uint8Array>,
-    manifest: GenericOperationArtifactManifest,
+    manifest: ArtifactMaterializationManifest,
     /** Closed facts loaded with the manifest; never caller/provider metadata. */
     expectedFacts: unknown,
   ): Promise<T>;

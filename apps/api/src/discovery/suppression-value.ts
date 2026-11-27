@@ -98,6 +98,17 @@ export function canonicalizeSuppressionValues(type: string, values: Iterable<str
   return canonical;
 }
 
+export function emailOrDomainMatchesSuppression(
+  suppressions: readonly { type: string; value: string }[], value: string,
+): boolean {
+  const email = canonicalizeSuppressionValue('email', value);
+  if (!email) return false;
+  const domain = canonicalizeSuppressionValue('domain', email.split('@')[1]);
+  return suppressions.some((row) =>
+    (row.type === 'email' && canonicalizeSuppressionValue(row.type, row.value) === email) ||
+    (row.type === 'domain' && domain !== null && canonicalizeSuppressionValue(row.type, row.value) === domain));
+}
+
 export function companyMatchesSuppression(
   rows: ReadonlyArray<{ type: string; value: string }>,
   company: { domain?: string | null; name: string },

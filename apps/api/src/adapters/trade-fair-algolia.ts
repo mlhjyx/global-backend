@@ -136,7 +136,7 @@ export async function queryAlgoliaExhibitors(
       throw new Error('ALGOLIA_RESPONSE_ITEM_BOUND_EXCEEDED');
     }
     for (const h of hits) {
-      const rec = mapHit(h);
+      const rec = mapAlgoliaExhibitor(h);
       if (!rec || seen.has(rec.externalId)) continue;
       seen.add(rec.externalId);
       out.push(rec);
@@ -147,7 +147,7 @@ export async function queryAlgoliaExhibitors(
   return out;
 }
 
-function mapHit(h: AlgoliaHit): FairExhibitor | null {
+export function mapAlgoliaExhibitor(h: AlgoliaHit): FairExhibitor | null {
   const companyName = (h.companyName || h.exhibitorName || '').trim();
   const objectID = h.objectID || h.id;
   if (!companyName || !objectID) return null;

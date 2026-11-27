@@ -27,6 +27,32 @@ afterEach(async () => {
 });
 
 describe('requestPublicHttp — 连接层 pinning 与逐跳 redirect 闸', () => {
+  it('aborts the actual pinned request when its wire fence cancels the response read', async () => {
+    const controller = new AbortController();
+    let onRequest!: () => void;
+    const receivedRequest = new Promise<void>((resolve) => { onRequest = resolve; });
+    const server = createServer((_req, res) => {
+      res.write('partial');
+      onRequest();
+    });
+    servers.push(server);
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('bind failed');
+    const result = requestPublicHttp(`http://cancel.example:${address.port}/`, { timeoutMs: 500 }, {
+      resolver: async (raw) => ({
+        url: new URL(raw), ip: '127.0.0.1', family: 4,
+        addresses: [{ address: '127.0.0.1', family: 4 }],
+      }),
+      dispatchPhysicalWire: (execute) => execute(controller.signal),
+    });
+    const failure = expect(result).rejects.toMatchObject({ name: 'AbortError' });
+    await receivedRequest;
+    controller.abort();
+    await failure;
+  });
+
   it('wraps each real loopback redirect wire after DNS and gates, and refuses the second before it reaches the server', async () => {
     const events: string[] = [];
     const server = createServer((req, res) => {

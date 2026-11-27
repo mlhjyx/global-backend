@@ -9,10 +9,12 @@ import {
   SourceClass,
 } from '../provider-contract';
 import type { FairExhibitor } from '../../adapters/trade-fair-algolia';
-import type { TradeFairAlgoliaInput } from '../../tools/source-tools';
+import { ALGOLIA_NATIVE_MAX_PAGES, ALGOLIA_NATIVE_MAX_PAGE_SIZE } from '../../adapters/trade-fair-algolia-native';
+import type { TradeFairAlgoliaInput, TradeFairAlgoliaOutput } from '../../tools/source-tools';
 import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
 import { selectFairs, TradeFairTemplate } from '../trade-fairs';
 import { normalizeDomain } from '../identity';
+import { currentDiscoveryV3OperationScope } from '../discovery-v3-operation-scope';
 import {
   DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
   buildDiscoveryCompanyResultLineage,
@@ -85,9 +87,11 @@ export class TradeFairDiscoveryProvider implements CompanyDiscoveryAdapter {
 
     const toolCtx: ToolContext = { ...ctx };
     const blocked = new Set((opts?.blockedDomains ?? []).map((d) => d.toLowerCase()));
+    const perFair = Math.min(PER_FAIR_LIMIT, Math.max(query.limit, 50));
+    const native = currentDiscoveryV3OperationScope(ctx);
+    if (native) return this.pullFairsNative({ broker, toolCtx, fairs, perFair, blocked, sourceClass: query.sourceClass, signal: native.signal });
     const dedup = new Map<string, ProviderCompanyRecord>();
     const observations: DiscoveryCompanyReceiptObservation[] = [];
-    const perFair = Math.min(PER_FAIR_LIMIT, Math.max(query.limit, 50));
 
     for (const fair of fairs) {
       const collector = createDiscoveryCompanyReceiptCollector({
@@ -141,6 +145,41 @@ export class TradeFairDiscoveryProvider implements CompanyDiscoveryAdapter {
     };
   }
 
+  private async pullFairsNative(args: {
+    broker: ExecutionBroker;
+    toolCtx: ToolContext;
+    fairs: TradeFairTemplate[];
+    perFair: number;
+    blocked: Set<string>;
+    sourceClass: SourceClass;
+    signal: AbortSignal;
+  }): Promise<DiscoveryResult> {
+    const { broker, toolCtx, fairs, perFair, blocked, sourceClass, signal } = args;
+    const maxPages = Math.min(ALGOLIA_NATIVE_MAX_PAGES, Math.ceil(perFair / ALGOLIA_NATIVE_MAX_PAGE_SIZE));
+    // A consistent page size keeps offsets stable and bounds the total requested hits.
+    const limit = Math.floor(perFair / maxPages);
+    const ctx: ToolContext = { ...toolCtx, onDurableReceipt: undefined, purpose: 'discovery' };
+    const dedup = new Map<string, ProviderCompanyRecord>();
+    for (const fair of fairs) {
+      for (let page = 0; page < maxPages; page++) {
+        signal.throwIfAborted();
+        const { data } = await invokeAlgolia(broker, ctx, { fairSlug: fair.slug, page, limit });
+        if (data.pagination?.fairSlug !== fair.slug || data.pagination.page !== page) {
+          throw new Error('DISCOVERY_V3_ALGOLIA_PAGE_BINDING_MISMATCH');
+        }
+        const fetchedAt = new Date().toISOString();
+        for (const exhibitor of data.exhibitors) {
+          const record = mapTradeFairExhibitorToRecord({ fair, exhibitor, sourceClass, fetchedAt });
+          if (record.domain && blocked.has(record.domain)) continue;
+          const key = record.domain ?? record.externalId;
+          if (!dedup.has(key)) dedup.set(key, record);
+        }
+        if (!data.pagination.hasNextPage) break;
+      }
+    }
+    return { records: [...dedup.values()], costCents: 0 };
+  }
+
   private async pullFair(
     broker: ExecutionBroker,
     toolCtx: ToolContext,
@@ -148,11 +187,7 @@ export class TradeFairDiscoveryProvider implements CompanyDiscoveryAdapter {
     limit: number,
     sourceClass: SourceClass,
   ): Promise<ProviderCompanyRecord[]> {
-    const res = await broker.invoke<TradeFairAlgoliaInput, { exhibitors: FairExhibitor[] }>(
-      'tradefair.algolia',
-      { cfg: fair.algolia, limit },
-      toolCtx,
-    );
+    const res = await invokeAlgolia(broker, toolCtx, { cfg: fair.algolia, limit });
     const exhibitors = res.data.exhibitors ?? [];
     const now = new Date().toISOString();
     return exhibitors.map((exhibitor) =>
@@ -164,6 +199,10 @@ export class TradeFairDiscoveryProvider implements CompanyDiscoveryAdapter {
       }),
     );
   }
+}
+
+function invokeAlgolia(broker: ExecutionBroker, ctx: ToolContext, input: TradeFairAlgoliaInput) {
+  return broker.invoke<TradeFairAlgoliaInput, TradeFairAlgoliaOutput>('tradefair.algolia', input, ctx);
 }
 
 export function mapTradeFairExhibitorToRecord(args: {

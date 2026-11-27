@@ -13,11 +13,16 @@
  * 本客户端只请求 🟢 绿字段，**绝不请求 winner-email 等 🔴 具名联系点**（个人数据，走隔离路径）。
  */
 
-const SEARCH_URL = process.env.TED_API_URL ?? 'https://api.ted.europa.eu/v3/notices/search';
+import { requestDiscoverySourceJson, type DiscoverySourceDispatch } from './discovery-v3-source-http';
+
+const OFFICIAL_SEARCH_URL = 'https://api.ted.europa.eu/v3/notices/search';
+const SEARCH_URL = process.env.TED_API_URL ?? OFFICIAL_SEARCH_URL;
 const MAX_LIMIT = 250; // API 硬上限（500 报 "exceeds maximum allowed value (250)"）
 const THROTTLE_MS = 1100; // 自限 ~1 req/s（WAF 无限流头，spec §1.6）
 const MAX_RETRIES = 2; // 429/403/5xx/网络抖动退避重试
 const MAX_PAGES = 200; // iteration 安全阀（有界样本，绝不 grind 全量）
+export const TED_NATIVE_TIMEOUT_MS = 30_000;
+const TED_NATIVE_AWARD_LIMIT = 32;
 
 /** 中标发现只取绿事实字段（🟢 公司/组织事实）；绝不含 winner-email 等 🔴 个人联系点。 */
 const AWARD_FIELDS = [
@@ -252,6 +257,35 @@ export async function searchAwardNotices(
     beforeRequest,
   );
   return raw.map(mapAwardNotice);
+}
+
+/** Native discovery reads one bounded page of award organization fields. */
+export async function searchAwardNoticesNative(
+  params: SearchAwardParams,
+  dispatch: DiscoverySourceDispatch,
+): Promise<TedAwardNotice[]> {
+  if (SEARCH_URL !== OFFICIAL_SEARCH_URL) throw new Error('TED_NATIVE_ENDPOINT_NOT_REGISTERED');
+  const limit = Math.min(params.limit ?? MAX_LIMIT, params.maxRecords ?? MAX_LIMIT, TED_NATIVE_AWARD_LIMIT);
+  const sinceDays = params.sinceDays ?? 30;
+  const scope = params.scope ?? 'ACTIVE';
+  if (!Number.isSafeInteger(limit) || limit < 1 || !Number.isSafeInteger(sinceDays) || sinceDays < 1 ||
+      !params.cpvCodes.length || params.cpvCodes.length > 64 ||
+      params.cpvCodes.some((code) => !/^\d{1,8}\*?$/u.test(code)) ||
+      (params.buyerCountries ?? []).some((code) => !/^[a-z]{3}$/iu.test(code)) ||
+      (params.noticeType !== undefined && params.noticeType !== 'can-standard') ||
+      (scope !== 'ALL' && scope !== 'ACTIVE' && scope !== 'LATEST')) {
+    throw new Error('TED_NATIVE_QUERY_INVALID');
+  }
+  const json = await requestDiscoverySourceJson<TedSearchResponse>(OFFICIAL_SEARCH_URL, {
+    source: 'TED', method: 'POST', timeoutMs: TED_NATIVE_TIMEOUT_MS,
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({
+      query: buildAwardQuery(params), fields: AWARD_FIELDS, limit, scope, paginationMode: 'ITERATION',
+      ...(scope === 'ALL' ? { onlyLatestVersions: true } : {}),
+    }),
+  }, dispatch);
+  if (!Array.isArray(json.notices) || json.notices.length > limit) throw new Error('TED_NATIVE_RESPONSE_INVALID');
+  return json.notices.map((notice) => mapAwardNotice(notice as Record<string, unknown>));
 }
 
 /** 拉招标公告（contract notice，cn-standard；买方需求 = intent/时机）。默认 scope=ACTIVE（当前开放机会）。 */

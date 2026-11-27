@@ -51,8 +51,10 @@ describe('suppression writer/action linearization topology', () => {
   });
 
   it('canonicalize and tenant projections reuse existing-identity materialization state', () => {
+    expect(read('apps/api/src/temporal/discovery.activities.ts')).toContain('return materializeRawCompanies(tx, args)');
+    expect(read('apps/api/src/temporal/discovery-v3-native-executor.ts')).toContain('await materializeRawCompanies(tx,');
     for (const path of [
-      'apps/api/src/temporal/discovery.activities.ts',
+      'apps/api/src/discovery/materialize-raw-companies.ts',
       'apps/api/src/acquisition/tenant-projection.service.ts',
     ]) {
       expect(read(path), `${path} must check incoming and existing canonical identity`).toContain(

@@ -12,7 +12,7 @@ import {
 import {
   invalidGenericOperationArtifact,
   type ArtifactMaterializer,
-  type GenericOperationArtifactManifest,
+  type ArtifactMaterializationManifest,
 } from '../artifact.types';
 
 const MAX_FETCH_BYTES = 300_000;
@@ -58,7 +58,7 @@ export const crawl4aiFetchMaterializer: ArtifactMaterializer<Crawl4aiFetchOutput
     resultSchema: 'crawl4ai-fetch/v1',
     async materialize(
       input: AsyncIterable<Uint8Array>,
-      manifest: GenericOperationArtifactManifest,
+      manifest: ArtifactMaterializationManifest,
       expectedFacts: unknown,
     ): Promise<Crawl4aiFetchOutput> {
       const facts = parseArtifactExpectedFacts(
@@ -82,7 +82,7 @@ export const crawl4aiRenderMaterializer: ArtifactMaterializer<Crawl4aiRenderOutp
     resultSchema: 'crawl4ai-render/v1',
     async materialize(
       input: AsyncIterable<Uint8Array>,
-      manifest: GenericOperationArtifactManifest,
+      manifest: ArtifactMaterializationManifest,
       expectedFacts: unknown,
     ): Promise<Crawl4aiRenderOutput> {
       const facts = parseArtifactExpectedFacts(

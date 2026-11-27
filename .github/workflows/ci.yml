@@ -793,6 +793,15 @@ jobs:
           bash infra/postgres/provision-runtime-service-principals.sh
           bash infra/postgres/provision-runtime-service-principals.sh
           bash infra/postgres/verify-runtime-service-principals.sh
+          DISCOVERY_V3_TEST_ADMIN_URL="${DATABASE_URL}" DISCOVERY_V3_TEST_RELAY_URL="${OUTBOX_RELAY_DATABASE_URL}" \
+            pnpm --filter @global/api exec vitest run --no-file-parallelism --testTimeout=30000 \
+              src/discovery/discovery-v3-admission.postgres.spec.ts \
+              src/discovery/discovery-v3-contact.postgres.spec.ts \
+              src/discovery/discovery-v3-operations.postgres.spec.ts \
+              src/discovery/discovery-v3-public-web.postgres.spec.ts \
+              src/discovery/manufacturer-network-v3.postgres.spec.ts \
+              src/durable-results/artifact/discovery-v3-artifact.postgres.spec.ts \
+              src/temporal/discovery-v3-gateway-reconciliation.postgres.spec.ts
           (
             set -euo pipefail
             SCOPED_PRINCIPALS_DB="global_test_scoped_principals"

@@ -62,6 +62,27 @@ const discoveryRunCompletedPayload = {
   costBasis: 'usage_ledger-runid/v1',
 };
 
+const discoveryTaskRef = {
+  workspaceId,
+  taskId: '51000000-0000-4000-8000-000000000001',
+  taskRunId: '52000000-0000-4000-8000-000000000001',
+  planId: uuid,
+  attemptId: '53000000-0000-4000-8000-000000000001',
+  requestSha256: 'a'.repeat(64),
+};
+
+const discoveryV3Payload = {
+  ...discoveryRunCompletedPayload,
+  executionContractVersion: 3,
+  executionOrigin: 'SAAS_TASK',
+  icpId: companyId,
+  taskRef: discoveryTaskRef,
+};
+
+function discoveryCompletionV3(payload: unknown, schemaVersion = 1) {
+  return { ...event('DiscoveryRunCompleted', payload, schemaVersion), aggregateType: 'DiscoveryRun' };
+}
+
 /** Historical shape: LeadsScored v1 never had a status field. */
 const leadsScoredPayload = {
   scored: 3,
@@ -127,7 +148,7 @@ describe('integration event payload gate', () => {
     const run = event('DiscoveryRunCompleted', discoveryRunCompletedPayload);
     const scored = event('LeadsScored', leadsScoredPayload);
 
-    // The existing envelope gate is unchanged: both remain envelope-only and accepted.
+    // Historical events still pass based on the envelope.
     expect(validateIntegrationEvent(run)).toBe(true);
     expect(validateIntegrationEvent(scored)).toBe(true);
     // The compatibility validator accepts the historical shapes (no taskRef, no status).
@@ -149,6 +170,34 @@ describe('integration event payload gate', () => {
       ok: false,
       reason: 'payload_contract_mismatch',
     });
+  });
+
+  it('accepts a v3 completion on the existing v1 envelope for SaaS and direct runs', () => {
+    expect(validateIntegrationEvent(discoveryCompletionV3(discoveryV3Payload))).toBe(true);
+    const { taskRef: _taskRef, ...direct } = discoveryV3Payload;
+    expect(validateIntegrationEvent(discoveryCompletionV3({ ...direct, executionOrigin: 'DIRECT' }))).toBe(true);
+    expect(validateIntegrationEvent(discoveryCompletionV3(discoveryV3Payload, 3))).toBe(false);
+  });
+
+  it.each([
+    { executionContractVersion: 4 },
+    { executionContractVersion: undefined },
+    { executionContractVersion: undefined, executionOrigin: undefined },
+    { executionContractVersion: undefined, executionOrigin: undefined, taskRef: undefined },
+    { executionOrigin: 'DIRECT' },
+    { taskRef: undefined },
+    { taskRef: { ...discoveryTaskRef, workspaceId: companyId } },
+    { taskRef: { ...discoveryTaskRef, planId: companyId } },
+    { taskRef: { ...discoveryTaskRef, attemptId: null } },
+    { taskRef: { ...discoveryTaskRef, attemptId: 'first' } },
+    { taskRef: { ...discoveryTaskRef, requestSha256: 'invalid' } },
+    { run_id: companyId },
+    { stats: [] },
+    { cost: '0.3' },
+    { cost: -1 },
+    { costBasis: {} },
+  ])('rejects an inconsistent versioned completion %j', (override) => {
+    expect(validateIntegrationEvent(discoveryCompletionV3({ ...discoveryV3Payload, ...override }))).toBe(false);
   });
 
   it('validates optional erased_contact_refs on DeletionCompleted for company subjects only', () => {

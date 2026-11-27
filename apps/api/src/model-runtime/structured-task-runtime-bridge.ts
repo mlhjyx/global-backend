@@ -1,4 +1,5 @@
 import type { ModelGateway } from "../model-gateway/model-gateway";
+import { hasNativeDiscoveryModelScope } from "../model-gateway/discovery-v3-model-scope";
 import { definiteModelFailureCode } from "../model-gateway/definite-model-failure";
 import { resolveCrossChannelFallbackModels } from "../model-gateway/model-fallback";
 import { checkAgainstSchema } from "../model-gateway/schema-validate";
@@ -77,6 +78,10 @@ function estimatedTokens(content: unknown): number {
     1,
     Math.ceil(Buffer.byteLength(JSON.stringify(content), "utf8") / 3),
   );
+}
+
+function allowsCrossChannelFallback(context: AiContext, nativeDiscovery: boolean): boolean {
+  return !nativeDiscovery && context.paidCost === undefined && context.platformEgress === undefined;
 }
 
 /** 缓存命中结果复用前重跑同一条输出门（schema + 任务级校验）；不合法按 miss 处理。 */
@@ -190,7 +195,8 @@ export async function executeStructuredTaskWithRuntime<Output>(
   const promptVersion = `${contractVersion}/prompt-v1`;
   const schemaDigest = canonicalDigest(input.schema);
   const registeredModel = registeredTask?.model ?? requestedAlias;
-  const llmCache = registeredTask?.cacheable === true ? activeLlmResultCache() : null;
+  const nativeDiscovery = hasNativeDiscoveryModelScope(context);
+  const llmCache = registeredTask?.cacheable === true && !nativeDiscovery ? activeLlmResultCache() : null;
   const llmCacheKey = llmCache
     ? llmResultCacheKey({
         workspaceId: context.workspaceId,
@@ -317,8 +323,7 @@ export async function executeStructuredTaskWithRuntime<Output>(
     },
   };
   const primaryModel = boundedInput.model ?? registeredTask?.model;
-  const canCrossChannelFallback =
-    context.paidCost === undefined && context.platformEgress === undefined;
+  const canCrossChannelFallback = allowsCrossChannelFallback(context, nativeDiscovery);
   const fallbackModels = canCrossChannelFallback
     ? resolveCrossChannelFallbackModels(primaryModel, boundedInput.task)
     : [];

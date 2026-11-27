@@ -15,11 +15,15 @@
  *  - CH 免费数据 = OGL v3.0（Crown copyright），可商用但**署名是 license 义务**（见 COMPANIES_HOUSE_ATTRIBUTION）。
  */
 
-const BASE_URL = process.env.CH_API_URL ?? 'https://api.company-information.service.gov.uk';
+import { requestDiscoverySourceJson, type DiscoverySourceDispatch } from './discovery-v3-source-http';
+
+const OFFICIAL_BASE_URL = 'https://api.company-information.service.gov.uk';
+const BASE_URL = process.env.CH_API_URL ?? OFFICIAL_BASE_URL;
 const THROTTLE_MS = 500; // 自限（600 req/5min ≈ 2/s，留余量）
 const MAX_RETRIES = 2; // 429/5xx/网络抖动退避
 const DEFAULT_SEARCH_LIMIT = 5;
 const DEFAULT_OFFICER_LIMIT = 50;
+export const CH_COMPANY_SEARCH_NATIVE_TIMEOUT_MS = 20_000;
 
 // OGL v3.0：公共部门信息，可商用、**署名是 license 义务**（展示/证据须附）。
 export const COMPANIES_HOUSE_LICENSE = 'OGL-UK-3.0';
@@ -100,6 +104,35 @@ export async function searchCompanies(
   const q = query.trim();
   if (!q) return [];
   const json = await chGet('/search/companies', { q, items_per_page: limit }, deps);
+  return mapCompanyItems(json);
+}
+
+/** Native discovery can request company search only, never the officers endpoint. */
+export async function searchCompaniesNative(
+  query: string,
+  limit: number = DEFAULT_SEARCH_LIMIT,
+  dispatch: DiscoverySourceDispatch,
+): Promise<ChCompanyHit[]> {
+  if (BASE_URL !== OFFICIAL_BASE_URL) throw new Error('CH_NATIVE_ENDPOINT_NOT_REGISTERED');
+  const q = query.trim();
+  if (!q || q.length > 500 || !Number.isSafeInteger(limit) || limit < 1 || limit > DEFAULT_SEARCH_LIMIT) {
+    throw new Error('CH_NATIVE_QUERY_INVALID');
+  }
+  const apiKey = process.env.COMPANIES_HOUSE_API_KEY;
+  if (!apiKey) throw new Error('COMPANIES_HOUSE_API_KEY not configured');
+  const url = new URL('/search/companies', OFFICIAL_BASE_URL);
+  url.searchParams.set('q', q);
+  url.searchParams.set('items_per_page', String(limit));
+  const json = await requestDiscoverySourceJson<ChResponse>(url, {
+    source: 'CH', timeoutMs: CH_COMPANY_SEARCH_NATIVE_TIMEOUT_MS,
+    headers: { Authorization: companiesHouseAuthHeader(apiKey), Accept: 'application/json' },
+    notFound: { items: [] },
+  }, dispatch);
+  if (!Array.isArray(json.items) || json.items.length > limit) throw new Error('CH_NATIVE_RESPONSE_INVALID');
+  return mapCompanyItems(json);
+}
+
+function mapCompanyItems(json: ChResponse): ChCompanyHit[] {
   const items = Array.isArray(json.items) ? json.items : [];
   return items.map((it) => mapCompanyHit(it as Record<string, unknown>)).filter((c): c is ChCompanyHit => c !== null);
 }
@@ -122,6 +155,11 @@ interface ChResponse {
   total_results?: number;
 }
 
+function companiesHouseAuthHeader(apiKey: string): string {
+  // Companies House uses the key as user name and an empty password.
+  return `Basic ${Buffer.from(`${apiKey}:`).toString('base64')}`;
+}
+
 /** 带退避的 GET（Basic auth；429/5xx 退避）。无 key → 抛可捕获错（provider fail-safe 返空）。 */
 async function chGet(
   path: string,
@@ -135,8 +173,7 @@ async function chGet(
   const beforeRequest = deps?.beforeRequest;
   const url = new URL(path, BASE_URL);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
-  // Basic auth：key 作 username、空 password → base64(key + ":")。
-  const auth = `Basic ${Buffer.from(`${apiKey}:`).toString('base64')}`;
+  const auth = companiesHouseAuthHeader(apiKey);
 
   let lastErr: unknown;
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {

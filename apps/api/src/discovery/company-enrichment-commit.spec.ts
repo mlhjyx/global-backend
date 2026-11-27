@@ -73,6 +73,19 @@ describe('company enrichment commit evidence provenance (L1)', () => {
     });
   });
 
+  it('does not commit a website result after the company changes to a different domain', async () => {
+    const create = vi.fn();
+    const tx = txWith(create);
+    await expect(commitCompanyEnrichmentResults(tx, {
+      workspaceId: 'ws-1', companyId: 'co-1', expectedDomain: 'previous.example',
+      hits: [{ key: 'website_profile', result: {
+        matched: true, confidence: 0.9, attributes: { trade_role: 'distributor' }, costCents: 0,
+      } }],
+    })).resolves.toBe(false);
+    expect(tx.canonicalCompany.updateMany).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+
   it('never stamps a non-profile hit with a row url (the page would not be the source)', async () => {
     const create = vi.fn(async () => ({}));
     await commitCompanyEnrichmentResults(txWith(create), {

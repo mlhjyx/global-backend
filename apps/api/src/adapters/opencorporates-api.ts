@@ -17,11 +17,14 @@
  *    高管/个人字段（源头剥离，非下游过滤）。
  */
 
-const BASE_URL = process.env.OPENCORPORATES_API_URL ?? 'https://api.opencorporates.com/v0.4';
+import { requestDiscoverySourceJson, type DiscoverySourceDispatch } from './discovery-v3-source-http';
+
+const OFFICIAL_BASE_URL = 'https://api.opencorporates.com/v0.4';
+const BASE_URL = process.env.OPENCORPORATES_API_URL ?? OFFICIAL_BASE_URL;
 const MAX_RETRIES = 2; // 429/5xx/网络抖动退避
 const THROTTLE_MS = 500; // 自限 ~2 req/s（免费档更低，付费档按合同；provider 层另有 rps=1 限流）
 const MAX_PER_PAGE = 30;
-const TIMEOUT_MS = 20_000;
+export const OPENCORPORATES_SEARCH_TIMEOUT_MS = 20_000;
 
 // ODbL 1.0：开放数据可商用但**署名+同源共享是 license 义务**；商用 API 走订阅合同。
 export const OPENCORPORATES_LICENSE = 'ODbL-1.0';
@@ -121,6 +124,34 @@ export async function searchOpenCorporatesCompanies(
   beforeRequest?: () => Promise<void>,
   deps?: OpenCorporatesDeps,
 ): Promise<OpenCorporatesCompanyHit[]> {
+  const { url } = prepareCompanySearch(params, apiToken, BASE_URL);
+  const res = await openCorporatesFetch(url, beforeRequest, deps);
+  if (!res.ok) throw new Error(`opencorporates ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  const json = (await res.json()) as OpenCorporatesSearchResponse;
+  const entries = Array.isArray(json.results?.companies) ? json.results.companies : [];
+  return mapCompanyResults(entries);
+}
+
+/** Native discovery reads one page from the policy-covered official company endpoint. */
+export async function searchOpenCorporatesCompaniesNative(
+  params: OpenCorporatesSearchParams,
+  apiToken: string,
+  dispatch: DiscoverySourceDispatch,
+): Promise<OpenCorporatesCompanyHit[]> {
+  if (BASE_URL !== OFFICIAL_BASE_URL) throw new Error('OPENCORPORATES_NATIVE_ENDPOINT_NOT_REGISTERED');
+  if (params.query.length > 500 || (params.limit !== undefined && (!Number.isSafeInteger(params.limit) || params.limit < 1))) {
+    throw new Error('OPENCORPORATES_NATIVE_QUERY_INVALID');
+  }
+  const { url, perPage } = prepareCompanySearch(params, apiToken, OFFICIAL_BASE_URL);
+  const json = await requestDiscoverySourceJson<OpenCorporatesSearchResponse>(url, {
+    source: 'OPENCORPORATES', timeoutMs: OPENCORPORATES_SEARCH_TIMEOUT_MS, headers: { Accept: 'application/json' },
+  }, dispatch);
+  const companies = json.results?.companies;
+  if (!Array.isArray(companies) || companies.length > perPage) throw new Error('OPENCORPORATES_NATIVE_RESPONSE_INVALID');
+  return mapCompanyResults(companies);
+}
+
+function prepareCompanySearch(params: OpenCorporatesSearchParams, apiToken: string, baseUrl: string) {
   const query = params.query.trim();
   if (!query) throw new Error('opencorporates: query required (绝不裸拉全库)');
   if (!apiToken.trim()) throw new Error('opencorporates: API token required');
@@ -130,16 +161,15 @@ export async function searchOpenCorporatesCompanies(
   if (!jurisdiction) throw new Error('opencorporates: jurisdiction required (countryCode 不可映射或缺失)');
   const perPage = Math.min(Math.max(params.limit ?? MAX_PER_PAGE, 1), MAX_PER_PAGE);
 
-  const url = new URL(`${BASE_URL}/companies/search`);
+  const url = new URL(`${baseUrl}/companies/search`);
   url.searchParams.set('q', query);
   url.searchParams.set('jurisdiction_code', jurisdiction);
   url.searchParams.set('per_page', String(perPage));
   url.searchParams.set('api_token', apiToken);
+  return { url, perPage };
+}
 
-  const res = await openCorporatesFetch(url, beforeRequest, deps);
-  if (!res.ok) throw new Error(`opencorporates ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  const json = (await res.json()) as OpenCorporatesSearchResponse;
-  const entries = Array.isArray(json.results?.companies) ? json.results!.companies! : [];
+function mapCompanyResults(entries: unknown[]): OpenCorporatesCompanyHit[] {
   return entries
     .map((entry) => {
       const company =
@@ -166,7 +196,7 @@ async function openCorporatesFetch(
       const res = await fetchImpl(url, {
         method: 'GET',
         headers: { Accept: 'application/json' },
-        signal: AbortSignal.timeout(TIMEOUT_MS),
+        signal: AbortSignal.timeout(OPENCORPORATES_SEARCH_TIMEOUT_MS),
       });
       if ((res.status === 429 || res.status >= 500) && attempt < MAX_RETRIES) {
         const retryAfter = Number(res.headers.get('retry-after'));

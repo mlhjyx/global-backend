@@ -103,7 +103,7 @@ function isAmbiguousNotFound(error: unknown): boolean {
 function parseInput(value: unknown): Readonly<{
   workspaceId: string;
   sha256: string;
-  versionId: string;
+  versionId: string | null;
   objectScope: PersonalArtifactObjectScope;
 }> {
   try {
@@ -135,7 +135,7 @@ function parseInput(value: unknown): Readonly<{
     if (
       !isCanonicalArtifactUuid(workspaceId) ||
       !isCanonicalArtifactSha256(sha256) ||
-      !isCanonicalArtifactObjectVersionId(versionId) ||
+      !(isCanonicalArtifactObjectVersionId(versionId) || (versionId === null && objectScope === 'workspace')) ||
       (objectScope !== 'workspace' && objectScope !== 'legacy_global')
     ) {
       throw unavailable();
@@ -212,7 +212,7 @@ export class S3PersonalArtifactCleanupAdapter
   async eraseFinalObject(input: Readonly<{
     workspaceId: string;
     sha256: string;
-    versionId: string;
+    versionId: string | null;
     objectScope: PersonalArtifactObjectScope;
   }>): Promise<'DELETED' | 'ABSENT'> {
     const exact = parseInput(input);

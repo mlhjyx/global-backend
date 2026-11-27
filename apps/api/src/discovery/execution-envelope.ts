@@ -70,6 +70,7 @@ export const MAX_DISCOVERY_PROVIDER_RECORDS: number =
   resolveMaxDiscoveryProviderRecords();
 /** Capped-mode deep fit ceiling: matches Run 2 QUICK_SCAN_POOL_LIMIT_CAPPED (500) so quotes do not multiply 66×11×25 into an $8k+ wall. */
 export const CAPPED_DISCOVERY_FIT_COMPANIES = 500 as const;
+export const MAX_STREAMING_L1_COMPANIES = 200;
 export function resolveMaxDiscoveryFitCompanies(
   env: NodeJS.ProcessEnv = ambientProcessEnv(),
 ): number {

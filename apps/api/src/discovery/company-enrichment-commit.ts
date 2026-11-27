@@ -73,6 +73,7 @@ export async function commitCompanyEnrichmentResults(
     companyId: string;
     hits: readonly CompanyEnrichmentHit[];
     status?: 'ENRICHED';
+    expectedDomain?: string;
     signalTimestamp?: Date;
     namespaceMarkers?: Readonly<Record<string, string>>;
   },
@@ -81,6 +82,7 @@ export async function commitCompanyEnrichmentResults(
   const markers = validNamespaceMarkers(args.namespaceMarkers);
   const current = await loadCompanyForSuppressionSafeWrite(tx, args.workspaceId, args.companyId);
   if (!current) return false;
+  if (args.expectedDomain !== undefined && current.domain !== args.expectedDomain) return false;
 
   const merged: Record<string, unknown> = { ...current.attributes };
   const governedHits: CompanyEnrichmentHit[] = [];
@@ -108,7 +110,7 @@ export async function commitCompanyEnrichmentResults(
         contactChannels: phoneChannels,
       });
   const updated = await tx.canonicalCompany.updateMany({
-    where: { id: current.id, status: { not: 'SUPPRESSED' } },
+    where: { id: current.id, status: { not: 'SUPPRESSED' }, ...(args.expectedDomain === undefined ? {} : { domain: args.expectedDomain }) },
     data: {
       attributes: merged as Prisma.InputJsonValue,
       ...(backfilledCountry ? { country: backfilledCountry.iso } : {}),

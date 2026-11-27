@@ -1,3 +1,5 @@
+import { hasVersionedDiscoveryCompletion, matchesDiscoveryCompletionV3 } from '../runtime/discovery-completion-contract';
+
 /**
  * 事件注册表（收口③）：outbox 事件的**穷举式**分流真值。
  *
@@ -243,7 +245,6 @@ const DELETION_COMPLETED_REQUIRED = [
 
 const ENVELOPE_ONLY_INTEGRATION_EVENTS: ReadonlySet<string> = new Set([
   "LeadsScored",
-  "DiscoveryRunCompleted",
   "ICPActivated",
   "ClaimApproved",
   "ClaimRevoked",
@@ -331,6 +332,13 @@ export function matchesDiscoveryRunCompletedPayload(ev: PayloadEvent): boolean {
       (payload.costBasis === undefined || typeof payload.costBasis === "string") &&
       (payload.taskRef === undefined || record(payload.taskRef) !== null),
   );
+}
+
+function matchesDiscoveryRunCompletedDelivery(ev: PayloadEvent): boolean {
+  const payload = payloadRecord(ev);
+  if (!payload) return false;
+  // Unversioned history keeps its warn-only compatibility check.
+  return !hasVersionedDiscoveryCompletion(payload) || matchesDiscoveryCompletionV3(payload, ev);
 }
 
 /**
@@ -425,6 +433,7 @@ const INTEGRATION_PAYLOAD_VALIDATORS: Readonly<
 > = {
   LeadQualified: matchesLeadQualifiedPayload,
   CandidateBatchCompleted: matchesCandidateBatchCompletedPayload,
+  DiscoveryRunCompleted: matchesDiscoveryRunCompletedDelivery,
   DeletionCompleted: matchesDeletionCompletedPayload,
   SellerDocumentCleanupCompleted: matchesSellerDocumentCleanupCompletedPayload,
   SiteBuildCostSummaryUpdated: matchesSiteBuildCostSummaryUpdatedV1,

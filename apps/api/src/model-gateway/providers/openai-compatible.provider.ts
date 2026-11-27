@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { currentDiscoveryV3OperationScope } from "../../durable-results/discovery-v3-operation-scope";
 import { ModelProvider } from "../model-provider";
 import {
   ProviderHttpError,
@@ -32,17 +33,15 @@ import {
   resolveReportedModelIdentityAmong,
 } from "../model-identity";
 import { isReviewedModelSubstitution } from "../model-identity-substitutes";
-import { NEW_API_REQUEST_BOUND_RESOLVER_ID } from "../settlement-readback-contract";
-import { buildTenantGatewayHeaders } from "../tenant-gateway-routing";
-import { boundedModelUsage } from "../model-usage-boundary";
+import { buildTenantGatewayHeaders, resolveTenantGatewayApiKey } from "../tenant-gateway-routing";
+import type { DiscoveryV3GatewayRoute } from "../discovery-v3-gateway-contract";
+import { discoveryV3GatewayRequestHeaders } from "../discovery-v3-gateway-readback";
+import { boundedModelTokenCount, boundedModelUsage } from "../model-usage-boundary";
 import {
   createProviderTransportObservation,
   modelSettlementErrorCode,
+  resolveProviderPhysicalWire,
 } from "../provider-transport-observation";
-import type {
-  GatewaySettlementObservation,
-  PaidModelPhysicalWireRuntime,
-} from "../paid-model-settlement";
 import { snapshotVisionReviewInput } from "../vision-review-input";
 import {
   DEFAULT_MODEL_GATEWAY_REQUEST_TIMEOUT_MS,
@@ -70,6 +69,22 @@ export type GatewayVisionTransport =
   | "openai-responses"
   | "anthropic-messages"
   | "google-generate-content";
+
+interface AnthropicMessageUsage {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
+}
+
+function anthropicInputTokens(usage: AnthropicMessageUsage | undefined): number | undefined {
+  if (!usage) return undefined;
+  const prompt = boundedModelTokenCount(usage.input_tokens);
+  const cacheCreation = usage.cache_creation_input_tokens === undefined ? 0 : boundedModelTokenCount(usage.cache_creation_input_tokens);
+  const cacheRead = usage.cache_read_input_tokens === undefined ? 0 : boundedModelTokenCount(usage.cache_read_input_tokens);
+  if (prompt === undefined || cacheCreation === undefined || cacheRead === undefined) return undefined;
+  return boundedModelTokenCount(prompt + cacheCreation + cacheRead);
+}
 
 export interface OpenAICompatConfig {
   id: string; // 'deepseek' | 'openai' | 'gemini' | 'volcengine'
@@ -321,6 +336,15 @@ export class OpenAICompatibleProvider implements ModelProvider {
 
   async health(): Promise<HealthStatus> {
     return { healthy: true, detail: this.cfg.model };
+  }
+
+  discoveryV3GatewayRoute(context: AiContext, requestedModel: string | undefined, maxOutputTokens: number): DiscoveryV3GatewayRoute {
+    const alias = requestedModel ?? this.cfg.model;
+    const credential = resolveTenantGatewayApiKey(this.cfg.apiKey, this.cfg.tenantApiKeys, context.workspaceId);
+    return {
+      alias, protocol: this.transportFor(alias), maxOutputTokens, gatewayOrigin: new URL(this.cfg.baseUrl).origin,
+      credentialSha256: createHash("sha256").update(credential).digest("hex"),
+    };
   }
 
   async generateText(
@@ -862,7 +886,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
         { callCount: 0, provider: this.id },
       );
     }
-    const observation = await this.resolvePhysicalWire(runtime, {
+    const observation = await resolveProviderPhysicalWire(runtime, {
       ...(usage ? { usage } : {}),
       payloadState,
       gatewayIdState: response.headers.has("x-oneapi-request-id")
@@ -876,58 +900,16 @@ export class OpenAICompatibleProvider implements ModelProvider {
     };
   }
 
-  private fallbackObservation(
-    runtime: PaidModelPhysicalWireRuntime,
-    input: {
-      payloadState: "not_read" | "available" | "unavailable";
-      gatewayIdState: "observed" | "missing" | "not_observable";
-      upstreamAckUnknown: boolean;
-    },
-  ): GatewaySettlementObservation {
-    const finalPhase =
-      input.payloadState === "unavailable"
-        ? "payload_unavailable"
-        : input.upstreamAckUnknown
-          ? "upstream_ack_unknown"
-          : "gateway_log_unavailable";
-    return {
-      status: "unknown",
-      physicalWireAttempt: runtime.identity.physicalWireAttempt,
-      resolverId: NEW_API_REQUEST_BOUND_RESOLVER_ID,
-      reason:
-        finalPhase === "payload_unavailable"
-          ? "payload_unavailable"
-          : finalPhase === "upstream_ack_unknown"
-            ? "upstream_ack_unknown"
-            : "gateway_log_unavailable",
-      transportObservation: createProviderTransportObservation({
-        physicalWireAttempt: runtime.identity.physicalWireAttempt,
-        finalPhase,
-        gatewayIdState: input.gatewayIdState,
-        upstreamIdState: "unknown",
-        payloadState: input.payloadState,
-        readbackProbes: [],
-      }),
-    };
-  }
-
-  private async resolvePhysicalWire(
-    runtime: PaidModelPhysicalWireRuntime,
-    input: Parameters<PaidModelPhysicalWireRuntime["resolve"]>[0],
-  ): Promise<GatewaySettlementObservation> {
-    try {
-      return await runtime.resolve(input);
-    } catch {
-      return this.fallbackObservation(runtime, input);
-    }
-  }
-
   private async paidFetch(
     url: string,
     init: RequestInit,
     ctx: AiContext | undefined,
     model: string,
   ): Promise<Response> {
+    if (ctx && currentDiscoveryV3OperationScope(ctx)) {
+      const headers = discoveryV3GatewayRequestHeaders(ctx, url, init, model) ?? init.headers;
+      return fetch(url, { ...init, headers, redirect: "error" });
+    }
     if (!ctx?.paidCost) return fetchWith429Backoff(url, init);
     const runtime = ctx.paidCost.settlementPhysicalWire;
     if (!runtime) {
@@ -944,7 +926,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
     try {
       sendDecision = await runtime.begin();
     } catch {
-      const observation = await this.resolvePhysicalWire(runtime, {
+      const observation = await resolveProviderPhysicalWire(runtime, {
         payloadState: "not_read",
         gatewayIdState: "not_observable",
         upstreamAckUnknown: true,
@@ -964,7 +946,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
     try {
       return await fetch(url, { ...init, headers, redirect: "error" });
     } catch {
-      const observation = await this.resolvePhysicalWire(runtime, {
+      const observation = await resolveProviderPhysicalWire(runtime, {
         payloadState: "not_read",
         gatewayIdState: "not_observable",
         upstreamAckUnknown: true,
@@ -2119,11 +2101,11 @@ export class OpenAICompatibleProvider implements ModelProvider {
         input?: unknown;
       }[];
       stop_reason?: string;
-      usage?: { input_tokens?: number; output_tokens?: number };
+      usage?: AnthropicMessageUsage;
       model?: string;
     }>(res, ctx, opts.model);
     const bodyUsage = {
-      inputTokens: json.usage?.input_tokens,
+      inputTokens: ctx && currentDiscoveryV3OperationScope(ctx) ? anthropicInputTokens(json.usage) : json.usage?.input_tokens,
       outputTokens: json.usage?.output_tokens,
     };
     const settlementUsage = await this.settledUsage(res, bodyUsage, ctx);

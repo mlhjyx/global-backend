@@ -1,4 +1,5 @@
 import { types } from 'node:util';
+import { arraySchema, numberSchema, objectSchema, stringSchema, toolResultSchema, type JsonSchema } from './catalog-result-projection-schema';
 import { socialSearchExaPeopleProjection, socialSearchSerperProjection } from './social-search-result-projection';
 import { viesCheckResultProjection } from './vies-result-projection';
 import { ALL_CLAIM_PROPERTIES, ENTITY_PROPERTIES, STRING_PROPERTIES, WIKIDATA_COMPANY_KEYS } from './wikidata-entity-properties';
@@ -7,14 +8,17 @@ import { normalizePersonName } from '../discovery/person-name';
 import type { TypedProjectionSchema } from './durable-result-strategy';
 import { TypedProjectionRegistry } from './typed-projection.registry';
 import type { TypedProjectionDefinition } from './typed-projection.types';
+import { ALGOLIA_NATIVE_MAX_PAGE_SIZE } from '../adapters/trade-fair-algolia-native';
 import {
+  PLATFORM_ALGOLIA_PAGES_PER_SOURCE_MAX,
   PLATFORM_MAPYOURSHOW_OUTPUT_ITEM_MAX,
   PLATFORM_PATENTS_OUTPUT_ITEM_MAX,
   PLATFORM_TRADE_FAIR_OUTPUT_ITEM_MAX,
   platformExecutionToolContract,
 } from '../platform-authority/platform-execution-contract';
 
-type JsonSchema = Readonly<Record<string, unknown>>; type UnknownRecord = Record<string, unknown>; type Transform = (value: unknown) => unknown;
+type UnknownRecord = Record<string, unknown>;
+type Transform = (value: unknown) => unknown;
 export const CATALOG_RESULT_TOOL_IDS = Object.freeze([
   'searxng.search', 'social.search', 'social.fetch', 'wikidata.sparql', 'osm.overpass',
   'wikidata.entity', 'gleif.fetch', 'companies_house.search', 'inpi_rne.search',
@@ -211,35 +215,6 @@ function resultMetadata(result: UnknownRecord, provenance: boolean): UnknownReco
       ? { provenance: projectProvenance(field(result, 'provenance')) }
       : {}),
   };
-}
-const stringSchema = (maxLength: number, extra?: JsonSchema): JsonSchema => (
-  { type: 'string', maxLength, ...extra }
-);
-const numberSchema = (minimum: number, maximum: number, integer = false): JsonSchema => (
-  { type: integer ? 'integer' : 'number', minimum, maximum }
-);
-const arraySchema = (maxItems: number, items: JsonSchema): JsonSchema => (
-  { type: 'array', maxItems, items }
-);
-function objectSchema(
-  properties: Readonly<Record<string, JsonSchema>>,
-  required: readonly string[],
-): JsonSchema {
-  return { type: 'object', additionalProperties: false, required, properties };
-}
-const provenanceSchema = objectSchema({
-  sourceUrl: stringSchema(2048),
-  fetchedAt: stringSchema(100),
-  contentHash: stringSchema(128),
-  parserVersion: stringSchema(120),
-}, ['fetchedAt', 'parserVersion']);
-function toolResultSchema(data: JsonSchema, provenance = false): JsonSchema {
-  return objectSchema({
-    data,
-    costCents: numberSchema(0, 1_000_000_000, true),
-    degraded: { type: 'boolean' },
-    ...(provenance ? { provenance: provenanceSchema } : {}),
-  }, ['data', 'costCents']);
 }
 function deepFreeze(value: unknown, seen = new Set<object>()): void {
   if (!value || typeof value !== 'object' || seen.has(value)) return;
@@ -882,16 +857,32 @@ const fairExhibitorSchema = objectSchema({
   stand: stringSchema(200), description: stringSchema(500),
   products: arraySchema(12, stringSchema(500)), hiring: { type: 'boolean' },
 }, ['externalId', 'companyName', 'products']);
-const fairData = (value: unknown) => mapClosedRecord(value, ['exhibitors'], ['exhibitors'], {
-  exhibitors: (items) => mapArray(items, (item) => mapClosedRecord(
-    item, FAIR_EXHIBITOR_KEYS, ['externalId', 'companyName', 'products'], {
+const fairPageKeys = ['fairSlug', 'page', 'hasNextPage'] as const;
+const fairPageSchema = objectSchema({
+  fairSlug: stringSchema(100),
+  page: numberSchema(0, PLATFORM_ALGOLIA_PAGES_PER_SOURCE_MAX - 1, true),
+  hasNextPage: { type: 'boolean' },
+}, fairPageKeys);
+const nativeFairExhibitorKeys = ['externalId', 'companyName', 'website', 'country', 'stand', 'products'] as const;
+function fairData(value: unknown): UnknownRecord {
+  const raw = ownDataRecord(value, ['exhibitors', 'pagination'], ['exhibitors']);
+  const native = hasDefinedField(raw, 'pagination');
+  const exhibitors = mapArray(field(raw, 'exhibitors'), (item) => mapClosedRecord(
+    item, native ? nativeFairExhibitorKeys : FAIR_EXHIBITOR_KEYS, ['externalId', 'companyName', 'products'], {
       products: mapStringArray,
     },
-  )),
-});
+  ));
+  if (!native) return { exhibitors };
+  const pagination = mapClosedRecord(field(raw, 'pagination'), fairPageKeys, fairPageKeys);
+  if (exhibitors.length > ALGOLIA_NATIVE_MAX_PAGE_SIZE || typeof pagination.fairSlug !== 'string' ||
+      !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(pagination.fairSlug)) projectionInvalid();
+  return { exhibitors, pagination };
+}
 const tradeFairDefinition = definition(
   'tradefair-algolia/v1',
-  objectSchema({ exhibitors: arraySchema(PLATFORM_TRADE_FAIR_OUTPUT_ITEM_MAX, fairExhibitorSchema) }, ['exhibitors']),
+  objectSchema({
+    exhibitors: arraySchema(PLATFORM_TRADE_FAIR_OUTPUT_ITEM_MAX, fairExhibitorSchema), pagination: fairPageSchema,
+  }, ['exhibitors']),
   fairData,
 );
 

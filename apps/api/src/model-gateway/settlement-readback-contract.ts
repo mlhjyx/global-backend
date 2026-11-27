@@ -38,12 +38,11 @@ export interface NewApiSettlementReadbackProbe {
   httpStatusClass: 2 | 4 | 5 | null;
 }
 
-export interface NewApiRequestBoundSettlementInput {
+interface NewApiRequestBoundSettlementRequest {
   requestId: string | null;
   nonce: string | null;
   alias: string;
   protocol: string;
-  expectedChannelId: number;
   usage?: { inputTokens?: number; outputTokens?: number };
   maxOutputTokens: number;
   maximumQuotaPoints: number;
@@ -54,9 +53,21 @@ export interface NewApiRequestBoundSettlementInput {
       probeId: string;
       probe: NewApiSettlementReadbackProbe;
       observedAt: Date;
+      receipt?: NewApiRequestBoundSettlementReceipt;
     }): Promise<void>;
   };
   signal?: AbortSignal;
+}
+
+export type NewApiRequestBoundSettlementInput = NewApiRequestBoundSettlementRequest & (
+  | { profile?: never; expectedChannelId: number }
+  | { profile: "discovery-v3"; expectedChannelId?: never }
+);
+
+/** A trusted gateway reader may supply a monetary charge for this consume row. */
+export interface NewApiReportedMonetaryCharge {
+  currency: string;
+  amountMicros: number;
 }
 
 export type NewApiRequestBoundSettlementUnknownReason =
@@ -76,19 +87,22 @@ interface SettlementBase {
   readbackProbes: readonly NewApiSettlementReadbackProbe[];
 }
 
+export interface NewApiRequestBoundSettlementReceipt extends SettlementBase {
+  status: "settled";
+  requestId: string;
+  alias: string;
+  protocol: string;
+  channelId: number;
+  quota: number;
+  inputTokens: number;
+  outputTokens: number;
+  upstreamIdState: "observed" | "absent";
+  receiptDigest: string;
+  actualCharge?: NewApiReportedMonetaryCharge;
+}
+
 export type NewApiRequestBoundSettlement =
-  | (SettlementBase & {
-      status: "settled";
-      requestId: string;
-      alias: string;
-      protocol: string;
-      channelId: number;
-      quota: number;
-      inputTokens: number;
-      outputTokens: number;
-      upstreamIdState: "observed" | "absent";
-      receiptDigest: string;
-    })
+  | NewApiRequestBoundSettlementReceipt
   | (SettlementBase & {
       status: "unknown";
       reason: NewApiRequestBoundSettlementUnknownReason;
