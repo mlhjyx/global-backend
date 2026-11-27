@@ -11,6 +11,7 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
+import { SELLER_DOCUMENT_DOCLING_TASKS_KEY } from '../seller-document-ingest-policy';
 
 export class PresignSellerDocumentDto {
   @ApiProperty({ example: '产品目录-2026.pdf' })
@@ -163,8 +164,10 @@ export class SellerDocumentDto {
   }): SellerDocumentDto {
     const parsedMeta =
       row.parsedMeta && typeof row.parsedMeta === 'object' && !Array.isArray(row.parsedMeta)
-        ? (row.parsedMeta as Record<string, unknown>)
+        ? { ...(row.parsedMeta as Record<string, unknown>) }
         : null;
+    const hasInternalTasks = parsedMeta !== null && Object.hasOwn(parsedMeta, SELLER_DOCUMENT_DOCLING_TASKS_KEY);
+    if (hasInternalTasks) delete parsedMeta[SELLER_DOCUMENT_DOCLING_TASKS_KEY];
     return {
       id: row.id,
       companyId: row.companyId,
@@ -175,7 +178,7 @@ export class SellerDocumentDto {
       status: row.status,
       processingErrorCode: row.processingErrorCode,
       chunkCount: row.chunkCount,
-      ...(parsedMeta ? { parsedMeta } : {}),
+      ...(parsedMeta && (!hasInternalTasks || Object.keys(parsedMeta).length > 0) ? { parsedMeta } : {}),
       factsExtractedAt: row.factsExtractedAt ? row.factsExtractedAt.toISOString() : null,
       createdAt: row.createdAt.toISOString(),
     };

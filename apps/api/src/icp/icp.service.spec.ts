@@ -3,6 +3,7 @@ import {
   ConflictException,
   NotFoundException,
 } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { IcpService } from "./icp.service";
 import * as BudgetExecution from "./icp-budget-execution";
@@ -79,11 +80,18 @@ function fixture() {
       update: vi.fn().mockResolvedValue(icp),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
-    persona: { create: vi.fn().mockResolvedValue({}) },
-    buyingCommitteeRole: { create: vi.fn().mockResolvedValue({}) },
+    persona: {
+      create: vi.fn().mockResolvedValue({}),
+      createMany: vi.fn().mockResolvedValue({ count: 1 }),
+    },
+    buyingCommitteeRole: {
+      create: vi.fn().mockResolvedValue({}),
+      createMany: vi.fn().mockResolvedValue({ count: 1 }),
+    },
     qualificationRule: {
       findUnique: vi.fn().mockResolvedValue({ id: "rule-1" }),
       create: vi.fn().mockResolvedValue({ id: "rule-1" }),
+      createMany: vi.fn().mockResolvedValue({ count: 1 }),
       update: vi.fn().mockResolvedValue({ id: "rule-1" }),
       delete: vi.fn().mockResolvedValue({}),
     },
@@ -501,6 +509,41 @@ describe("ICP generation authority and controlled enrichment", () => {
       painPoints: [],
     });
     expect(f.tx.persona.create).not.toHaveBeenCalled();
+    expect(f.tx.persona.createMany).not.toHaveBeenCalled();
+  });
+  it("persists a large draft using one write per child relation and one model call", async () => {
+    const f = generationFixture();
+    const personas = Array.from({ length: 8 }, (_, i) => ({
+      title: `Buyer ${i}`, goals: ["Source pumps"], pain_points: [],
+    }));
+    const committee = Array.from({ length: 32 }, (_, i) => ({
+      role: `buyer-${i}`, title: `Officer ${i}`, concerns: [],
+    }));
+    const rules = Array.from({ length: 64 }, (_, i) => ({
+      kind: "NICE_TO_HAVE", field: "keywords", operator: "contains",
+      value: `industrial-pump-${i}`, weight: 0, rationale: "",
+    }));
+    f.result.data = { personas, buying_committee: committee, qualification_rules: rules };
+    const expired = Object.assign(new Error("Transaction already closed"), { code: "P2028" });
+    f.tx.qualificationRule.create.mockRejectedValue(expired);
+
+    await expect(f.service.generateFromCompany(ctx, "company")).resolves.toBe(f.icp);
+    expect(f.runtime).toHaveBeenCalledOnce();
+    expect(f.tx.persona.createMany).toHaveBeenCalledExactlyOnceWith({
+      data: personas.map((p) => ({
+        workspaceId: ctx.workspaceId, icpId: f.icp.id,
+        title: p.title, goals: p.goals, painPoints: p.pain_points,
+      })),
+    });
+    expect(f.tx.buyingCommitteeRole.createMany).toHaveBeenCalledExactlyOnceWith({
+      data: committee.map((role) => ({ workspaceId: ctx.workspaceId, icpId: f.icp.id, ...role })),
+    });
+    expect(f.tx.qualificationRule.createMany).toHaveBeenCalledExactlyOnceWith({
+      data: rules.map((rule) => ({ workspaceId: ctx.workspaceId, icpId: f.icp.id, ...rule })),
+    });
+    expect(f.tx.persona.create).not.toHaveBeenCalled();
+    expect(f.tx.buyingCommitteeRole.create).not.toHaveBeenCalled();
+    expect(f.tx.qualificationRule.create).not.toHaveBeenCalled();
   });
   it("includes approved facts and offerings but discards invalid proposed rules", async () => {
     const f = generationFixture();
@@ -540,9 +583,14 @@ describe("ICP generation authority and controlled enrichment", () => {
     const prompt = f.runtime.mock.calls[0][1].prompt;
     expect(prompt).toContain("https://example.test");
     expect(prompt).toContain("industrial");
-    expect(f.tx.qualificationRule.create).toHaveBeenCalledTimes(2);
-    expect(f.tx.persona.create).toHaveBeenCalledOnce();
-    expect(f.tx.buyingCommitteeRole.create).toHaveBeenCalledOnce();
+    expect(f.tx.qualificationRule.createMany).toHaveBeenCalledExactlyOnceWith({
+      data: [
+        expect.objectContaining({ kind: "MUST_HAVE", value: Prisma.JsonNull }),
+        expect.objectContaining({ kind: "NICE_TO_HAVE", value: "DE", weight: 0, rationale: "" }),
+      ],
+    });
+    expect(f.tx.persona.createMany).toHaveBeenCalledOnce();
+    expect(f.tx.buyingCommitteeRole.createMany).toHaveBeenCalledOnce();
   });
   it("injects the seller profile's authoritative target markets and industry into the prompt (P1-B2)", async () => {
     const f = generationFixture();
@@ -671,10 +719,9 @@ describe("ICP generation authority and controlled enrichment", () => {
       ],
     };
     await f.service.generateFromCompany(ctx, "company");
-    const created = f.tx.qualificationRule.create.mock.calls.map(
-      ([call]: [{ data: { kind: string; field: string; operator: string } }]) =>
-        [call.data.kind, call.data.field, call.data.operator],
-    );
+    const [{ data }] = f.tx.qualificationRule.createMany.mock.calls[0] as
+      [{ data: { kind: string; field: string; operator: string }[] }];
+    const created = data.map((rule) => [rule.kind, rule.field, rule.operator]);
     expect(created).toEqual([
       ["MUST_HAVE", "keywords", "contains"],
       ["MUST_HAVE", "business_model", "in"],
@@ -1518,5 +1565,6 @@ describe("a generation whose model answer the gateway settled as unusable", () =
     expect(f.runtime).toHaveBeenCalledOnce();
     expect(f.tx.icpDefinition.create).not.toHaveBeenCalled();
     expect(f.tx.persona.create).not.toHaveBeenCalled();
+    expect(f.tx.persona.createMany).not.toHaveBeenCalled();
   });
 });

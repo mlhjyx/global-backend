@@ -86,10 +86,9 @@ class GenerateIcpDto extends GenerateWithAttemptDto {
   @Length(1, 120, { each: true })
   productLines?: string[];
 
-  @ApiPropertyOptional({ type: [String], maxItems: 5, description: '可选：本 ICP 聚焦的下游买家角色（如 distributor / epc_integrator）' })
+  @ApiPropertyOptional({ type: [String], description: '可选：本 ICP 聚焦的下游买家角色（如 distributor / epc_integrator）' })
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(5)
   @IsString({ each: true })
   @Length(1, 60, { each: true })
   buyerRoles?: string[];

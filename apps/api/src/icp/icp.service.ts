@@ -123,6 +123,7 @@ interface QueryPlanModelOutput {
 
 const RULE_KINDS = ['MUST_HAVE', 'NICE_TO_HAVE', 'EXCLUSION'] as const;
 const RULE_OPERATORS = ['eq', 'neq', 'in', 'not_in', 'contains', 'not_contains', 'gte', 'lte', 'matches'];
+const ICP_DRAFT_WRITE_TIMEOUT_MS = 15_000;
 
 const json = (v: unknown): Prisma.InputJsonValue => (v ?? []) as Prisma.InputJsonValue;
 
@@ -237,6 +238,36 @@ export class IcpService {
       });
     }
 
+    const personas = (out.personas ?? []).map((p) => ({
+      title: p.title,
+      goals: json(p.goals),
+      painPoints: json(p.pain_points),
+    }));
+    const committee = (out.buying_committee ?? []).map((role) => ({
+      role: role.role,
+      title: role.title,
+      concerns: json(role.concerns),
+    }));
+    // 结构化验证规则（LED-003）：仅保留确定性规则引擎可评估的提议。
+    const proposed = filterUnmatchableIcpRules(
+      (out.qualification_rules ?? []).flatMap((rule) => {
+        const kind = String(rule.kind).toUpperCase();
+        if (!RULE_KINDS.includes(kind as never) || !RULE_OPERATORS.includes(rule.operator)) return [];
+        return [{ ...rule, kind: kind as RuleLike['kind'] }];
+      }),
+      targetMarketsForIcp,
+    );
+    // MUST_HAVE 不满足已拒绝候选，排除其镜像否定，避免放大拒绝范围。
+    const mirrored = new Set(mirrorExclusionRuleIndexes(proposed));
+    const rules = proposed.filter((_rule, index) => !mirrored.has(index)).map((rule) => ({
+      kind: rule.kind,
+      field: rule.field,
+      operator: rule.operator,
+      value: rule.value == null ? Prisma.JsonNull : rule.value as Prisma.InputJsonValue,
+      weight: rule.weight ?? 1,
+      rationale: rule.rationale ?? null,
+    }));
+
     const icpId = result.durableReceipt
       ? domainAggregateIdForReceipt(result.durableReceipt, 'icp.design')
       : undefined;
@@ -256,76 +287,37 @@ export class IcpService {
         domainAckKey: icpId ?? companyId,
         domainRevision: result.durableReceipt?.resultDigest ?? '1',
         apply: async (transaction) => {
-      const icp = await transaction.icpDefinition.create({
-        data: {
-          ...(icpId ? { id: icpId } : {}),
-          workspaceId: ctx.workspaceId,
-          companyId,
-          name: overrides?.name?.trim() || out.name || '未命名 ICP',
-          status: 'HYPOTHESIS', // AI-generated, not yet backtested
-          companyAttributes: json(companyAttributesForIcp),
-          painPoints: json(out.pain_points),
-          triggerSignals: json(out.trigger_signals),
-          exclusions: json(sanitizedExclusions),
-          valueProps: json(out.value_props),
-          targetMarkets: json(targetMarketsForIcp),
-        },
-      });
-      for (const p of out.personas ?? []) {
-        await transaction.persona.create({
-          data: {
-            workspaceId: ctx.workspaceId,
-            icpId: icp.id,
-            title: p.title,
-            goals: json(p.goals),
-            painPoints: json(p.pain_points),
-          },
-        });
-      }
-      for (const r of out.buying_committee ?? []) {
-        await transaction.buyingCommitteeRole.create({
-          data: {
-            workspaceId: ctx.workspaceId,
-            icpId: icp.id,
-            role: r.role,
-            title: r.title,
-            concerns: json(r.concerns),
-          },
-        });
-      }
-      // 结构化验证规则（LED-003）：AI 提议 → 落库 → 由确定性规则引擎评估。
-      const proposed = filterUnmatchableIcpRules(
-        (out.qualification_rules ?? []).flatMap((r) => {
-          const kind = String(r.kind).toUpperCase();
-          if (!RULE_KINDS.includes(kind as never) || !RULE_OPERATORS.includes(r.operator)) return []; // 丢弃不合法提议
-          return [{ ...r, kind: kind as RuleLike['kind'] }];
-        }),
-        targetMarketsForIcp,
-      );
-      // 评分规则 v3：拒绝与 MUST_HAVE 同 field 同 value 的镜像 EXCLUSION（否定操作符）——模型常把每条
-      // MUST_HAVE 复述成 not_contains / not_in（xin ICP 22202d3c 6 条），公司属性是受控英文词表时它对每家
-      // 公司都命中。MUST_HAVE 不满足本就 no_match，镜像只会把「复核」硬变成「拒绝」。
-      const mirrored = new Set(mirrorExclusionRuleIndexes(proposed));
-      for (const [index, r] of proposed.entries()) {
-        if (mirrored.has(index)) continue;
-        await transaction.qualificationRule.create({
-          data: {
-            workspaceId: ctx.workspaceId,
-            icpId: icp.id,
-            kind: r.kind as never,
-            field: r.field,
-            operator: r.operator,
-            value: (r.value ?? null) as Prisma.InputJsonValue,
-            weight: r.weight ?? 1,
-            rationale: r.rationale ?? null,
-          },
-        });
-      }
-      return this.full(transaction, icp.id);
+          const icp = await transaction.icpDefinition.create({
+            data: {
+              ...(icpId ? { id: icpId } : {}),
+              workspaceId: ctx.workspaceId,
+              companyId,
+              name: overrides?.name?.trim() || out.name || '未命名 ICP',
+              status: 'HYPOTHESIS', // AI-generated, not yet backtested
+              companyAttributes: json(companyAttributesForIcp),
+              painPoints: json(out.pain_points),
+              triggerSignals: json(out.trigger_signals),
+              exclusions: json(sanitizedExclusions),
+              valueProps: json(out.value_props),
+              targetMarkets: json(targetMarketsForIcp),
+            },
+          });
+          const owner = { workspaceId: ctx.workspaceId, icpId: icp.id };
+          // One statement per child table keeps the model result inside the transaction deadline.
+          if (personas.length > 0) {
+            await transaction.persona.createMany({ data: personas.map((p) => ({ ...owner, ...p })) });
+          }
+          if (committee.length > 0) {
+            await transaction.buyingCommitteeRole.createMany({ data: committee.map((role) => ({ ...owner, ...role })) });
+          }
+          if (rules.length > 0) {
+            await transaction.qualificationRule.createMany({ data: rules.map((rule) => ({ ...owner, ...rule })) });
+          }
+          return this.full(transaction, icp.id);
         },
       });
       return applied.value ?? this.full(tx, icpId!);
-    });
+    }, { timeout: ICP_DRAFT_WRITE_TIMEOUT_MS });
   }
 
   list(ctx: RequestContext, companyId?: string) {

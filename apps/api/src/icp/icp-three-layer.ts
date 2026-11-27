@@ -101,6 +101,7 @@ const SELLER_TECH_SPEC_RE =
   /\b(?:HJT|TOPCon|PERC|0BB|G12|M10|N-?type|bifacial|\d{2,4}\s*(?:Wp?|kW|MW|MPa|bar|mm|rpm|kV|Hz)|±\s*\d+(?:\.\d+)?\s*(?:mm|µm|um)|ISO\s*\d{4,5}|IATF\s*16949|IEC\s*6\d{4}|IP6[5-9])\b/giu;
 
 const NON_MANUFACTURING_ROLES = new Set(['distributor', 'epc_integrator', 'wholesaler', 'importer', 'reseller']);
+const BUYER_ROLE_PROMPT_MAX_CHARS = 2_048;
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -203,8 +204,17 @@ export function buildMultiIcpPromptFocus(overrides?: GenerateIcpOverrides): stri
   if (overrides.productLines?.length) {
     lines.push(`- 本 ICP 仅聚焦以下产品线：${overrides.productLines.join('、')}`);
   }
-  if (overrides.buyerRoles?.length) {
-    lines.push(`- 本 ICP 指定的下游买家角色：${overrides.buyerRoles.join('、')}`);
+  const selectedRoles = overrides.buyerRoles ?? [];
+  const promptRoles: string[] = [];
+  let remainingRoleChars = BUYER_ROLE_PROMPT_MAX_CHARS;
+  for (const role of uniqueStrings(selectedRoles, selectedRoles.length)) {
+    const length = role.length + (promptRoles.length > 0 ? 1 : 0);
+    if (length > remainingRoleChars) continue;
+    promptRoles.push(role);
+    remainingRoleChars -= length;
+  }
+  if (promptRoles.length > 0) {
+    lines.push(`- 本 ICP 指定的下游买家角色：${promptRoles.join('、')}`);
   }
   if (overrides.procurementScenario) {
     lines.push(`- 本 ICP 指定的采购场景：${overrides.procurementScenario}`);
@@ -254,13 +264,14 @@ export function buildThreeLayerIcpAttributes(input: {
 
   const existingBuyer = isPlainRecord(attrs.buyer_spec) ? attrs.buyer_spec : {};
   const resolvedRole = icpTradeRole(attrs);
-  const overrideRoles = uniqueStrings(input.overrides?.buyerRoles ?? [], 5);
+  const selectedRoles = input.overrides?.buyerRoles ?? [];
+  const overrideRoles = uniqueStrings(selectedRoles, selectedRoles.length);
   const targetRoles = uniqueStrings([
     ...overrideRoles,
     ...asStrings(existingBuyer.target_roles),
     ...(resolvedRole ? [resolvedRole] : []),
     ...asStrings(attrs.trade_side),
-  ], 6);
+  ], Math.max(6, overrideRoles.length));
 
   const tradeSide =
     overrideRoles[0] ??

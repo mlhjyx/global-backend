@@ -18,10 +18,11 @@ const binding = Object.freeze({
 
 describe('IcpService receipt-aware domain consumer', () => {
   it('persists an unreceipted pre-cutover model result in the existing workspace transaction', async () => {
-    const icpCreate = vi.fn(async () => ({ id: '40000000-0000-4000-8000-000000000001' }));
-    const personaCreate = vi.fn(async () => ({}));
-    const roleCreate = vi.fn(async () => ({}));
-    const ruleCreate = vi.fn(async () => ({}));
+    const icpId = '40000000-0000-4000-8000-000000000001';
+    const icpCreate = vi.fn(async () => ({ id: icpId }));
+    const personaCreateMany = vi.fn(async () => ({ count: 1 }));
+    const roleCreateMany = vi.fn(async () => ({ count: 1 }));
+    const ruleCreateMany = vi.fn(async () => ({ count: 1 }));
     const tx = {
       companyProfile: {
         findUnique: vi.fn(async ({ where }: { where: { id: string } }) =>
@@ -38,9 +39,9 @@ describe('IcpService receipt-aware domain consumer', () => {
           id: where.id, name: 'Pump buyers', personas: [], roles: [], rules: [],
         })),
       },
-      persona: { create: personaCreate },
-      buyingCommitteeRole: { create: roleCreate },
-      qualificationRule: { create: ruleCreate },
+      persona: { createMany: personaCreateMany },
+      buyingCommitteeRole: { createMany: roleCreateMany },
+      qualificationRule: { createMany: ruleCreateMany },
     };
     const prisma = {
       withWorkspace: vi.fn(async (_workspaceId: string, callback: (value: typeof tx) => unknown) =>
@@ -83,9 +84,19 @@ describe('IcpService receipt-aware domain consumer', () => {
       name: 'Pump buyers',
     });
     expect(icpCreate).toHaveBeenCalledOnce();
-    expect(personaCreate).toHaveBeenCalledOnce();
-    expect(roleCreate).toHaveBeenCalledOnce();
-    expect(ruleCreate).toHaveBeenCalledOnce();
+    const owner = { workspaceId: WORKSPACE_ID, icpId };
+    expect(personaCreateMany).toHaveBeenCalledExactlyOnceWith({
+      data: [{ ...owner, title: 'Plant manager', goals: [], painPoints: [] }],
+    });
+    expect(roleCreateMany).toHaveBeenCalledExactlyOnceWith({
+      data: [{ ...owner, role: 'buyer', title: 'Plant manager', concerns: [] }],
+    });
+    expect(ruleCreateMany).toHaveBeenCalledExactlyOnceWith({
+      data: [{
+        ...owner, kind: 'MUST_HAVE', field: 'industry', operator: 'eq', value: 'industrial',
+        weight: 1, rationale: 'Industrial buyer',
+      }],
+    });
     expect(budgetStore.attestAuthorized).toHaveBeenCalledWith({
       authorityId: binding.authorityId,
       scopeKey: binding.scopeKey,

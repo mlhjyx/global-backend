@@ -32,6 +32,10 @@ import {
   readSelectionMarker,
   type OfferingSelectionMarker,
 } from '../company/offering-selection';
+import {
+  hasReviewableWebsiteEvidence,
+  type ExtractedWebsiteClaim,
+} from '../company/website-claim-evidence';
 import { isNavigationNoiseOffering } from '../discovery/offering-noise-filter';
 import {
   applyDomainAckConsumerTransaction,
@@ -99,13 +103,6 @@ type UnderstandingAuthorityEnvelope = Readonly<{
   executionContractVersion?: 2;
   executionBudget?: ExecutionBudgetBinding;
 }>;
-
-interface ExtractedClaim {
-  type: string;
-  statement: string;
-  evidence?: string; // 源文本中支持该结论的原文片段（溯源）
-  confidence: number;
-}
 
 interface ExtractedOffering {
   name: string;
@@ -380,7 +377,7 @@ export function createUnderstandingActivities(deps: {
     },
 
     async extractClaims(args: UnderstandingAuthorityInput & { text: string }): Promise<{
-      claims: ExtractedClaim[];
+      claims: ExtractedWebsiteClaim[];
       durableReceipt?: DurableExecutionReceipt;
     }> {
       return withActivityHeartbeat(30_000, () => withRunBudget(args, async (accountKey) => {
@@ -406,10 +403,10 @@ export function createUnderstandingActivities(deps: {
           },
           { telemetry: deps.runtimeTelemetry },
         ).catch(skillDenialFailure);
-        const fromModel = (result.data as { claims?: ExtractedClaim[] })?.claims;
+        const fromModel = (result.data as { claims?: ExtractedWebsiteClaim[] })?.claims;
         if (!Array.isArray(fromModel)) throw new Error('UNDERSTANDING_CLAIMS_INVALID');
         return {
-          claims: fromModel,
+          claims: fromModel.filter((claim) => hasReviewableWebsiteEvidence(claim, args.text)),
           ...(result.durableReceipt ? { durableReceipt: result.durableReceipt } : {}),
         };
       }));
@@ -515,7 +512,7 @@ export function createUnderstandingActivities(deps: {
     async persistClaims(
       args: UnderstandingInput & { pages: {
         url: string;
-        claims: ExtractedClaim[];
+        claims: ExtractedWebsiteClaim[];
         durableReceipt?: DurableExecutionReceipt;
         crawlDurableReceipt?: DurableExecutionReceipt;
       }[] },
@@ -552,7 +549,8 @@ export function createUnderstandingActivities(deps: {
         let conflictBudget = 20; // 防洪：单次运行最多报 20 组冲突
         const byStatement = new Map<string, string>(); // normalized statement → claim id
         for (const page of args.pages) {
-          if (!page.claims.length) continue;
+          const claims = page.claims.filter((claim) => hasReviewableWebsiteEvidence(claim));
+          if (!claims.length) continue;
           const ingestKey = `${runId}:${page.url}`;
           const existing = await transaction.knowledgeSource.findFirst({
             where: { companyId: args.companyId, ingestKey },
@@ -569,7 +567,7 @@ export function createUnderstandingActivities(deps: {
               ingestKey,
             },
           });
-          for (const c of page.claims) {
+          for (const c of claims) {
             const key = c.statement.toLowerCase().replace(/\s+/g, ' ').trim();
             let claimId = byStatement.get(key);
             if (!claimId) {
@@ -618,7 +616,7 @@ export function createUnderstandingActivities(deps: {
                 workspaceId: args.workspaceId,
                 claimId,
                 sourceUrl: page.url,
-                snippet: c.evidence ?? null,
+                snippet: c.evidence.trim(),
                 confidence: c.confidence,
                 fetchedAt: new Date(),
               },
