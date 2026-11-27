@@ -10,7 +10,7 @@ import {
   OnModuleInit,
   Optional,
 } from "@nestjs/common";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, type Prisma } from "@prisma/client";
 import { WorkflowIdReusePolicy } from "@temporalio/client";
 import type { Duration } from "@temporalio/common";
 import { TemporalClient } from "../temporal/temporal.client";
@@ -114,11 +114,7 @@ interface OutboxEventRecord {
   parkedAt: Date | null;
 }
 
-/** Development fast lane only: the outbox filter for the lane workspace's acquisition commands. */
-type LaneCommandFilter = Readonly<{
-  workspaceId: string;
-  eventType: { in: string[] };
-}>;
+type LaneCommandFilter = Prisma.OutboxEventWhereInput & Readonly<{ workspaceId: string }>;
 
 /** fetch 的最小可注入面（单测 mock 用，绝不真发网络）。 */
 type FetchLike = (
@@ -475,6 +471,10 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       ? {
           workspaceId: lane.workspaceId,
           eventType: { in: [...DEV_FAST_LANE_ACQUISITION_COMMANDS] },
+          OR: [
+            { eventType: { not: "DiscoveryRunRequested" } },
+            { schemaVersion: { not: 3 } },
+          ],
         }
       : undefined;
   }
