@@ -70,9 +70,9 @@ describe('AI task registry model execution policy invariants', () => {
         timeoutMs: 180000,
       },
       'discovery.classify_trade_role': {
-        // BI-14: the website profile also renders the company's linked contact page (form check).
+        // BI-14 + 流式 L1：官网画像除 crawl4ai.fetch/render 外，raw-http-extractor 经 Broker 调 http.get 抓 robots.txt 与原 HTML。
         model: 'deepseek-flash', risk: 'low', humanGate: false,
-        allowedTools: ['crawl4ai.fetch', 'crawl4ai.render'], maxCostCents: 3, timeoutMs: 120000,
+        allowedTools: ['crawl4ai.fetch', 'crawl4ai.render', 'http.get'], maxCostCents: 3, timeoutMs: 120000,
       },
       'contact.find_decision_makers': {
         model: 'deepseek-flash', risk: 'medium', humanGate: false,
@@ -323,7 +323,7 @@ const B2_LEGACY_SCHEMA_BYTES = {
   },
   "discovery.classify_trade_role": {
     "output": "26c61256e97019ee6bdbecb76aededa991a5f8c100fa820c7d86e1c60ee134a3",
-    "contract": "a6a888e005b90190ca8481aa0c1543348664cb9d411bbcd5f0092c4b8bd677bf"
+    "contract": "fd3ee5a3aad4cec430bbc0cd4cf534db3121dafed1b9083c36e751028386b526"
   },
   "discovery.web_search_candidates": {
     "output": "3ba5f1c67e332287da4fe3ee36ee4556b9165c8c649300389f24076c10b6f189",
