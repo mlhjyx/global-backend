@@ -102,5 +102,48 @@ describe('registry frames catalog', () => {
       status: 'ACTIVE',
     });
     expect(us.find((entity) => entity.regNumber === 'UEI000000000003')!.status).toBe('UNKNOWN');
+
+    const auConfig = JSON.parse(readFileSync(`${FRAMES_DIR}au-abr-abn.json`, 'utf8'));
+    const auStore = new InMemoryRegistryFrameStore();
+    await importFrame({
+      store: auStore,
+      config: auConfig,
+      file: { name: 'au.csv', bytes: readFileSync(`${FRAMES_DIR}../fixtures/au-abr-abn.sample.csv`) },
+      now: new Date('2026-11-27T02:00:00Z'),
+    });
+    const au = [...auStore.entities.values()];
+    expect(au.find((entity) => entity.regNumber === '51824753556')).toMatchObject({
+      scheme: 'au_abn',
+      country: 'AU',
+      status: 'ACTIVE',
+      legalForm: 'pty_ltd',
+      region: 'NSW',
+      postalCode: '2000',
+      nace: '46.69',
+      naceVersion: 'AU-ABN-KW',
+      identifiers: [{ scheme: 'au_acn', value: '012345678' }],
+    });
+
+    const brConfig = JSON.parse(readFileSync(`${FRAMES_DIR}br-rfb-cnpj.json`, 'utf8'));
+    const brStore = new InMemoryRegistryFrameStore();
+    await importFrame({
+      store: brStore,
+      config: brConfig,
+      file: { name: 'br.csv', bytes: readFileSync(`${FRAMES_DIR}../fixtures/br-rfb-cnpj.sample.csv`) },
+      now: new Date('2026-11-27T02:00:00Z'),
+    });
+    const br = [...brStore.entities.values()];
+    expect(br.find((entity) => entity.regNumber === '22333444000181')).toMatchObject({
+      scheme: 'br_cnpj',
+      country: 'BR',
+      status: 'ACTIVE',
+      legalForm: 'sa',
+      city: 'BELO HORIZONTE',
+      region: 'MG',
+      postalCode: '30140071',
+      nace: '46.69',
+      naceVersion: 'BR-CNAE-2.0',
+      attributes: expect.objectContaining({ cnae: '4673700', tradeName: 'MINAS ELETRICA' }),
+    });
   });
 });

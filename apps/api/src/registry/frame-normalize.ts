@@ -17,7 +17,7 @@ import type {
   RegistryEntityStatus,
 } from './frame-types';
 import { EMPLOYEE_BANDS, REGISTRY_ENTITY_STATUSES } from './frame-types';
-import { canonicalNace } from './industry-map';
+import { canonicalNace, mapNationalIndustryCodeToNace } from './industry-map';
 
 export interface NormalizedRegistryEntity {
   scheme: string;
@@ -123,6 +123,28 @@ export function contentHashFor(entity: Omit<NormalizedRegistryEntity, 'contentHa
       : '',
   ];
   return createHash('sha256').update(parts.join('\u0001'), 'utf8').digest('hex');
+}
+
+const NATIONAL_NACE_SCHEMES = /^(?:UK-SIC-2007|BR-CNAE-2\.0|AU-ANZSIC-2006)$/iu;
+
+function resolveNormalizedNace(
+  naceRaw: string,
+  naceVersion: string | null,
+  row: number,
+  warnings: RowIssue[],
+): string | null {
+  const candidate = naceRaw.trim();
+  if (!candidate) return null;
+  if (naceVersion && NATIONAL_NACE_SCHEMES.test(naceVersion)) {
+    const mapped = mapNationalIndustryCodeToNace(naceVersion, candidate);
+    if (mapped) return mapped;
+  }
+  if (NACE_PATTERN.test(candidate)) {
+    // 国家派生码（NAF 28.13Z、无点号 2813）归一到 NACE 类目形态；原始码保留在源快照里。
+    return canonicalNace(candidate) ?? candidate;
+  }
+  warnings.push({ row, field: 'nace', code: 'NACE_INVALID', detail: candidate });
+  return null;
 }
 
 export interface NormalizeRecordInput {
@@ -246,23 +268,15 @@ export function normalizeRecord(input: NormalizeRecordInput): NormalizeRecordRes
     }
   }
 
-  let nace: string | null = null;
-  const naceRaw = mapping.fields.nace ? (read(mapping.fields.nace).text ?? '') : '';
-  if (naceRaw.trim()) {
-    const candidate = naceRaw.trim();
-    if (NACE_PATTERN.test(candidate)) {
-      // 国家派生码（NAF 28.13Z、无点号 2813）归一到 NACE 类目形态；原始码保留在源快照里。
-      nace = canonicalNace(candidate) ?? candidate;
-    } else {
-      warnings.push({ row, field: 'nace', code: 'NACE_INVALID', detail: candidate });
-    }
-  }
   const naceVersion =
     (mapping.fields.naceVersion
       ? cleanText(read(mapping.fields.naceVersion).text, 16)
       : null) ??
     mapping.constants.naceVersion ??
     null;
+
+  const naceRaw = mapping.fields.nace ? (read(mapping.fields.nace).text ?? '') : '';
+  const nace = resolveNormalizedNace(naceRaw, naceVersion, row, warnings);
 
   let addressJson: { lines: string[] } | null = null;
   if (mapping.fields.addressLines?.length) {

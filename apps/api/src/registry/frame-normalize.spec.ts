@@ -325,6 +325,29 @@ describe('normalizeRecord (JSON mapping)', () => {
     if (result.ok) expect(result.entity.naceVersion).toBe('NAF-rev2');
   });
 
+  it('normalizes UK-SIC-2007, BR-CNAE-2.0 and AU-ANZSIC-2006 into canonical NACE Rev.2', () => {
+    const normalizeWithScheme = (naceVersion: string, rawCode: string) =>
+      normalizeRecord({
+        mapping: {
+          ...gleifMapping,
+          constants: { ...gleifMapping.constants, naceVersion },
+          fields: { ...gleifMapping.fields, nace: 'attributes.entity.nace' },
+        },
+        row: 1,
+        read: jsonFieldReader(
+          { ...record, attributes: { ...record.attributes, entity: { ...record.attributes.entity, nace: rawCode } } },
+          readDottedPath,
+        ),
+      });
+
+    const uk = normalizeWithScheme('UK-SIC-2007', '43210 - Electrical installation');
+    expect(uk.ok && uk.entity.nace).toBe('43.21');
+    const br = normalizeWithScheme('BR-CNAE-2.0', '4673700');
+    expect(br.ok && br.entity.nace).toBe('46.69');
+    const au = normalizeWithScheme('AU-ANZSIC-2006', '3494');
+    expect(au.ok && au.entity.nace).toBe('46.69');
+  });
+
   it('fails when per-row country is missing and no constant exists', () => {
     const withoutCountry = { attributes: { ...record.attributes, entity: { ...record.attributes.entity, legalAddress: { city: 'X' } } } };
     const result = normalizeRecord({

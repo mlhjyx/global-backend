@@ -7,21 +7,22 @@
     "label": "英国 Companies House 活跃公司（BasicCompanyData bulk 子集）",
     "providerKey": "companies_house_bulk",
     "sourceUrl": "https://download.companieshouse.gov.uk/en_output.html",
-    "licence": "public-register",
-    "licenceUrl": null,
+    "licence": "OGL-UK-3.0",
+    "licenceUrl": "https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/",
     "fetchMode": "bulk_file",
     "cadence": { "kind": "monthly", "dayOfMonth": 6, "hourUtc": 18 },
     "config": {
       "fileNamePattern": "BasicCompanyDataAsOneFile-*.zip",
       "encoding": "utf-8",
-      "note": "无 website/email 字段；SIC→NACE 映射与 PreviousName 抽取留给 T3-04 接入波次"
+      "attribution": "Contains public sector information licensed under the Open Government Licence v3.0. Companies House data © Crown copyright.",
+      "note": "仅导纯公司事实（不含门牌街道/CareOf 个人地址）；SICCode.SicText_1 按 UK-SIC-2007 映射至 NACE Rev.2"
     }
   },
   "mapping": {
     "schemaVersion": "registry-frame-mapping/v1",
     "format": "csv",
     "csv": { "delimiter": "," },
-    "constants": { "scheme": "gb_crn", "country": "GB" },
+    "constants": { "scheme": "gb_crn", "country": "GB", "naceVersion": "UK-SIC-2007" },
     "fields": {
       "regNumber": "CompanyNumber",
       "name": "CompanyName",
@@ -30,18 +31,17 @@
       "city": "RegAddress.PostTown",
       "region": "RegAddress.County",
       "postalCode": "RegAddress.PostCode",
-      "addressLines": [
-        "RegAddress.CareOf",
-        "RegAddress.AddressLine1",
-        "RegAddress.AddressLine2"
-      ],
-      "nace": null,
+      "addressLines": null,
+      "nace": "SICCode.SicText_1",
       "naceVersion": null,
       "employeeBand": null,
       "vatId": null,
       "lei": null,
       "website": null,
-      "identifiers": null
+      "identifiers": null,
+      "attributes": {
+        "ukSic": "SICCode.SicText_1"
+      }
     },
     "statusMap": {
       "active": "ACTIVE",
@@ -57,7 +57,8 @@
       "public limited company": "plc",
       "limited liability partnership": "llp",
       "limited partnership": "lp",
-      "private unlimited company": "unlimited"
+      "private unlimited company": "unlimited",
+      "community interest company": "cic"
     },
     "employeeBandMap": null
   }

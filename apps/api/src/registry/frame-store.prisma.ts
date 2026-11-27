@@ -125,6 +125,145 @@ export function createRegistryFramePrismaClient(databaseUrl: string): PrismaClie
   return new PrismaClient({ datasourceUrl: databaseUrl });
 }
 
+const ADD_BATCH_SIZE = 2_000;
+const TOUCH_BATCH_SIZE = 5_000;
+const CHANGE_BATCH_SIZE = 2_000;
+
+function chunksOf<T>(items: readonly T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    out.push(items.slice(index, index + size));
+  }
+  return out;
+}
+
+type TxClient = Prisma.TransactionClient;
+
+async function applyPlanAdds(
+  tx: TxClient,
+  adds: readonly NormalizedRegistryEntity[],
+  context: { snapshotId: string; frameId: string; now: Date },
+): Promise<void> {
+  const { snapshotId, frameId, now } = context;
+  for (const batch of chunksOf(adds, ADD_BATCH_SIZE)) {
+    const inserted = await tx.registryEntity.createMany({
+      data: batch.map((entity) => ({
+        id: randomUUID(),
+        ...entityData(entity),
+        sourceFrameId: frameId,
+        lastSnapshotId: snapshotId,
+        firstSeenAt: now,
+        lastSeenAt: now,
+      })),
+      skipDuplicates: true,
+    });
+    if (inserted.count === batch.length) continue;
+    // 崩溃重试或并发写命中既有业务键时回退逐行 upsert，保持重放语义一致。
+    for (const entity of batch) {
+      await tx.registryEntity.upsert({
+        where: {
+          scheme_regNumber: { scheme: entity.scheme, regNumber: entity.regNumber },
+        },
+        create: {
+          id: randomUUID(),
+          ...entityData(entity),
+          sourceFrameId: frameId,
+          lastSnapshotId: snapshotId,
+          firstSeenAt: now,
+          lastSeenAt: now,
+        },
+        update: {
+          ...entityData(entity),
+          lastSnapshotId: snapshotId,
+          lastSeenAt: now,
+          missCount: 0,
+          withdrawnAt: null,
+        },
+      });
+    }
+  }
+}
+
+async function applyPlanUpdatesAndReappeared(
+  tx: TxClient,
+  plan: FrameLoadPlan,
+  context: { snapshotId: string; now: Date },
+): Promise<void> {
+  const { snapshotId, now } = context;
+  for (const update of plan.updates) {
+    const result = await tx.registryEntity.updateMany({
+      where: { id: update.id, contentHash: update.previousContentHash },
+      data: {
+        ...entityData(update.entity),
+        lastSnapshotId: snapshotId,
+        lastSeenAt: now,
+        missCount: 0,
+      },
+    });
+    if (result.count !== 1) throw new RegistryLoadConflictError(update.id);
+  }
+  for (const reappear of plan.reappeared) {
+    const result = await tx.registryEntity.updateMany({
+      where: { id: reappear.id },
+      data: {
+        ...entityData(reappear.entity),
+        lastSnapshotId: snapshotId,
+        lastSeenAt: now,
+        missCount: 0,
+        withdrawnAt: null,
+      },
+    });
+    if (result.count !== 1) throw new RegistryLoadConflictError(reappear.id);
+  }
+}
+
+async function applyPlanTouchesAndMisses(
+  tx: TxClient,
+  plan: FrameLoadPlan,
+  context: { snapshotId: string; now: Date },
+): Promise<void> {
+  const { snapshotId, now } = context;
+  for (const ids of chunksOf(plan.touches, TOUCH_BATCH_SIZE)) {
+    await tx.registryEntity.updateMany({
+      where: { id: { in: ids } },
+      data: { lastSeenAt: now, lastSnapshotId: snapshotId, missCount: 0 },
+    });
+  }
+  for (const miss of plan.misses) {
+    await tx.registryEntity.updateMany({
+      where: { id: miss.id },
+      data: { missCount: miss.missCount },
+    });
+  }
+  for (const withdrawal of plan.withdrawals) {
+    await tx.registryEntity.updateMany({
+      where: { id: withdrawal.id },
+      data: { missCount: withdrawal.missCount, withdrawnAt: now },
+    });
+  }
+}
+
+async function applyPlanChanges(
+  tx: TxClient,
+  changes: FrameLoadPlan['changes'],
+  snapshotId: string,
+): Promise<void> {
+  for (const batch of chunksOf(changes, CHANGE_BATCH_SIZE)) {
+    await tx.registryEntityChange.createMany({
+      data: batch.map((change) => ({
+        id: randomUUID(),
+        scheme: change.scheme,
+        regNumber: change.regNumber,
+        snapshotId,
+        changeType: change.changeType,
+        fieldDiffs: jsonOrNull(change.fieldDiffs),
+        contentHash: change.contentHash,
+      })),
+      skipDuplicates: true,
+    });
+  }
+}
+
 export class PrismaRegistryFrameStore implements RegistryFrameStore {
   constructor(private readonly prisma: PrismaClient) {}
 
@@ -244,94 +383,14 @@ export class PrismaRegistryFrameStore implements RegistryFrameStore {
     plan: FrameLoadPlan,
     context: { snapshotId: string; frameId: string; now: Date },
   ): Promise<void> {
-    const { snapshotId, frameId, now } = context;
     await this.prisma.$transaction(
       async (tx) => {
-        for (const entity of plan.adds) {
-          await tx.registryEntity.upsert({
-            where: {
-              scheme_regNumber: { scheme: entity.scheme, regNumber: entity.regNumber },
-            },
-            create: {
-              id: randomUUID(),
-              ...entityData(entity),
-              sourceFrameId: frameId,
-              lastSnapshotId: snapshotId,
-              firstSeenAt: now,
-              lastSeenAt: now,
-            },
-            update: {
-              ...entityData(entity),
-              lastSnapshotId: snapshotId,
-              lastSeenAt: now,
-              missCount: 0,
-              withdrawnAt: null,
-            },
-          });
-        }
-        for (const update of plan.updates) {
-          const result = await tx.registryEntity.updateMany({
-            where: { id: update.id, contentHash: update.previousContentHash },
-            data: {
-              ...entityData(update.entity),
-              lastSnapshotId: snapshotId,
-              lastSeenAt: now,
-              missCount: 0,
-            },
-          });
-          if (result.count !== 1) {
-            throw new RegistryLoadConflictError(update.id);
-          }
-        }
-        for (const reappear of plan.reappeared) {
-          const result = await tx.registryEntity.updateMany({
-            where: { id: reappear.id },
-            data: {
-              ...entityData(reappear.entity),
-              lastSnapshotId: snapshotId,
-              lastSeenAt: now,
-              missCount: 0,
-              withdrawnAt: null,
-            },
-          });
-          if (result.count !== 1) {
-            throw new RegistryLoadConflictError(reappear.id);
-          }
-        }
-        if (plan.touches.length > 0) {
-          await tx.registryEntity.updateMany({
-            where: { id: { in: plan.touches } },
-            data: { lastSeenAt: now, lastSnapshotId: snapshotId, missCount: 0 },
-          });
-        }
-        for (const miss of plan.misses) {
-          await tx.registryEntity.updateMany({
-            where: { id: miss.id },
-            data: { missCount: miss.missCount },
-          });
-        }
-        for (const withdrawal of plan.withdrawals) {
-          await tx.registryEntity.updateMany({
-            where: { id: withdrawal.id },
-            data: { missCount: withdrawal.missCount, withdrawnAt: now },
-          });
-        }
-        if (plan.changes.length > 0) {
-          await tx.registryEntityChange.createMany({
-            data: plan.changes.map((change) => ({
-              id: randomUUID(),
-              scheme: change.scheme,
-              regNumber: change.regNumber,
-              snapshotId,
-              changeType: change.changeType,
-              fieldDiffs: jsonOrNull(change.fieldDiffs),
-              contentHash: change.contentHash,
-            })),
-            skipDuplicates: true,
-          });
-        }
+        await applyPlanAdds(tx, plan.adds, context);
+        await applyPlanUpdatesAndReappeared(tx, plan, context);
+        await applyPlanTouchesAndMisses(tx, plan, context);
+        await applyPlanChanges(tx, plan.changes, context.snapshotId);
       },
-      { maxWait: 10_000, timeout: 120_000 },
+      { maxWait: 30_000, timeout: 300_000 },
     );
   }
 
