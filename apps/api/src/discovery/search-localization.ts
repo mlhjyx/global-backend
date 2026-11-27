@@ -27,7 +27,7 @@ const COUNTRIES: readonly CountryEntry[] = Object.freeze([
   { iso2: 'be', language: 'nl', name: 'België', aliases: ['belgium', 'belgië', 'belgie', 'belgique', 'be', 'bel', '比利时'] },
   { iso2: 'lu', language: 'fr', name: 'Luxembourg', aliases: ['luxembourg', 'lu', 'lux', '卢森堡'] },
   { iso2: 'pl', language: 'pl', name: 'Polska', aliases: ['poland', 'polska', 'pl', 'pol', '波兰'] },
-  { iso2: 'cn', language: 'zh', name: '中国', aliases: ['china', 'cn', 'chn', '中国'] },
+  { iso2: 'cn', language: 'zh', name: '中国', aliases: ['china', 'mainland china', 'cn', 'chn', '中国', '中国大陆', '中国内地'] },
   { iso2: 'hk', language: 'zh', name: '香港', aliases: ['hong kong', 'hk', 'hkg', '香港', '中国香港'] },
   { iso2: 'tw', language: 'zh', name: '台湾', aliases: ['taiwan', 'tw', 'twn', '台湾', '中国台湾'] },
   { iso2: 'my', language: 'ms', name: 'Malaysia', aliases: ['malaysia', 'my', 'mys', '马来西亚'] },
@@ -229,13 +229,14 @@ function marketRegionCodes(term: string): string[] | undefined {
 }
 
 /**
- * 「意大利（IT）」「瑞士（德语区优先）」这类带尾注的市场名 → 去掉尾注的主体词。
+ * 「意大利（IT）」「瑞士（德语区优先）」「中国大陆｜配电项目」保留市场主体。
  * ICP 的 targetMarkets 常带括号尾注，覆盖补齐会把它原样抄进 filters.country；
  * 不剥掉尾注，下面的别名/区域匹配全部落空、语言回退 en（2026-11-10 run 97a4fa1b：
  * 「意大利（IT）」→ 语言误判 en → 中文行业词被整体剥离 → public_web 空检索串）。
  */
 export function stripMarketQualifier(term: string): string {
-  return term.replace(MARKET_QUALIFIER, '').trim();
+  const market = term.split(/[｜]/u, 1)[0]!;
+  return market.replace(MARKET_QUALIFIER, '').trim();
 }
 
 function targetCountries(filters: Record<string, unknown>): CountryEntry[] {
