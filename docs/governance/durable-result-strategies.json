@@ -545,6 +545,22 @@
       }
     },
     {
+      "id": "google_places.discover",
+      "declarationPath": "apps/api/src/tools/search-provider-tools.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "google-places-discover/v1",
+      "operationIdentity": "tool:google_places.discover:<version>:<idempotencyKey>",
+      "privacyClass": "PUBLIC_ORGANIZATION",
+      "domainAck": {
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
+        "consumer": "GooglePlacesDiscoveryProvider",
+        "domainAggregateType": "LocationEvidence",
+        "identitySource": "google-place-id",
+        "subjectRefRequired": false,
+        "personalDataDsrCompatible": false
+      }
+    },
+    {
       "id": "social.search_serper",
       "declarationPath": "apps/api/src/tools/search-provider-tools.ts",
       "resultStrategy": "typed_projection",

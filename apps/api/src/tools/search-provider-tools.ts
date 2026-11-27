@@ -30,6 +30,7 @@ import { assertToolExternalActionAuthorized, type Tool } from './tool-contract';
 import { type ToolRegistry } from './tool-registry';
 import { durableTitle, isDurableText, isPersonProfileUrl } from './durable-text';
 import { normalizeSocialProfileUrl, redactSocialSearchHighlights, redactSocialSearchText } from './social-search-retention';
+import { DailyCallQuotaExceededError, sharedGooglePlacesDailyQuota, type DailyCallQuotaLimiter } from './daily-call-quota';
 
 const hash = (value: string): string =>
   createHash('sha256').update(value).digest('hex').slice(0, 24);
@@ -448,6 +449,84 @@ export function createGooglePlacesSearchTool(
 
 export const googlePlacesSearchTool = createGooglePlacesSearchTool();
 
+export interface GooglePlacesDiscoverToolDependencies extends GooglePlacesToolDependencies {
+  dailyQuota?: DailyCallQuotaLimiter;
+}
+
+/** 独立公司发现源 google_places 专用工具：强制 places.googleapis.com source_policy、合规矩阵 sourceKey 与每日调用上限。 */
+export function createGooglePlacesDiscoverTool(
+  dependencies: GooglePlacesDiscoverToolDependencies = { googlePlacesSearchText },
+): Tool<GooglePlacesToolInput, GooglePlacesToolOutput> {
+  const getKey = dependencies.resolveApiKey ?? resolveGoogleMapsApiKey;
+  const dailyQuota = dependencies.dailyQuota ?? sharedGooglePlacesDailyQuota;
+  return {
+    id: "google_places.discover",
+    version: '1.0.0',
+    category: 'structured_source',
+    sourceClass: 'industry_data',
+    cost: { unit: 'request', estimatedCents: GOOGLE_PLACES_REQUEST_COST_CENTS, external: true },
+    rateLimit: { rps: 2, concurrency: 2 },
+    compliance: {
+      sourcePolicy: 'required',
+      policyDomain: 'places.googleapis.com',
+      sourceKey: 'google_places',
+      respectsRobots: false,
+      personalData: false,
+      allowedPurpose: ['discovery'],
+      reversible: true,
+      authRequired: true,
+      risk: 'low',
+    },
+    capabilities: { produces: ['company', 'domain'], accepts: ['keywords'] },
+    idempotencyKey: (input) => `google_places.discover:${stableKey(input)}`,
+    durableResultStrategy: {
+      kind: "typed_projection",
+      schema: CATALOG_RESULT_PROJECTION_SCHEMAS["google_places.discover"],
+    },
+    // Google Maps Terms §3.2.3：持久回放仅保留 placeId，绝不长期缓存名称/网址/地址等 Places 内容。
+    durableReplayResult: (result) => ({
+      data: { places: result.data.places.map((item) => ({ placeId: item.placeId })) },
+      costCents: result.costCents,
+      ...(result.degraded === undefined ? {} : { degraded: result.degraded }),
+    }),
+    healthCheck: async () =>
+      getKey()
+        ? { healthy: true, detail: 'google-places-discover' }
+        : { healthy: false, detail: 'GOOGLE_MAPS_API_KEY not configured' },
+    physicalWireObservation: 'before_each_wire',
+    discoveryV3SingleWireTimeoutMs: 20_000,
+    execute: async (input, ctx) => {
+      if (!input || typeof input !== 'object') {
+        throw new Error('GOOGLE_PLACES_INPUT_INVALID: input must be an object');
+      }
+      const textQuery = normalizeQueryString(input.textQuery, 'GOOGLE_PLACES_INPUT_INVALID');
+      const maxResultCount = normalizeBoundedCount(input.maxResultCount, 20, 'GOOGLE_PLACES_INPUT_INVALID');
+      const apiKey = getKey();
+      if (!apiKey) return { data: { places: [] }, costCents: 0, degraded: true };
+      await assertToolExternalActionAuthorized(ctx);
+      const quota = await dailyQuota.consume();
+      if (!quota.allowed) throw new DailyCallQuotaExceededError('GOOGLE_PLACES_DAILY_LIMIT_EXCEEDED', quota);
+      const response = await dependencies.googlePlacesSearchText(
+        { textQuery, maxResultCount, regionCode: input.regionCode, languageCode: input.languageCode },
+        {
+          apiKey,
+          ...(ctx.dispatchDiscoveryV3Wire ? { dispatchDiscoveryV3Wire: ctx.dispatchDiscoveryV3Wire } : {}),
+          beforeRequest: async () => {
+            await assertToolExternalActionAuthorized(ctx);
+            await ctx.beforePhysicalWire?.();
+          },
+        },
+      );
+      return {
+        data: { places: durablePlaceHits(response.places) },
+        costCents: response.billed ? GOOGLE_PLACES_REQUEST_COST_CENTS : 0,
+      };
+    },
+  };
+}
+
+export const googlePlacesDiscoverTool = createGooglePlacesDiscoverTool();
+
 export interface BraveSearchToolDependencies {
   braveSearch: typeof braveSearch;
   resolveApiKey?: typeof resolveBraveSearchApiKey;
@@ -694,6 +773,7 @@ export function registerSearchProviderTools(registry: ToolRegistry): ToolRegistr
   registry.register(braveSearchTool as Tool);
   registry.register(exaSearchTool as Tool);
   registry.register(googlePlacesSearchTool as Tool);
+  registry.register(googlePlacesDiscoverTool as Tool);
   registry.register(socialSerperSearchTool as Tool);
   registry.register(socialExaPeopleTool as Tool);
   return registry;

@@ -982,6 +982,50 @@ describe('source coverage fill (vNext W4)', () => {
     ]);
     expect(filled.slice(1).every((planned) => planned.keywords?.includes('变电设备'))).toBe(true);
   });
+
+  it('fills google_places with localized target-country key cities and solar channel category terms', () => {
+    const sources: readonly CompanyDiscoverySource[] = [
+      ...enabledOnly('public_web'),
+      { sourceClass: 'industry_data', providerKey: 'google_places', hasCompanyLineage: true },
+    ];
+    const deFilled = withSourceCoverage(
+      [query('public_intelligence', { source_hint: 'public_web', country: 'DE' })],
+      { targetMarkets: ['德国'], companyAttributes: { industry: '太阳能光伏安装商与电气分销商' } },
+      sources,
+      { registryFrameCountries: new Set() },
+    );
+    const dePlaces = deFilled.find((q) => q.filters?.source_hint === 'google_places');
+    expect(dePlaces).toBeDefined();
+    expect(dePlaces?.source_class).toBe('industry_data');
+    expect(dePlaces?.filters).toMatchObject({
+      source_hint: 'google_places',
+      country: '德国',
+      cities: ['München', 'Frankfurt', 'Stuttgart'],
+    });
+    expect(dePlaces?.keywords).toEqual([
+      'Elektrogroßhandel Photovoltaik',
+      'Photovoltaik Installateur',
+      'Photovoltaik EPC Projektentwicklung',
+    ]);
+
+    const itFilled = withSourceCoverage(
+      [query('public_intelligence', { source_hint: 'public_web', country: 'IT' })],
+      { targetMarkets: ['意大利（IT）'], companyAttributes: { industry: 'fotovoltaico EPC' } },
+      sources,
+      { registryFrameCountries: new Set() },
+    );
+    const itPlaces = itFilled.find((q) => q.filters?.source_hint === 'google_places');
+    expect(itPlaces?.filters).toMatchObject({
+      source_hint: 'google_places',
+      country: '意大利',
+      cities: ['Milano', 'Bologna', 'Torino'],
+    });
+    expect(itPlaces?.keywords).toEqual([
+      'EPC fotovoltaico impianti solari',
+      'installatore fotovoltaico',
+      'grossista materiale elettrico fotovoltaico',
+    ]);
+  });
 });
 
 describe('registry_frame loaded-country lookup (vNext W4)', () => {

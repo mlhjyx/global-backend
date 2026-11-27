@@ -56,12 +56,14 @@ const GOVERNED_PROVIDERS = new Set([
   "companies_house_registry",
   "model_web_search",
   "channel_catalog",
+  "google_places",
 ]);
 const LICENSES_BY_PROVIDER: Readonly<Record<string, ReadonlySet<string>>> =
   Object.freeze({
     registry: new Set(["public", "licensed", "byo"]),
     directory: new Set(["public", "licensed", "byo"]),
     channel_catalog: new Set(["public", "licensed", "byo"]),
+    google_places: new Set(["GOOGLE_MAPS_PLACE_ID_ONLY"]),
     wikidata: new Set(["CC0-1.0"]),
     openstreetmap: new Set(["ODbL-1.0"]),
     trade_fair: new Set(["SOURCE_SPECIFIC_RESTRICTED", "public"]),
@@ -291,6 +293,8 @@ function validExternalId(providerKey: string, value: unknown): value is string {
       return /^companies_house_registry:[A-Z0-9]{1,12}$/u.test(value);
     case "channel_catalog":
       return /^channel_catalog:[0-9a-f-]{36}:[0-9a-f-]{36}$/iu.test(value);
+    case "google_places":
+      return /^google_places:[0-9a-f]{64}$/u.test(value);
     default:
       return validGenericExternalId(value);
   }
@@ -377,6 +381,14 @@ function validIdentifier(providerKey: string, value: unknown): boolean {
   if (providerKey === "companies_house_registry") {
     // CH 注册号在 GB 内唯一：scheme 固定 ch-company-number（纯数字 8 位是常态，不走电话形态门）。
     return scheme === "ch-company-number" && companyRegistryNumberToken(identifier);
+  }
+  if (providerKey === "google_places") {
+    // Google Maps Place ID（Terms §3.2.3 允许长期留存的唯一标识）：ASCII 字母数字与 _/-，允许长数字段。
+    return (
+      scheme === "google-place-id" &&
+      /^[A-Za-z0-9_-]{1,256}$/u.test(identifier) &&
+      isSecretFreeText(identifier)
+    );
   }
   return false;
 }
@@ -700,9 +712,24 @@ function validAttributes(providerKey: string, value: unknown): boolean {
         UUID.test(input.record_id) &&
         input.source_class === "industry_data"
       );
+    case "google_places":
+      return validGooglePlacesAttributes(input);
     default:
       return false;
   }
+}
+
+/** Google Maps Places 仅留存 place_id 与 source_class（严格遵循 Maps Terms §3.2.3，无地址/电话/评论）。 */
+function validGooglePlacesAttributes(value: JsonRecord): boolean {
+  if (!exactKeys(value, ["google_places"])) return false;
+  const gp = record(value.google_places);
+  if (!gp || !exactKeys(gp, ["place_id", "source_class"])) return false;
+  return (
+    typeof gp.place_id === "string" &&
+    /^[A-Za-z0-9_-]{1,256}$/u.test(gp.place_id) &&
+    isSecretFreeText(gp.place_id) &&
+    gp.source_class === "industry_data"
+  );
 }
 
 /** 获客 vNext W4 第二源：Companies House 归一后的公司属性（关闭形状，无 officers/个人字段）。 */
@@ -757,6 +784,45 @@ function validOpenCorporatesAttributes(value: JsonRecord): boolean {
       (typeof oc.registered_address === "string" &&
         Buffer.byteLength(oc.registered_address, "utf8") <= 2000 &&
         isContactFreeText(oc.registered_address)))
+  );
+}
+
+function validGooglePlacesBinding(
+  payload: JsonRecord,
+  attributes: JsonRecord,
+  host: string,
+  path: string,
+): boolean {
+  const gp = record(attributes.google_places);
+  const identifier = record(payload.identifier);
+  return Boolean(
+    gp &&
+      identifier &&
+      typeof payload.domain === "string" &&
+      host === "places.googleapis.com" &&
+      path === "/v1/places:searchText" &&
+      /^google_places:[0-9a-f]{64}$/u.test(String(payload.externalId)) &&
+      identifier.scheme === "google-place-id" &&
+      identifier.value === gp.place_id,
+  );
+}
+
+function validOpenCorporatesBinding(
+  payload: JsonRecord,
+  attributes: JsonRecord,
+  host: string,
+  path: string,
+): boolean {
+  const oc = record(attributes.opencorporates);
+  const identifier = record(payload.identifier);
+  return Boolean(
+    oc &&
+      host === "api.opencorporates.com" &&
+      path === "/v0.4/companies/search" &&
+      /^opencorporates:[0-9a-f]{64}$/u.test(String(payload.externalId)) &&
+      (identifier === null ||
+        (identifier.value === oc.company_number &&
+          /^oc-company-number:[a-z]{2}(?:_[a-z0-9]{1,3})?$/u.test(String(identifier.scheme)))),
   );
 }
 
@@ -840,20 +906,8 @@ function validProviderBindings(
     }
     case "public_web":
       return payload.externalId === payload.domain && isCompanySourceHost(host, payload.domain);
-    case "opencorporates": {
-      const oc = record(attributes.opencorporates);
-      const identifier = record(payload.identifier);
-      return Boolean(
-        oc &&
-          host === "api.opencorporates.com" &&
-          path === "/v0.4/companies/search" &&
-          /^opencorporates:[0-9a-f]{64}$/u.test(String(payload.externalId)) &&
-          (identifier === null
-            ? true
-            : identifier.value === oc.company_number &&
-              /^oc-company-number:[a-z]{2}(?:_[a-z0-9]{1,3})?$/u.test(String(identifier.scheme))),
-      );
-    }
+    case "opencorporates":
+      return validOpenCorporatesBinding(payload, attributes, host, path);
     case "companies_house_registry": {
       const ch = record(attributes.ch_registry);
       const identifier = record(payload.identifier);
@@ -868,6 +922,8 @@ function validProviderBindings(
               identifier.scheme === "ch-company-number"),
       );
     }
+    case "google_places":
+      return validGooglePlacesBinding(payload, attributes, host, path);
     default:
       return true;
   }

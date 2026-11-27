@@ -240,7 +240,13 @@ describe('DomainAckService', () => {
     const service = new DomainAckService(repository);
     const apply = vi.fn(async () => ({ status: 'verified' }));
 
-    expect(DOMAIN_ACK_PRODUCT_CONSUMER_BINDINGS).toHaveLength(49);
+    expect(DOMAIN_ACK_PRODUCT_CONSUMER_BINDINGS).toHaveLength(50);
+    expect(getDomainAckProductConsumerBinding('google_places.discover')).toMatchObject({
+      consumer: 'GooglePlacesDiscoveryProvider',
+      domainAggregateType: 'LocationEvidence',
+      resultStrategy: 'typed_projection',
+      resultSchema: 'google-places-discover/v1',
+    });
     expect(getDomainAckProductConsumerBinding('social.search_serper')).toMatchObject({
       consumer: 'SocialPresenceContactAdapter',
       resultStrategy: 'typed_projection',

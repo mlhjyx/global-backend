@@ -46,6 +46,7 @@ const DECLARED = [
   "deepseek.fetch",
   "deepseek.search",
   "exa.search",
+  "google_places.discover",
   "google_places.search",
   "http.get",
   "mapyourshow.fetch",

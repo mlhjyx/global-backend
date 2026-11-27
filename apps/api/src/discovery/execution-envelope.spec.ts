@@ -85,6 +85,6 @@ describe('模块级常量按进程 env 解析', () => {
     expect(mod.MAX_DISCOVERY_FIT_COMPANIES).toBe(
       mod.MAX_DISCOVERY_PLAN_QUERIES * mod.MAX_COMPANY_DISCOVERY_ADAPTERS * 1_000,
     );
-    expect(mod.MAX_DISCOVERY_FIT_COMPANIES).toBe(792_000);
+    expect(mod.MAX_DISCOVERY_FIT_COMPANIES).toBe(858_000);
   });
 });

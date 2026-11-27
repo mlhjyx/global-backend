@@ -590,6 +590,7 @@ const REPRESENTATIVE_LEGAL_BOUNDARY_FIXTURES: readonly ProjectionFixture[] = [
   { toolId: 'brave.search', schema: 'brave-search/v1', raw: SERPER_SEARCH_RAW },
   { toolId: 'exa.search', schema: 'exa-search/v1', raw: EXA_SEARCH_RAW },
   { toolId: 'google_places.search', schema: 'google-places-search/v1', raw: GOOGLE_PLACES_RAW },
+  { toolId: 'google_places.discover', schema: 'google-places-discover/v1', raw: GOOGLE_PLACES_RAW },
   { toolId: 'vies.check', schema: 'vies-check/v1', raw: VIES_CHECK_RAW },
   { toolId: 'social.search_serper', schema: 'social-search-serper/v1', raw: SOCIAL_PERSON_RAW },
   { toolId: 'social.search_exa_people', schema: 'social-search-exa-people/v1', raw: SOCIAL_PERSON_RAW },
@@ -861,6 +862,14 @@ const EXPECTED_BOUNDS: Readonly<Record<string, JsonRecord>> = {
     '$.data.places[].websiteUri.maxLength': 2048,
     '$.data.places[].countryCode.maxLength': 16,
   },
+  'google-places-discover/v1': {
+    ...COMMON_RESULT_BOUNDS,
+    '$.data.places.maxItems': 20,
+    '$.data.places[].placeId.maxLength': 256,
+    '$.data.places[].name.maxLength': 500,
+    '$.data.places[].websiteUri.maxLength': 2048,
+    '$.data.places[].countryCode.maxLength': 16,
+  },
   'vies-check/v1': {
     ...COMMON_RESULT_BOUNDS,
     '$.data.status.maxLength': 16,
@@ -997,7 +1006,7 @@ describe('closed catalog Tool result projections', () => {
       'wikidata.entity', 'gleif.fetch', 'companies_house.search', 'inpi_rne.search',
       'google_patents.search', 'tradefair.algolia', 'mapyourshow.fetch',
       'deepseek.search', 'deepseek.fetch',
-      'serper.search', 'brave.search', 'exa.search', 'google_places.search', 'vies.check',
+      'serper.search', 'brave.search', 'exa.search', 'google_places.search', 'google_places.discover', 'vies.check',
       'social.search_serper', 'social.search_exa_people',
     ]);
     expect(CATALOG_RESULT_PROJECTION_SCHEMAS).toEqual({
@@ -1019,6 +1028,7 @@ describe('closed catalog Tool result projections', () => {
       'brave.search': 'brave-search/v1',
       'exa.search': 'exa-search/v1',
       'google_places.search': 'google-places-search/v1',
+      'google_places.discover': 'google-places-discover/v1',
       'vies.check': 'vies-check/v1',
       'social.search_serper': 'social-search-serper/v1',
       'social.search_exa_people': 'social-search-exa-people/v1',

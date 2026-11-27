@@ -20,6 +20,7 @@ import { CompaniesHouseRegistryDiscoveryProvider } from './providers/companies-h
 import { ModelWebSearchDiscoveryProvider } from './providers/model-web-search.provider';
 import { RegistryFrameDiscoveryProvider } from './providers/registry-frame.provider';
 import { ChannelCatalogDiscoveryProvider } from './providers/channel-catalog.provider';
+import { GooglePlacesDiscoveryProvider } from './providers/google-places.provider';
 import { DecisionMakerContactAdapter } from './providers/decision-maker.provider';
 import { SocialPresenceContactAdapter } from './providers/social-presence.provider';
 import { CompaniesHouseContactProvider } from './providers/companies-house.provider';
@@ -170,6 +171,14 @@ export class DiscoveryProviderRegistry {
       new ChannelCatalogDiscoveryProvider({
         prisma,
         lineageEnabled: process.env.CHANNEL_CATALOG_PROVIDER !== 'off',
+      }),
+    );
+    // google_places = Google Maps Places API（New）重点城市 × 行业类目公司发现源（默认声明血缘，
+    // GOOGLE_PLACES_PROVIDER=off 可紧急关停）；data_provider.google_places 默认 DISABLED 由运维开启。
+    this.discovery.push(
+      new GooglePlacesDiscoveryProvider({
+        broker,
+        lineageEnabled: process.env.GOOGLE_PLACES_PROVIDER !== 'off',
       }),
     );
     // UK Companies House 董事发现（待办 3 第一个身份源；官方注册处 API，Basic auth）——contact_discovery 类。
@@ -907,6 +916,34 @@ export class DiscoveryProviderRegistry {
       update: {},
       create: { key: 'channel_catalog', class: 'industry_data', status: 'ENABLED', costPerCallCents: 0 },
     });
+    // google_places：Google Maps Places API（New）按「目标国重点城市 × 行业类目」发现光伏安装商、
+    // EPC 与电气分销商。默认 DISABLED 由运维开启；单次 Text Search Enterprise（websiteUri）≈$0.035 → 4¢。
+    await db.dataProvider.upsert({
+      where: { key: 'google_places' },
+      update: {},
+      create: { key: 'google_places', class: 'industry_data', status: 'DISABLED', costPerCallCents: 4 },
+    });
+    // Google Maps Platform Terms §3.2.3 合规策略：禁止长期缓存/存储 Places 内容（name/address/phone 等），
+    // 仅允许永久留存 place_id；禁止采集用户评论/评论者或任何个人数据。本源只采商家实体 id/displayName/websiteUri/country，
+    // Raw 记录 retentionDays=1 自动过期，企业官网由下游 website_profile 作为公司事实权威来源。
+    if (db.sourcePolicy) {
+      await db.sourcePolicy.upsert({
+        where: { domain: 'places.googleapis.com' },
+        update: {},
+        create: {
+          domain: 'places.googleapis.com',
+          sourceType: 'directory_listing',
+          accessMode: 'api',
+          reviewStatus: 'APPROVED',
+          robotsStatus: 'ALLOWS',
+          termsStatus: 'REVIEWED_RESTRICTED',
+          personalData: false,
+          allowedPurpose: ['discovery'],
+          retentionDays: 1,
+          notes: 'Google Maps Places API (New) Text Search（places.googleapis.com，工具 google_places.discover）。遵循 Google Maps Platform Terms §3.2.3：禁止长期缓存名称/地址/电话等 Places 内容，仅允许长期留存 place_id；不采评论、评论者、电话、街道地址或坐标等个人/受限字段；仅准入带有效企业官网的候选商家，由下游 website_profile 抓官网作为公司事实权威来源；Raw 原始记录 retentionDays=1 自动过期。data_provider.google_places 默认 DISABLED，叠加日调用上限（GOOGLE_PLACES_DAILY_CALL_LIMIT）与 source_compliance_matrix 治理门。',
+        },
+      });
+    }
   }
 
   /**

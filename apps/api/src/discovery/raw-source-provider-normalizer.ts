@@ -121,6 +121,16 @@ const PROVIDER_KEYS: Readonly<Record<string, readonly string[]>> =
       "name",
       "provenance",
     ],
+    google_places: [
+      "attributes",
+      "country",
+      "domain",
+      "externalId",
+      "identifier",
+      "license",
+      "name",
+      "provenance",
+    ],
   });
 const SHA256 = /^[0-9a-f]{64}$/u;
 const DOMAIN =
@@ -231,6 +241,8 @@ function validExternalId(providerKey: string, value: unknown): value is string {
       return /^ted:\d{1,9}(?:-\d{4})?:\d{1,6}$/u.test(value);
     case "openfda":
       return /^openfda:(?:\d{1,32}|[0-9a-f]{64})$/u.test(value);
+    case "google_places":
+      return /^google_places:[0-9a-f]{64}$/u.test(value);
     default:
       return isContactFreeText(value);
   }
@@ -518,12 +530,43 @@ function normalizeCompaniesHouseRegistryAttributes(input: RawJsonRecord): RawJso
   };
 }
 
+function normalizeGooglePlacesAttributes(input: RawJsonRecord): RawJsonRecord | null {
+  // Google Maps Terms §3.2.3：只保留 place_id 与内部 source_class，拒绝地址/电话/评论等 Places 内容。
+  if (!exactKeys(input, ["google_places"])) return null;
+  const gp = record(input.google_places);
+  if (
+    !gp ||
+    !exactKeys(gp, ["place_id", "source_class"]) ||
+    typeof gp.place_id !== "string" ||
+    gp.source_class !== "industry_data"
+  ) {
+    return null;
+  }
+  return {
+    google_places: {
+      place_id: gp.place_id,
+      source_class: gp.source_class,
+    },
+  };
+}
+
+const DELEGATED_ATTRIBUTE_NORMALIZERS: Readonly<
+  Record<string, (input: RawJsonRecord) => RawJsonRecord | null>
+> = Object.freeze({
+  model_web_search: normalizeModelWebSearchAttributes,
+  channel_catalog: normalizeChannelCatalogAttributes,
+  companies_house_registry: normalizeCompaniesHouseRegistryAttributes,
+  google_places: normalizeGooglePlacesAttributes,
+});
+
 function normalizeAttributes(
   providerKey: string,
   value: unknown,
 ): RawJsonRecord | null {
   const input = record(value);
   if (!input) return null;
+  const delegated = DELEGATED_ATTRIBUTE_NORMALIZERS[providerKey];
+  if (delegated) return delegated(input);
   if (providerKey === "registry") {
     if (!keysWithin(input, ["employee_band", "employees", "products"]))
       return null;
@@ -624,10 +667,6 @@ function normalizeAttributes(
       ].flatMap(([key, item]) => (item == null ? [] : [[key, item]])),
     );
   }
-  if (providerKey === "model_web_search")
-    return normalizeModelWebSearchAttributes(input);
-  if (providerKey === "channel_catalog")
-    return normalizeChannelCatalogAttributes(input);
   if (providerKey === "ted") {
     if (!exactKeys(input, ["ted"])) return null;
     const ted = record(input.ted);
@@ -746,8 +785,6 @@ function normalizeAttributes(
       ),
     };
   }
-  if (providerKey === "companies_house_registry")
-    return normalizeCompaniesHouseRegistryAttributes(input);
   if (providerKey === "public_web") {
     if (
       !keysWithin(input, [

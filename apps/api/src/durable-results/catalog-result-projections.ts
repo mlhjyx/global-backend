@@ -24,7 +24,7 @@ export const CATALOG_RESULT_TOOL_IDS = Object.freeze([
   'wikidata.entity', 'gleif.fetch', 'companies_house.search', 'inpi_rne.search',
   'google_patents.search', 'tradefair.algolia', 'mapyourshow.fetch',
   'deepseek.search', 'deepseek.fetch',
-  'serper.search', 'brave.search', 'exa.search', 'google_places.search', 'vies.check',
+  'serper.search', 'brave.search', 'exa.search', 'google_places.search', 'google_places.discover', 'vies.check',
   'social.search_serper', 'social.search_exa_people',
 ] as const);
 export type CatalogResultToolId = (typeof CATALOG_RESULT_TOOL_IDS)[number];
@@ -47,6 +47,7 @@ export const CATALOG_RESULT_PROJECTION_SCHEMAS = Object.freeze({
   'brave.search': 'brave-search/v1',
   'exa.search': 'exa-search/v1',
   'google_places.search': 'google-places-search/v1',
+  'google_places.discover': 'google-places-discover/v1',
   'vies.check': 'vies-check/v1',
   'social.search_serper': 'social-search-serper/v1', 'social.search_exa_people': 'social-search-exa-people/v1',
 } satisfies Readonly<Record<CatalogResultToolId, TypedProjectionSchema>>);
@@ -929,21 +930,20 @@ const googlePlaceSchema = objectSchema(
   { placeId: stringSchema(256), name: stringSchema(500), websiteUri: stringSchema(2048), countryCode: stringSchema(16) },
   ['placeId'],
 );
-const googlePlacesSearchDefinition = definition(
-  'google-places-search/v1',
-  objectSchema({ places: arraySchema(20, googlePlaceSchema) }, ['places']),
-  (value) => mapClosedRecord(value, ['places'], ['places'], {
-    places: (items) => mapArray(items, (item) => mapClosedRecord(item, GOOGLE_PLACE_KEYS, ['placeId'])),
-  }),
-);
+const googlePlacesPlacesSchema = objectSchema({ places: arraySchema(20, googlePlaceSchema) }, ['places']);
+const projectGooglePlaces = (value: unknown) => mapClosedRecord(value, ['places'], ['places'], {
+  places: (items) => mapArray(items, (item) => mapClosedRecord(item, GOOGLE_PLACE_KEYS, ['placeId'])),
+});
+const googlePlacesSearchDefinition = definition('google-places-search/v1', googlePlacesPlacesSchema, projectGooglePlaces);
+const googlePlacesDiscoverDefinition = definition('google-places-discover/v1', googlePlacesPlacesSchema, projectGooglePlaces);
 export const CATALOG_RESULT_PROJECTION_DEFINITIONS = Object.freeze([
   searxDefinition, socialSearchDefinition, socialFetchDefinition, wikidataSparqlDefinition,
   osmDefinition, wikidataEntityDefinition, gleifDefinition, companiesHouseDefinition,
   inpiDefinition, googlePatentsDefinition, tradeFairDefinition, mapYourShowDefinition,
   deepseekSearchDefinition, deepseekFetchDefinition,
   searchResultDefinition('serper-search/v1'), searchResultDefinition('brave-search/v1'),
-  searchResultDefinition('exa-search/v1'), googlePlacesSearchDefinition, viesCheckResultProjection,
-  socialSearchSerperProjection, socialSearchExaPeopleProjection,
+  searchResultDefinition('exa-search/v1'), googlePlacesSearchDefinition, googlePlacesDiscoverDefinition,
+  viesCheckResultProjection, socialSearchSerperProjection, socialSearchExaPeopleProjection,
 ] as const);
 
 export function getCatalogResultProjectionSchema(toolId: string): TypedProjectionSchema {

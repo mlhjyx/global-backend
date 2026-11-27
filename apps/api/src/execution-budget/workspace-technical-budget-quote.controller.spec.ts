@@ -116,8 +116,8 @@ describe('WorkspaceTechnicalBudgetQuoteController', () => {
       data: expect.objectContaining({
         purpose: 'discovery.run',
         subjectType: 'discovery_run',
-        // Capped-mode fit ceiling aligned with Run 2 pool cap (500) + right-sized Flash task ceilings + Batch 1.4-B L0 + Batch 1.8A social people tools (+75c).
-        requiredCapMicrousd: '574130000',
+        // Capped-mode fit ceiling aligned with Run 2 pool cap (500) + right-sized Flash task ceilings + Batch 1.4-B L0 + Batch 1.8A social people tools (+75c) + google_places.discover (+792c).
+        requiredCapMicrousd: '582050000',
       }),
     });
   });

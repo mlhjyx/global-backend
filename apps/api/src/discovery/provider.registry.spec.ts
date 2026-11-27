@@ -185,6 +185,8 @@ describe('DiscoveryProviderRegistry SourceClass governance', () => {
       { sourceClass: 'company_registry', providerKey: 'registry_frame', hasCompanyLineage: false },
       // Batch 1.4-B / Phase 1：本地渠道库枚举（零出网零成本；默认声明血缘，CHANNEL_CATALOG_PROVIDER=off 可关停）。
       { sourceClass: 'industry_data', providerKey: 'channel_catalog', hasCompanyLineage: true },
+      // Google Maps Places API 独立公司发现源（data_provider 默认 DISABLED，GOOGLE_PLACES_PROVIDER=off 可就地回滚）。
+      { sourceClass: 'industry_data', providerKey: 'google_places', hasCompanyLineage: true },
     ]);
     // Contact, email and enrichment adapters are never plan query sources.
     expect(sources.map((source) => source.providerKey)).not.toEqual(
@@ -220,7 +222,7 @@ describe('DiscoveryProviderRegistry SourceClass governance', () => {
       (await registry.routeCompanyDiscovery(db as never, sourceClass)).map((adapter) => adapter.key);
 
     expect(await routed('industry_data')).toEqual([
-      'public_web', 'directory', 'wikidata', 'openstreetmap', 'trade_fair', 'channel_catalog',
+      'public_web', 'directory', 'wikidata', 'openstreetmap', 'trade_fair', 'channel_catalog', 'google_places',
     ]);
     expect(await routed('company_registry')).toEqual(['wikidata', 'opencorporates']);
     expect(await routed('public_intelligence')).toEqual([
@@ -324,7 +326,7 @@ describe('DiscoveryProviderRegistry SourceClass governance', () => {
       [...new Set(sources.filter((source) => source.hasCompanyLineage).map((source) => source.providerKey))],
     ).toEqual([
       'public_web', 'directory', 'wikidata', 'openstreetmap', 'trade_fair', 'ted', 'openfda',
-      'opencorporates', 'model_web_search', 'channel_catalog',
+      'opencorporates', 'model_web_search', 'channel_catalog', 'google_places',
     ]);
     // CHANNEL_CATALOG_PROVIDER=off acts as an emergency env kill switch for channel_catalog lineage.
     const prevChannelSwitch = process.env.CHANNEL_CATALOG_PROVIDER;
@@ -401,7 +403,7 @@ describe('DiscoveryProviderRegistry SourceClass governance', () => {
       },
     ]);
 
-    expect(policies.filter((entry) => entry.create.domain === 'ec.europa.eu')).toEqual([
+      expect(policies.filter((entry) => entry.create.domain === 'ec.europa.eu')).toEqual([
       {
         where: { domain: 'ec.europa.eu' },
         update: {},
@@ -419,5 +421,66 @@ describe('DiscoveryProviderRegistry SourceClass governance', () => {
         },
       },
     ]);
+  });
+
+  it('seeds google_places DISABLED with places.googleapis.com §3.2.3 source_policy and supports env kill switch', async () => {
+    const providers: Array<{ where: unknown; update: unknown; create: Record<string, unknown> }> = [];
+    const policies: Array<{ where: unknown; update: unknown; create: Record<string, unknown> }> = [];
+    await new DiscoveryProviderRegistry().seed({
+      dataProvider: {
+        upsert: async (args: (typeof providers)[number]) => {
+          providers.push(args);
+          return args;
+        },
+      },
+      sourcePolicy: {
+        upsert: async (args: (typeof policies)[number]) => {
+          policies.push(args);
+          return args;
+        },
+      },
+    } as never);
+
+    expect(providers.filter((entry) => entry.create.key === 'google_places')).toEqual([
+      {
+        where: { key: 'google_places' },
+        update: {},
+        create: {
+          key: 'google_places',
+          class: 'industry_data',
+          status: 'DISABLED',
+          costPerCallCents: 4,
+        },
+      },
+    ]);
+
+    expect(policies.filter((entry) => entry.create.domain === 'places.googleapis.com')).toEqual([
+      {
+        where: { domain: 'places.googleapis.com' },
+        update: {},
+        create: {
+          domain: 'places.googleapis.com',
+          sourceType: 'directory_listing',
+          accessMode: 'api',
+          reviewStatus: 'APPROVED',
+          robotsStatus: 'ALLOWS',
+          termsStatus: 'REVIEWED_RESTRICTED',
+          personalData: false,
+          allowedPurpose: ['discovery'],
+          retentionDays: 1,
+          notes: expect.stringContaining('§3.2.3'),
+        },
+      },
+    ]);
+
+    const prevSwitch = process.env.GOOGLE_PLACES_PROVIDER;
+    process.env.GOOGLE_PLACES_PROVIDER = 'off';
+    try {
+      const offSources = new DiscoveryProviderRegistry({ gateway: {} as ModelGateway }).companyDiscoverySources();
+      expect(offSources.find((s) => s.providerKey === 'google_places')?.hasCompanyLineage).toBe(false);
+    } finally {
+      if (prevSwitch === undefined) delete process.env.GOOGLE_PLACES_PROVIDER;
+      else process.env.GOOGLE_PLACES_PROVIDER = prevSwitch;
+    }
   });
 });

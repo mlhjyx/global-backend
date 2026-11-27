@@ -20,10 +20,10 @@
       "reason": "存量超标文件（棘轮：只许缩小）；site-builder 相关文件随 SUB-02/03 退役后删除条目"
     },
     "apps/api/src/discovery/discovery-query-governed-lineage.ts": {
-      "maxLines": 898,
+      "maxLines": 902,
       "owner": "P6-CI-10",
       "expiresAt": "2027-01-31",
-      "reason": "存量超标文件（棘轮：只许缩小）；WEB-1 model_web_search 血缘契约条目 +7 行（PR 评审上调）；site-builder 相关条目随 SUB-02/03 退役后删除；+5 行：获客 vNext W4 opencorporates 进 PROVIDER_CONTRACT（PR 评审上调）；+6 行：获客 vNext W4 第二源 companies_house_registry 进 PROVIDER_CONTRACT（PR 评审上调）；2026-11-25 Batch 1.4-B：channel_catalog 进 PROVIDER_CONTRACT（+4 行，按门禁规则上调）"
+      "reason": "存量超标文件（棘轮：只许缩小）；WEB-1 model_web_search 血缘契约条目 +7 行（PR 评审上调）；site-builder 相关条目随 SUB-02/03 退役后删除；+5 行：获客 vNext W4 opencorporates 进 PROVIDER_CONTRACT（PR 评审上调）；+6 行：获客 vNext W4 第二源 companies_house_registry 进 PROVIDER_CONTRACT（PR 评审上调）；2026-11-25 Batch 1.4-B：channel_catalog 进 PROVIDER_CONTRACT（+4 行，按门禁规则上调）；2026-11-27 google_places 独立发现源进 PROVIDER_CONTRACT（+4 行，按门禁规则上调）"
     },
     "apps/api/src/discovery/discovery.service.ts": {
       "maxLines": 1410,
@@ -44,10 +44,10 @@
       "reason": "存量超标文件（棘轮：只许缩小）；site-builder 相关文件随 SUB-02/03 退役后删除条目；2026-11-11 #1009：governingPolicy 公司站点兜底扩展到 model_web_search（子域匹配与注释 +4 行）。"
     },
     "apps/api/src/discovery/raw-source-provider-schema.ts": {
-      "maxLines": 1018,
+      "maxLines": 1074,
       "owner": "P6-CI-10",
       "expiresAt": "2027-01-31",
-      "reason": "存量超标文件（棘轮：只许缩小）；site-builder 相关文件随 SUB-02/03 退役后删除条目；+68 行：获客 vNext W4 opencorporates 的载荷校验/绑定/外部 ID 分支（PR 评审上调）；2026-11-10 #1000：TED 纯数字国家税号对 identifier/winner_identifier 的定向放行 + 注释（+6 行）按门禁规则上调；+55 行：获客 vNext W4 第二源 companies_house_registry 的载荷校验/绑定/外部 ID 分支 + 注册号专用 token（PR 评审上调）；2026-11-11 #1009：model_web_search 治理（GOVERNED/属性校验器/dispatch 与注释 +24 行），按门禁规则上调；2026-11-14 PR-03b：TED buyer/winner 关系与 self_role 的 schema 校验（validTedRelationships + 白名单，+23 行），按门禁规则上调；2026-11-25 Batch 1.4-B：channel_catalog 治理（GOVERNED/许可/externalId/属性校验器 +13 行），按门禁规则上调。"
+      "reason": "存量超标文件（棘轮：只许缩小）；site-builder 相关文件随 SUB-02/03 退役后删除条目；+68 行：获客 vNext W4 opencorporates 的载荷校验/绑定/外部 ID 分支（PR 评审上调）；2026-11-10 #1000：TED 纯数字国家税号对 identifier/winner_identifier 的定向放行 + 注释（+6 行）按门禁规则上调；+55 行：获客 vNext W4 第二源 companies_house_registry 的载荷校验/绑定/外部 ID 分支 + 注册号专用 token（PR 评审上调）；2026-11-11 #1009：model_web_search 治理（GOVERNED/属性校验器/dispatch 与注释 +24 行），按门禁规则上调；2026-11-14 PR-03b：TED buyer/winner 关系与 self_role 的 schema 校验（validTedRelationships + 白名单，+23 行），按门禁规则上调；2026-11-25 Batch 1.4-B：channel_catalog 治理（GOVERNED/许可/externalId/属性校验器 +13 行），按门禁规则上调；2026-11-27 google_places 独立发现源治理（GOVERNED/GOOGLE_MAPS_PLACE_ID_ONLY/place_id 校验与绑定拆函数 +56 行），按门禁规则上调。"
     },
     "apps/api/src/durable-results/artifact/generic-operation-artifact.store.ts": {
       "maxLines": 891,

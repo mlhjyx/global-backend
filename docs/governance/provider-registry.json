@@ -509,6 +509,49 @@
       ]
     },
     {
+      "key": "google_places",
+      "status": "IMPLEMENTED",
+      "source_classes": [
+        "industry_data"
+      ],
+      "purpose": "Discover B2B companies (such as solar PV installers, EPC contractors, and electrical distributors) via Google Maps Places API (New) Text Search by target-country key cities and localized industry categories. Admits only merchant entities with a valid first-party website so downstream website_profile crawls the company's own site as the authoritative fact source.",
+      "taxonomy": [
+        "target-country key cities",
+        "localized industry category",
+        "google_place_id",
+        "first-party website domain"
+      ],
+      "license": {
+        "classification": "GOOGLE_MAPS_PLACE_ID_ONLY",
+        "note": "Google Maps Platform Terms of Service §3.2.3 prohibits long-term caching/storage of Places content (displayName, address, phone, ratings, reviews) and allows indefinite retention of place_id only. FieldMask excludes reviews, ratings, phones, and street addresses; durable replay retains placeId only; raw_source_record enforces retentionDays=1 while downstream website_profile establishes company facts from the official website. source_compliance_matrix row stays unapproved until ops/legal sign-off."
+      },
+      "personal_data_class": "COMPANY_ONLY",
+      "default_enablement": "DISABLED",
+      "call_gates": [
+        "data_provider_status",
+        "source_policy",
+        "source_compliance_matrix",
+        "tool_broker",
+        "daily_call_quota",
+        "per_query_call_cap",
+        "api_key"
+      ],
+      "test_paths": [
+        "apps/api/src/discovery/providers/google-places.provider.spec.ts",
+        "apps/api/src/tools/daily-call-quota.spec.ts"
+      ],
+      "evidence_refs": [
+        {
+          "kind": "TEST_ANCHOR",
+          "path": "apps/api/src/discovery/providers/google-places.provider.spec.ts"
+        },
+        {
+          "kind": "TEST_ANCHOR",
+          "path": "apps/api/src/tools/daily-call-quota.spec.ts"
+        }
+      ]
+    },
+    {
       "key": "google_patents",
       "status": "PARTIAL",
       "source_classes": [

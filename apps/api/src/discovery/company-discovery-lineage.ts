@@ -21,6 +21,7 @@ export type DiscoveryCompanyLineageProviderKey =
   | 'companies_house_registry'
   | 'registry_frame'
   | 'channel_catalog'
+  | 'google_places'
   | 'model_web_search';
 
 export type DiscoveryCompanyReceiptAttemptV1 = Readonly<{
@@ -137,6 +138,11 @@ const PROVIDER_RECEIPT_CONTRACT = Object.freeze({
   channel_catalog: Object.freeze({
     producerId: 'channel_catalog.query',
     resultSchema: 'channel-catalog-query/v1',
+  }),
+  // Google Places 独立发现源：回执来自 google_places.discover 工具结算（与 public_web 辅助 google_places.search 分区隔离）。
+  google_places: Object.freeze({
+    producerId: 'google_places.discover',
+    resultSchema: 'google-places-discover/v1',
   }),
   // WEB-1 模型联网搜索：血缘回执来自结构确认模型的持久投影（任务即 producer），
   // 探索环的搜索工具回执只是 auxiliary——搜索工具本身被 public_web/directory 共用，

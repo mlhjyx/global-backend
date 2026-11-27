@@ -22,6 +22,9 @@
   "channel_catalog": [
     "industry_data"
   ],
+  "google_places": [
+    "industry_data"
+  ],
   "directory": [
     "industry_data"
   ],

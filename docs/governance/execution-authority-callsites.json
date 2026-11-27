@@ -248,6 +248,20 @@
       ]
     },
     {
+      "key": "apps/api/src/discovery/providers/google-places.provider.ts#google_places.discover#1",
+      "kind": "tool",
+      "producerId": "google_places.discover",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "google-places-discover/v1",
+      "receiptMode": "ACK_REQUIRED",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/temporal/discovery.activities.ts",
+          "anchor": "onDurableReceipt"
+        }
+      ]
+    },
+    {
       "key": "apps/api/src/discovery/providers/inpi-rne.provider.ts#inpi_rne.search#1",
       "kind": "tool",
       "producerId": "inpi_rne.search",

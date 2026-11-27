@@ -53,6 +53,7 @@ const typedProjectionSchemaValues = [
   "brave-search/v1",
   "exa-search/v1",
   "google-places-search/v1",
+  "google-places-discover/v1",
   "outreach-first-contact-draft/v1",
   "campaign-plan/v1",
   "market-candidates-generation/v1",

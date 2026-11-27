@@ -8,16 +8,19 @@ import {
   braveSearchTool,
   createBraveSearchTool,
   createExaSearchTool,
+  createGooglePlacesDiscoverTool,
   createGooglePlacesSearchTool,
   createSerperSearchTool,
   createSocialExaPeopleTool,
   createSocialSerperSearchTool,
   exaSearchTool,
+  googlePlacesDiscoverTool,
   googlePlacesSearchTool,
   serperSearchTool,
   socialExaPeopleTool,
   socialSerperSearchTool,
 } from './search-provider-tools';
+import { createDailyCallQuotaLimiter, DailyCallQuotaExceededError } from './daily-call-quota';
 import { registerBuiltinTools } from './builtin-tools';
 import { ToolRegistry } from './tool-registry';
 import type { ToolContext } from './tool-contract';
@@ -293,12 +296,89 @@ describe('L0 search provider tools (serper.search / exa.search / google_places.s
     expect(exa.durableReplayResult?.(exaRes)).toEqual(exaRes);
   });
 
-  it('registers all six search provider tools through registerBuiltinTools', () => {
+  it('google_places.discover enforces source policy, §3.2.3 placeId-only replay, and fail-closed daily quota before wire', async () => {
+    const ctx: ToolContext = { workspaceId: 'ws', purpose: 'discovery' };
+    const noKey = createGooglePlacesDiscoverTool({
+      googlePlacesSearchText: vi.fn(),
+      resolveApiKey: () => undefined,
+    });
+    expect(noKey.compliance).toMatchObject({
+      sourcePolicy: 'required',
+      policyDomain: 'places.googleapis.com',
+      sourceKey: 'google_places',
+      personalData: false,
+      allowedPurpose: ['discovery'],
+    });
+    expect(await noKey.execute({ textQuery: 'Photovoltaik Installateur München' }, ctx)).toEqual({
+      data: { places: [] },
+      costCents: 0,
+      degraded: true,
+    });
+
+    const beforePhysicalWire = vi.fn(async () => undefined);
+    const searchMock = vi.fn(async (_input, deps) => {
+      await deps?.beforeRequest?.();
+      return {
+        billed: true,
+        places: [
+          {
+            placeId: 'ChIJ_solar_munich_1',
+            name: 'Sonnenkraft Bayern GmbH',
+            websiteUri: 'https://sonnenkraft-bayern.de/',
+            countryCode: 'DE',
+          },
+        ],
+      };
+    });
+    const dailyQuota = createDailyCallQuotaLimiter({
+      scope: 'test-google-places-discover',
+      resolveLimit: () => 1,
+      now: () => new Date('2026-11-27T08:00:00.000Z'),
+    });
+    const tool = createGooglePlacesDiscoverTool({
+      resolveApiKey: () => 'maps-key',
+      googlePlacesSearchText: searchMock,
+      dailyQuota,
+    });
+
+    const result = await tool.execute(
+      { textQuery: 'Photovoltaik Installateur München', regionCode: 'DE', languageCode: 'de' },
+      { workspaceId: 'ws', purpose: 'discovery', beforePhysicalWire },
+    );
+    expect(beforePhysicalWire).toHaveBeenCalledTimes(1);
+    expect(result.costCents).toBe(4);
+    expect(
+      projectionRegistry().project(CATALOG_RESULT_PROJECTION_SCHEMAS['google_places.discover'], result).data,
+    ).toEqual(result);
+    expect(tool.durableReplayResult?.(result)).toEqual({
+      data: { places: [{ placeId: 'ChIJ_solar_munich_1' }] },
+      costCents: 4,
+    });
+
+    // Second call on the same UTC day must be blocked BEFORE beforePhysicalWire & adapter call.
+    await expect(
+      tool.execute(
+        { textQuery: 'Solartechnik EPC Frankfurt', regionCode: 'DE', languageCode: 'de' },
+        { workspaceId: 'ws', purpose: 'discovery', beforePhysicalWire },
+      ),
+    ).rejects.toThrowError(DailyCallQuotaExceededError);
+    await expect(
+      tool.execute(
+        { textQuery: 'Elektrogroßhandel Stuttgart', regionCode: 'DE', languageCode: 'de' },
+        { workspaceId: 'ws', purpose: 'discovery', beforePhysicalWire },
+      ),
+    ).rejects.toThrow('GOOGLE_PLACES_DAILY_LIMIT_EXCEEDED');
+    expect(beforePhysicalWire).toHaveBeenCalledTimes(1);
+    expect(searchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('registers all seven search provider tools through registerBuiltinTools', () => {
     const registry = registerBuiltinTools(new ToolRegistry());
     expect(registry.get('serper.search')).toBe(serperSearchTool);
     expect(registry.get('brave.search')).toBe(braveSearchTool);
     expect(registry.get('exa.search')).toBe(exaSearchTool);
     expect(registry.get('google_places.search')).toBe(googlePlacesSearchTool);
+    expect(registry.get('google_places.discover')).toBe(googlePlacesDiscoverTool);
     expect(registry.get('social.search_serper')).toBe(socialSerperSearchTool);
     expect(registry.get('social.search_exa_people')).toBe(socialExaPeopleTool);
   });
