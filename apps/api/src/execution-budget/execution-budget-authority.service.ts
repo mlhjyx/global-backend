@@ -241,7 +241,25 @@ export class ExecutionBudgetAuthorityService {
     const exact = exactVerifiedAuthority(authority);
     const { accountKey } = workspaceBindingIdentity(exact);
     if (isLegacyExecutionBudgetBypass()) {
-      return executionBudgetBinding(exact, randomUUID(), false, accountKey);
+      if (exact.purpose !== 'market.candidates.generate') {
+        return executionBudgetBinding(exact, randomUUID(), false, accountKey);
+      }
+      // Market candidate generation enforces PostgreSQL attempt-binding and
+      // terminal triggers over execution_budget_authority + tool_budget_account,
+      // so bypass mode persists the local 80c technical-cap authority directly
+      // without RS256 JWKS verification or candidate-grant allocation.
+      const consumed =
+        await this.repository.consumeWorkspaceAndOpenInTransaction(
+          transaction,
+          exact,
+          accountKey,
+        );
+      return executionBudgetBinding(
+        exact,
+        consumed.authorityId,
+        consumed.replay,
+        consumed.accountKey,
+      );
     }
     await assertCandidateGrantAllocated(exact);
     const consumed =

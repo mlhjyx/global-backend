@@ -333,6 +333,44 @@ describe('LEGACY_EXECUTION_BUDGET_MODE (enforce | bypass)', () => {
           accountKey: 'platform:sanctions',
         });
         expect(closeSpy).toHaveBeenCalledTimes(1);
+
+        // 3) market.candidates.generate:* workspace accounts also delegate to PostgresBudgetStore
+        //    so PostgreSQL attempt-binding and terminal triggers stay satisfied in bypass mode.
+        const marketAccountKey = `market.candidates.generate:market_candidate_generation:${COMPANY_ID}:${REQUEST_SHA256}`;
+        await store.open({
+          authorityId: AUTHORITY_ID,
+          scopeKey: WORKSPACE_ID,
+          accountKey: marketAccountKey,
+        });
+        expect(openSpy).toHaveBeenCalledTimes(2);
+        await store.attestAuthorized({
+          authorityId: AUTHORITY_ID,
+          scopeKey: WORKSPACE_ID,
+          accountKey: marketAccountKey,
+        });
+        expect(attestSpy).toHaveBeenCalledTimes(2);
+        reserveSpy.mockResolvedValueOnce({
+          workspaceId: WORKSPACE_ID,
+          accountKey: marketAccountKey,
+          operationId: 'market-op-1',
+          estimatedMicrousd: 800_000n,
+          replay: false,
+        });
+        const marketRes = await store.reserve({
+          workspaceId: WORKSPACE_ID,
+          accountKey: marketAccountKey,
+          operationKey: 'market-op-key-1',
+          estimatedMicrousd: 800_000n,
+        });
+        expect(reserveSpy).toHaveBeenCalledTimes(2);
+        await store.settle(marketRes, 50_000n);
+        expect(settleSpy).toHaveBeenCalledTimes(2);
+        await store.release(marketRes);
+        expect(releaseSpy).toHaveBeenCalledTimes(2);
+        await store.status({ workspaceId: WORKSPACE_ID, accountKey: marketAccountKey });
+        expect(statusSpy).toHaveBeenCalledTimes(2);
+        await store.close({ workspaceId: WORKSPACE_ID, accountKey: marketAccountKey });
+        expect(closeSpy).toHaveBeenCalledTimes(2);
       } finally {
         openSpy.mockRestore();
         attestSpy.mockRestore();
@@ -622,7 +660,8 @@ describe('LEGACY_EXECUTION_BUDGET_MODE (enforce | bypass)', () => {
         }),
       ).toEqual(first);
 
-      // market.candidates.generate keeps its structural cap compatibility.
+      // market.candidates.generate keeps its structural cap compatibility and persists
+      // its local 80c technical-cap authority + account in transaction under bypass mode.
       const marketVerified = await service.verifyWorkspaceGrant({
         compactJws: undefined,
         identity: { workspaceId: WORKSPACE_ID },
@@ -636,6 +675,28 @@ describe('LEGACY_EXECUTION_BUDGET_MODE (enforce | bypass)', () => {
       expect(marketVerified.capMicrousd).toBe(
         BYPASS_MARKET_GENERATION_CAP_MICROUSD,
       );
+      const marketAccountKey = `market.candidates.generate:market_candidate_generation:${COMPANY_ID}:${REQUEST_SHA256}`;
+      consumeWorkspaceAndOpenInTransaction.mockResolvedValueOnce({
+        authorityId: AUTHORITY_ID,
+        replay: false,
+        accountKey: marketAccountKey,
+        accountId: '11111111-1111-4111-8111-111111111111',
+        generation: 1,
+        authorizedCapMicrousd: BYPASS_MARKET_GENERATION_CAP_MICROUSD,
+      });
+      const marketBinding =
+        await service.consumeVerifiedWorkspaceGrantInTransaction(
+          marketVerified,
+          {} as never,
+        );
+      expect(consumeWorkspaceAndOpenInTransaction).toHaveBeenCalledTimes(1);
+      expect(marketBinding).toMatchObject({
+        authorityId: AUTHORITY_ID,
+        replay: false,
+        scopeKey: WORKSPACE_ID,
+        accountKey: marketAccountKey,
+        purpose: 'market.candidates.generate',
+      });
 
       // Invalid workspaceId still fails closed even in bypass mode.
       await expect(
@@ -955,6 +1016,23 @@ describe('LEGACY_EXECUTION_BUDGET_MODE (enforce | bypass)', () => {
             platformEgress: {
               authorizeAndDispatch: async (_op, run) => run(),
             },
+          },
+        ),
+      ).rejects.toThrow(BudgetStoreUnavailableError);
+
+      // market.candidates.generate requires a durable projection in tool_budget_operation
+      // so it stays on BudgetStore even in bypass mode.
+      await expect(
+        gateway.generateStructured(
+          {
+            task: 'market.candidates.generate',
+            prompt: 'generate markets',
+            schema: { type: 'object' },
+          },
+          {
+            workspaceId: WORKSPACE_ID,
+            runId: `market.candidates.generate:market_candidate_generation:${COMPANY_ID}:${REQUEST_SHA256}`,
+            durableResultSchema: 'market-candidates-generation/v1',
           },
         ),
       ).rejects.toThrow(BudgetStoreUnavailableError);

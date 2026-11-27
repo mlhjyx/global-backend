@@ -378,12 +378,29 @@ export class StatelessTechnicalBudgetStore implements BudgetStore {
   }
 }
 
+const DURABLE_WORKSPACE_BYPASS_ACCOUNT_PREFIX =
+  'market.candidates.generate:' as const;
+
+function requiresDurableBudgetStoreInBypass(
+  scopeKey: string,
+  accountKey?: string,
+): boolean {
+  return (
+    scopeKey === 'platform' ||
+    (accountKey !== undefined &&
+      accountKey.startsWith(DURABLE_WORKSPACE_BYPASS_ACCOUNT_PREFIX))
+  );
+}
+
 /**
  * Scope-routed composite `BudgetStore` used when `LEGACY_EXECUTION_BUDGET_MODE=bypass`:
  * - `platform` scope (`scopeKey === 'platform'` / `workspaceId === 'platform'`) delegates
  *   every lifecycle operation to the durable `platformStore` (`PostgresBudgetStore` or
  *   `UnavailableBudgetStore`), keeping platform schedules and egress fences intact.
- * - Tenant workspace scopes delegate to `StatelessTechnicalBudgetStore` with zero DB writes.
+ * - `market.candidates.generate:*` accounts also delegate to `platformStore` so
+ *   PostgreSQL attempt-binding / terminal triggers can audit the local 80c technical-cap
+ *   projection without RS256 grants.
+ * - All other tenant workspace scopes delegate to `StatelessTechnicalBudgetStore` with zero DB writes.
  */
 export class ScopeRoutedBypassBudgetStore implements BudgetStore {
   constructor(
@@ -391,8 +408,10 @@ export class ScopeRoutedBypassBudgetStore implements BudgetStore {
     private readonly workspaceStore: BudgetStore = new StatelessTechnicalBudgetStore(),
   ) {}
 
-  private targetForScope(scopeKey: string): BudgetStore {
-    return scopeKey === 'platform' ? this.platformStore : this.workspaceStore;
+  private targetForScope(scopeKey: string, accountKey?: string): BudgetStore {
+    return requiresDurableBudgetStoreInBypass(scopeKey, accountKey)
+      ? this.platformStore
+      : this.workspaceStore;
   }
 
   async readOperationResult(
@@ -412,7 +431,7 @@ export class ScopeRoutedBypassBudgetStore implements BudgetStore {
     accountKey: string;
     replayScope?: boolean;
   }): Promise<BudgetAccountAuthorization> {
-    return this.targetForScope(input.scopeKey).open(input);
+    return this.targetForScope(input.scopeKey, input.accountKey).open(input);
   }
 
   attestAuthorized(input: {
@@ -420,11 +439,15 @@ export class ScopeRoutedBypassBudgetStore implements BudgetStore {
     scopeKey: string;
     accountKey: string;
   }): Promise<BudgetAccountAuthorization> {
-    return this.targetForScope(input.scopeKey).attestAuthorized(input);
+    return this.targetForScope(input.scopeKey, input.accountKey).attestAuthorized(
+      input,
+    );
   }
 
   reserve(input: BudgetReservationRequest): Promise<BudgetReservation> {
-    return this.targetForScope(input.workspaceId).reserve(input);
+    return this.targetForScope(input.workspaceId, input.accountKey).reserve(
+      input,
+    );
   }
 
   settle(
@@ -433,12 +456,10 @@ export class ScopeRoutedBypassBudgetStore implements BudgetStore {
     projection?: GenericOperationProjection,
     receiptFacts?: DurableExecutionReceiptFacts,
   ): Promise<BudgetSettlement> {
-    return this.targetForScope(reservation.workspaceId).settle(
-      reservation,
-      observedMicrousd,
-      projection,
-      receiptFacts,
-    );
+    return this.targetForScope(
+      reservation.workspaceId,
+      reservation.accountKey,
+    ).settle(reservation, observedMicrousd, projection, receiptFacts);
   }
 
   markResultUnknown(
@@ -446,11 +467,10 @@ export class ScopeRoutedBypassBudgetStore implements BudgetStore {
     expected?: GenericOperationArtifactSnapshot,
     subjectRef?: GenericOperationArtifactSubjectRef,
   ): Promise<BudgetResultUnknownTransition> {
-    return this.targetForScope(reservation.workspaceId).markResultUnknown(
-      reservation,
-      expected,
-      subjectRef,
-    );
+    return this.targetForScope(
+      reservation.workspaceId,
+      reservation.accountKey,
+    ).markResultUnknown(reservation, expected, subjectRef);
   }
 
   loadResultUnknownArtifact(
@@ -460,6 +480,7 @@ export class ScopeRoutedBypassBudgetStore implements BudgetStore {
   ): Promise<GenericOperationArtifactSnapshot | null> {
     return this.targetForScope(
       reservation.workspaceId,
+      reservation.accountKey,
     ).loadResultUnknownArtifact(reservation, authorityId, subjectRef);
   }
 
@@ -472,7 +493,10 @@ export class ScopeRoutedBypassBudgetStore implements BudgetStore {
     subjectRef?: GenericOperationArtifactSubjectRef,
     objectVersionId?: string,
   ): Promise<BudgetSettlement> {
-    return this.targetForScope(reservation.workspaceId).settleArtifactManifest(
+    return this.targetForScope(
+      reservation.workspaceId,
+      reservation.accountKey,
+    ).settleArtifactManifest(
       reservation,
       observedMicrousd,
       snapshot,
@@ -484,14 +508,19 @@ export class ScopeRoutedBypassBudgetStore implements BudgetStore {
   }
 
   release(reservation: BudgetReservation): Promise<BudgetSettlement> {
-    return this.targetForScope(reservation.workspaceId).release(reservation);
+    return this.targetForScope(
+      reservation.workspaceId,
+      reservation.accountKey,
+    ).release(reservation);
   }
 
   status(input: {
     workspaceId: string;
     accountKey: string;
   }): Promise<BudgetStatus> {
-    return this.targetForScope(input.workspaceId).status(input);
+    return this.targetForScope(input.workspaceId, input.accountKey).status(
+      input,
+    );
   }
 
   close(input: {
@@ -499,7 +528,9 @@ export class ScopeRoutedBypassBudgetStore implements BudgetStore {
     accountKey: string;
     force?: boolean;
   }): Promise<void> {
-    return this.targetForScope(input.workspaceId).close(input);
+    return this.targetForScope(input.workspaceId, input.accountKey).close(
+      input,
+    );
   }
 }
 
