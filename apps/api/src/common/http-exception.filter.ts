@@ -32,6 +32,7 @@ function dataProperty(value: object, name: string): unknown {
 const APP_ROOT = resolve(__dirname, '..') + sep;
 const ERROR_NAMES = new Set([
   'Error', 'TypeError', 'RangeError', 'ReferenceError', 'SyntaxError',
+  'DOMException', 'TimeoutError', 'AbortError',
   'PrismaClientKnownRequestError', 'PrismaClientUnknownRequestError',
 ]);
 const ERROR_CODES = new Set([
@@ -40,6 +41,38 @@ const ERROR_CODES = new Set([
 ]);
 const HTTP_METHODS = new Set(METHODS);
 const NATIVE_STACK_GETTER = Object.getOwnPropertyDescriptor(new Error(), 'stack')?.get;
+const NATIVE_DOM_EXCEPTION_NAME_GETTER =
+  typeof DOMException !== 'undefined'
+    ? Object.getOwnPropertyDescriptor(DOMException.prototype, 'name')?.get
+    : undefined;
+const NATIVE_DOM_EXCEPTION_MESSAGE_GETTER =
+  typeof DOMException !== 'undefined'
+    ? Object.getOwnPropertyDescriptor(DOMException.prototype, 'message')?.get
+    : undefined;
+
+function safeErrorProperty(
+  value: object,
+  name: string,
+  nativeGetter?: () => unknown,
+): unknown {
+  let current: object | null = value;
+  for (let depth = 0; current !== null && depth < 4; depth += 1) {
+    const descriptor = Object.getOwnPropertyDescriptor(current, name);
+    if (descriptor) {
+      if (Object.hasOwn(descriptor, 'value')) return descriptor.value;
+      if (nativeGetter && descriptor.get === nativeGetter) {
+        try {
+          return nativeGetter.call(value);
+        } catch {
+          return undefined;
+        }
+      }
+      return undefined;
+    }
+    current = Object.getPrototypeOf(current) as object | null;
+  }
+  return undefined;
+}
 
 type DiagnosticRequest = { originalUrl?: unknown; method?: unknown; route?: { path?: unknown } };
 
@@ -76,10 +109,15 @@ function safeUnknownDiagnostic(
   req: DiagnosticRequest | undefined,
 ) {
   const error = types.isNativeError(exception) ? exception : null;
-  const name = error ? dataProperty(error, 'name') : undefined;
+  const name = error
+    ? safeErrorProperty(error, 'name', NATIVE_DOM_EXCEPTION_NAME_GETTER)
+    : undefined;
+  const message = error
+    ? safeErrorProperty(error, 'message', NATIVE_DOM_EXCEPTION_MESSAGE_GETTER)
+    : undefined;
   const rawCode = error ? dataProperty(error, 'code') : undefined;
   // V8 can lazily format a stack using the error's name and message.
-  const stack = error && typeof name === 'string' && typeof dataProperty(error, 'message') === 'string'
+  const stack = error && typeof name === 'string' && typeof message === 'string'
     ? nativeErrorStack(error)
     : undefined;
   const route = req?.route?.path;

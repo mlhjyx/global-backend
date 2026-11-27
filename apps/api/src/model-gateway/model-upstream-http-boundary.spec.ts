@@ -90,6 +90,17 @@ describe('a model call the gateway settled without a usable answer', () => {
   });
 
   it.each([
+    ['a DOMException TimeoutError from AbortSignal.timeout', new DOMException('The operation was aborted due to timeout', 'TimeoutError')],
+    ['an Error with name TimeoutError', Object.assign(new Error('upstream timed out'), { name: 'TimeoutError' })],
+  ])('maps %s to MODEL_UPSTREAM_TIMEOUT (502 instead of 500 INTERNAL)', (_case, error) => {
+    expect(settledModelUpstreamFailureReason(error)).toBe('MODEL_UPSTREAM_TIMEOUT');
+  });
+
+  it('does not map a DOMException AbortError (caller cancellation) to MODEL_UPSTREAM_TIMEOUT', () => {
+    expect(settledModelUpstreamFailureReason(new DOMException('aborted by caller', 'AbortError'))).toBeUndefined();
+  });
+
+  it.each([
     ['a status below 400', 302],
     ['a status above 599', 600],
     ['a fractional status', 503.5],

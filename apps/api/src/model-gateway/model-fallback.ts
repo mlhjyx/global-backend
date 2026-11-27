@@ -16,6 +16,7 @@ import {
   isJudgeModelAllowlisted,
   judgeAllowsFlash,
 } from '../ai-tasks/judge-model-routing';
+import { isLegacyExecutionBudgetBypass } from '../execution-budget/legacy-execution-budget-mode';
 
 export const MODEL_CROSS_CHANNEL_FALLBACK_ENABLED_ENV = 'MODEL_CROSS_CHANNEL_FALLBACK_ENABLED';
 export const MODEL_CROSS_CHANNEL_FALLBACKS_JSON_ENV = 'MODEL_CROSS_CHANNEL_FALLBACKS_JSON';
@@ -58,6 +59,13 @@ export function isCrossChannelFallbackEnabled(
   if (flag === 'on' || flag === 'true' || flag === '1') return true;
   if (flag === 'off' || flag === 'false' || flag === '0') return false;
   return Boolean((env[MODEL_CROSS_CHANNEL_FALLBACKS_JSON_ENV] ?? '').trim());
+}
+
+/** 仅在旧执行预算旁路模式下允许主模型单跳超时自动切换备用通道，保持 enforce 模式 D13 fail-closed 不变。 */
+export function isCrossChannelTimeoutFallbackEnabled(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return isLegacyExecutionBudgetBypass(env) && isCrossChannelFallbackEnabled(env);
 }
 
 /** 解析给定主模型与任务的跨渠道备选模型列表（最多 2 个；终判任务严格遵守 JUDGE_MODEL_ALLOWLIST）。 */

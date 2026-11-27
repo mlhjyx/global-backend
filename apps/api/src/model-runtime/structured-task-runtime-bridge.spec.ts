@@ -169,3 +169,97 @@ describe('pure shared structured preparation before budget admission', () => {
     expect(result.runtimeExecution.contextDigest).toBe(prepared.envelope.digest);
   });
 });
+
+describe('cross-channel timeout fallback under LEGACY_EXECUTION_BUDGET_MODE=bypass', () => {
+  const prevBudgetMode = process.env.LEGACY_EXECUTION_BUDGET_MODE;
+  const prevFallback = process.env.MODEL_CROSS_CHANNEL_FALLBACK_ENABLED;
+
+  const restoreEnv = () => {
+    if (prevBudgetMode === undefined) delete process.env.LEGACY_EXECUTION_BUDGET_MODE;
+    else process.env.LEGACY_EXECUTION_BUDGET_MODE = prevBudgetMode;
+    if (prevFallback === undefined) delete process.env.MODEL_CROSS_CHANNEL_FALLBACK_ENABLED;
+    else process.env.MODEL_CROSS_CHANNEL_FALLBACK_ENABLED = prevFallback;
+  };
+
+  it('bounds the primary attempt signal and falls back to the secondary channel on TimeoutError in bypass mode', async () => {
+    process.env.LEGACY_EXECUTION_BUDGET_MODE = 'bypass';
+    process.env.MODEL_CROSS_CHANNEL_FALLBACK_ENABLED = 'on';
+    try {
+      const seenSignals: Array<AbortSignal | undefined> = [];
+      const seenModels: Array<string | undefined> = [];
+      const generateStructured = vi.fn(async (input: { model?: string; signal?: AbortSignal }) => {
+        seenModels.push(input.model);
+        seenSignals.push(input.signal);
+        if (seenModels.length === 1) {
+          throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+        }
+        return {
+          data: { code: 'ok' },
+          provider: 'gateway',
+          model: input.model ?? 'claude-sonnet-5-5',
+          usage: { inputTokens: 10, outputTokens: 5 },
+        };
+      });
+
+      const result = await executeStructuredTaskWithRuntime(
+        { generateStructured } as unknown as ModelGateway,
+        { task: 'icp.design', prompt: 'Design ICP', model: 'gpt-6.2-sol', schema },
+        { workspaceId: 'ws-1', runId: 'run-1' },
+      );
+
+      expect(generateStructured).toHaveBeenCalledTimes(2);
+      expect(seenModels).toEqual(['gpt-6.2-sol', 'claude-sonnet-5-5']);
+      expect(seenSignals[0]).toBeInstanceOf(AbortSignal);
+      expect(seenSignals[1]).toBeUndefined();
+      expect(result.runtimeExecution.runtimeResolvedAlias).toBe('claude-sonnet-5-5');
+    } finally {
+      restoreEnv();
+    }
+  });
+
+  it('does not fall back on TimeoutError in enforce mode (preserves D13 fail-closed)', async () => {
+    process.env.LEGACY_EXECUTION_BUDGET_MODE = 'enforce';
+    process.env.MODEL_CROSS_CHANNEL_FALLBACK_ENABLED = 'on';
+    try {
+      const timeoutError = new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+      const generateStructured = vi.fn(async () => {
+        throw timeoutError;
+      });
+
+      await expect(
+        executeStructuredTaskWithRuntime(
+          { generateStructured } as unknown as ModelGateway,
+          { task: 'icp.design', prompt: 'Design ICP', model: 'gpt-6.2-sol', schema },
+          { workspaceId: 'ws-1', runId: 'run-1' },
+        ),
+      ).rejects.toBe(timeoutError);
+      expect(generateStructured).toHaveBeenCalledTimes(1);
+    } finally {
+      restoreEnv();
+    }
+  });
+
+  it('does not fall back when the caller signal itself was aborted', async () => {
+    process.env.LEGACY_EXECUTION_BUDGET_MODE = 'bypass';
+    process.env.MODEL_CROSS_CHANNEL_FALLBACK_ENABLED = 'on';
+    try {
+      const controller = new AbortController();
+      const timeoutError = new DOMException('caller timed out', 'TimeoutError');
+      const generateStructured = vi.fn(async () => {
+        controller.abort(timeoutError);
+        throw timeoutError;
+      });
+
+      await expect(
+        executeStructuredTaskWithRuntime(
+          { generateStructured } as unknown as ModelGateway,
+          { task: 'icp.design', prompt: 'Design ICP', model: 'gpt-6.2-sol', schema, signal: controller.signal },
+          { workspaceId: 'ws-1', runId: 'run-1' },
+        ),
+      ).rejects.toBe(timeoutError);
+      expect(generateStructured).toHaveBeenCalledTimes(1);
+    } finally {
+      restoreEnv();
+    }
+  });
+});
