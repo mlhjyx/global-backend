@@ -423,4 +423,28 @@ describe('enrichContactEmail：本地复用', () => {
     const db = fakeDb();
     expect(await enrichContactEmail(depsFor(db, [], []), INPUT)).toEqual({ status: 'no_finders' });
   });
+
+  it('Prospeo VERIFIED 命中 + Emailable VALID → 满足双正规则直接落 VALID（无需调故障 ZeroBounce）并触发 onValidEmail', async () => {
+    const db = fakeDb();
+    const onValidEmail = vi.fn();
+    const prospeo = finder('prospeo', {
+      status: 'hit',
+      hit: { email: PERSONAL_EMAIL, providerConfidence: 95, raw: { provider: 'prospeo', email_status: 'VERIFIED' } },
+      costMicrousd: 19_800,
+      latencyMs: 100,
+    });
+    const emailable = verifier('emailable', 'VALID', { costMicrousd: 7_600 });
+    const brokenZb = verifier('zerobounce', 'UNKNOWN', {
+      error: 'Invalid API key or your account ran out of credits',
+      costMicrousd: 0,
+    });
+    const res = await enrichContactEmail(
+      { ...depsFor(db, [prospeo], [emailable, brokenZb]), onValidEmail },
+      INPUT,
+    );
+    expect(res).toMatchObject({ status: 'stored', state: 'VALID', provider: 'prospeo' });
+    expect(emailable.calls).toBe(1);
+    expect(brokenZb.calls).toBe(0);
+    expect(onValidEmail).toHaveBeenCalledWith(PERSONAL_EMAIL);
+  });
 });

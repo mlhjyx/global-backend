@@ -179,6 +179,17 @@ export async function runVerificationWaterfall(
       stopReason: 'settled',
     };
   }
+  // 若 priorVotes 已携带独立来源 positive 票（例如商业 finder 已在供应商侧完成 SMTP VERIFIED），
+  // 再叠加主验独立 positive 票即已满足双正规则，无需再额外调第二家验证器。
+  if (primary.provisional.state === 'VALID') {
+    return {
+      resolved: primary.provisional,
+      steps,
+      providerCalls: steps.length,
+      costMicrousd,
+      stopReason: 'settled',
+    };
+  }
 
   // ② 二次确认：只有主验 VALID 才花钱换第二票。
   const afterSecondary = await callNext(1);
