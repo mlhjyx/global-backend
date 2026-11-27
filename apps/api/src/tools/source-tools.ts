@@ -162,7 +162,7 @@ export const crawl4aiRenderTool: Tool<{ url: string }, CrawlHtmlResult & { robot
   category: "fetch",
   sourceClass: "public_intelligence",
   cost: { unit: platformCrawl4aiContract.costUnit, estimatedCents: Number(platformCrawl4aiContract.estimatedCents), external: false },
-  rateLimit: { rps: 1, concurrency: 3, perDomainCrawlDelayMs: 2000 },
+  rateLimit: { rps: 4, concurrency: 10, perDomainCrawlDelayMs: 2000 },
   compliance: { sourcePolicy: "advisory", respectsRobots: true, personalData: false, allowedPurpose: ["discovery", "enrichment"], reversible: true, authRequired: false, risk: "low" },
   capabilities: { produces: ["company", "domain", "contact"], accepts: ["domain"] },
   idempotencyKey: (i) => `crawl4ai.render:${hash(i.url)}`,

@@ -60,12 +60,21 @@ export function buildCachedStructuredOperationKey(
 }
 
 const MAX_TRACKED_BYPASS_ACCOUNTS = 2_048;
+const DURABLE_BYPASS_RESULT_SCHEMAS = new Set<string>([
+  "market-candidates-generation/v1",
+]);
 
 export function isWorkspaceModelBudgetBypass(
   ctx: AiContext,
   explicitMode?: LegacyExecutionBudgetMode,
 ): boolean {
-  if (ctx.paidCost || ctx.platformEgress || ctx.workspaceId === "platform") {
+  if (
+    ctx.paidCost ||
+    ctx.platformEgress ||
+    ctx.workspaceId === "platform" ||
+    (ctx.durableResultSchema !== undefined &&
+      DURABLE_BYPASS_RESULT_SCHEMAS.has(ctx.durableResultSchema))
+  ) {
     return false;
   }
   return (explicitMode ?? resolveLegacyExecutionBudgetMode()) === "bypass";
