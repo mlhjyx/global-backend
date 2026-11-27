@@ -35,6 +35,7 @@ const semanticIdentifierCollisions = [
   "owner_operator_numbers",
   "parent_lei",
   "parent_qid",
+  "place_id",
   "product_code",
   "publication_number",
   "qid",
@@ -782,4 +783,38 @@ describe('reserved manufacturer namespace after G9 extraction',()=>{
   expect(sanitizeStored('manufacturer_network.evidence',EVIDENCE)).toEqual(EVIDENCE);
   expect(sanitizeCanonicalCompanyAttributes({manufacturer_network:{evidence:{...EVIDENCE,attested:true}}})).toEqual({});
  });
+});
+
+describe('google_places namespace Maps Terms §3.2.3 compliance', () => {
+  it('retains only place_id and source_class, stripping all Places content fields', () => {
+    expect(
+      sanitizeCanonicalCompanyAttributes({
+        google_places: {
+          place_id: 'ChIJ_abc_123',
+          source_class: 'industry_data',
+          name: 'Solar GmbH',
+          formatted_address: 'Sonnenstraße 1, 80331 München',
+          phone: '+49 89 123456',
+          rating: 4.9,
+          reviews: ['great service'],
+          website: 'https://solar.de',
+        },
+      }),
+    ).toEqual({
+      google_places: {
+        place_id: 'ChIJ_abc_123',
+        source_class: 'industry_data',
+      },
+    });
+    expect(
+      sanitizeCanonicalCompanyAttributes({
+        google_places: { place_id: 'invalid id with spaces', source_class: 'industry_data' },
+      }),
+    ).toEqual({});
+    expect(
+      sanitizeCanonicalCompanyAttributes({
+        digital_footprint: { safe: 'industrial', place_id: 'ChIJ_abc_123' },
+      }),
+    ).toEqual({ digital_footprint: { safe: 'industrial' } });
+  });
 });

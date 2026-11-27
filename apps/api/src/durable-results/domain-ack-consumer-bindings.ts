@@ -53,6 +53,7 @@ export const DOMAIN_ACK_PRODUCT_CONSUMER_BINDINGS = Object.freeze([
   { producerId: 'brave.search', consumer: 'SearchDiscoveryProvider', domainAggregateType: 'SearchResultEvidence', identity: 'result-url-and-query-digest', resultStrategy: 'typed_projection', resultSchema: 'brave-search/v1' },
   { producerId: 'exa.search', consumer: 'SearchDiscoveryProvider', domainAggregateType: 'SearchResultEvidence', identity: 'result-url-and-query-digest', resultStrategy: 'typed_projection', resultSchema: 'exa-search/v1' },
   { producerId: 'google_places.search', consumer: 'SearchDiscoveryProvider', domainAggregateType: 'LocationEvidence', identity: 'google-place-id', resultStrategy: 'typed_projection', resultSchema: 'google-places-search/v1' },
+  { producerId: 'google_places.discover', consumer: 'GooglePlacesDiscoveryProvider', domainAggregateType: 'LocationEvidence', identity: 'google-place-id', resultStrategy: 'typed_projection', resultSchema: 'google-places-discover/v1' },
   { producerId: 'social.search', consumer: 'SocialPresenceContactAdapter', domainAggregateType: 'SearchResultEvidence', identity: 'result-url-and-query-digest', resultStrategy: 'typed_projection', resultSchema: 'social-search/v1' },
   { producerId: 'social.search_serper', consumer: 'SocialPresenceContactAdapter', domainAggregateType: 'SearchResultEvidence', identity: 'result-url-and-query-digest', resultStrategy: 'typed_projection', resultSchema: 'social-search-serper/v1' },
   { producerId: 'social.search_exa_people', consumer: 'SocialPresenceContactAdapter', domainAggregateType: 'SearchResultEvidence', identity: 'result-url-and-query-digest', resultStrategy: 'typed_projection', resultSchema: 'social-search-exa-people/v1' },
@@ -103,6 +104,8 @@ const DISCOVERY_GOVERNED_COMPANY_ACK_BINDINGS = Object.freeze([
   // WEB-1：模型联网搜索的公司回执来自结构确认任务的持久投影（任务 id 即 producer）。
   // consumer 必须与 discovery-query-governed-lineage.ts 的 PROVIDER_CONTRACT 一致。
   { producerId: 'discovery.web_search_candidates', consumer: 'ModelWebSearchDiscoveryProvider', domainAggregateType: 'RawSourceRecord', identity: 'run-provider-operation-result-digest', resultStrategy: 'typed_projection', resultSchema: 'discovery-web-search-candidates/v1' },
+  // Google Places 独立发现源：回执来自 google_places.discover 工具结算（与 public_web 辅助调用 google_places.search 分区隔离）。
+  { producerId: 'google_places.discover', consumer: 'GooglePlacesDiscoveryProvider', domainAggregateType: 'RawSourceRecord', identity: 'run-provider-operation-result-digest', resultStrategy: 'typed_projection', resultSchema: 'google-places-discover/v1' },
 ] as const satisfies readonly DomainAckProductConsumerBinding[]);
 
 function getDiscoveryGovernedCompanyAckBinding(

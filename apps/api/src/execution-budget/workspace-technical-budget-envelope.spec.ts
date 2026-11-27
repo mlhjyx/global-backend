@@ -328,6 +328,7 @@ describe('workspace execution technical envelope catalog', () => {
       ['brave.search', 66 * (3 + 4) + 66 * 10],
       ['exa.search', 66 * 3 + 66 * 10],
       ['google_places.search', 66 * 3],
+      ['google_places.discover', 66 * 3],
       // directory pages + homepage and Impressum of each profiled company
       ['crawl4ai.fetch', 66 * 8 * 3 + 50 * 3],
       ['wikidata.sparql', 66],
@@ -351,7 +352,7 @@ describe('workspace execution technical envelope catalog', () => {
     ]);
     expect(envelope.policy.executionLimits).toMatchObject({
       planQueries: 66,
-      companyDiscoveryAdapters: 12,
+      companyDiscoveryAdapters: 13,
       providerRecords: 25,
       taxonomyIndustryTermsPerQuery: 4,
       taxonomyCountryTermsPerQuery: 2,
@@ -363,10 +364,10 @@ describe('workspace execution technical envelope catalog', () => {
     });
     // models: 396×2×5 + 924×2×3 + 1584×2×5 + 462×2×5 + 50×2×3 + 500×2×20 + 63×2×20 = 52_784 cents
     // tools: 自托管 crawl4ai.fetch / crawl4ai.render 按 0¢ 计，仅外部付费工具计入：
-    // deepseek.search 660×1 + serper 1122×1 + brave 1122×1 + exa 858×1 + google_places 198×4 + social_serper 50×1 + social_exa_people 25×1 = 4_629 cents；合计 57_413 cents。
+    // deepseek.search 660×1 + serper 1122×1 + brave 1122×1 + exa 858×1 + google_places.search 198×4 + google_places.discover 198×4 + social_serper 50×1 + social_exa_people 25×1 = 5_421 cents；合计 58_205 cents。
     expect(envelope.policy.tools.find((t) => t.toolId === 'crawl4ai.fetch')?.estimatedCents).toBe(0);
     expect(envelope.policy.tools.find((t) => t.toolId === 'crawl4ai.render')?.estimatedCents).toBe(0);
-    expect(envelope.requiredCapMicrousd).toBe(57_413n * 10_000n);
+    expect(envelope.requiredCapMicrousd).toBe(58_205n * 10_000n);
   });
 
   it('quotes company creation from the bounded understanding crawl and per-page extraction', () => {
@@ -473,8 +474,8 @@ describe('DISCOVERY_UNCAPPED=on —— 报价按防爆安全界（余额是唯�
       // 去帽模式工具环 24 轮探索 + 1 次结构确认
       expect.objectContaining({ taskId: 'discovery.web_search_candidates', logicalInvocations: 66 * 25 }),
       expect.objectContaining({ taskId: 'discovery.classify_trade_role', logicalInvocations: 50 }),
-      // 66 查询 × 12 适配器 × 1000 条记录安全界
-      expect.objectContaining({ taskId: 'discovery.qualify_fit', logicalInvocations: 792_000 }),
+      // 66 查询 × 13 适配器 × 1000 条记录安全界
+      expect.objectContaining({ taskId: 'discovery.qualify_fit', logicalInvocations: 858_000 }),
       // 快扫池 5 万 / 8 家每批 = 6250 次批量粗判上限
       expect.objectContaining({ taskId: 'discovery.quick_judge', logicalInvocations: 6_250 }),
     ]);
@@ -487,6 +488,7 @@ describe('DISCOVERY_UNCAPPED=on —— 报价按防爆安全界（余额是唯�
       ['brave.search', 66 * (3 + 4) + 66 * 100],
       ['exa.search', 66 * 3 + 66 * 100],
       ['google_places.search', 66 * 3],
+      ['google_places.discover', 66 * 3],
       ['crawl4ai.fetch', 66 * 8 * 3 + 50 * 3],
       ['wikidata.sparql', 66],
       ['osm.overpass', 66],
@@ -506,13 +508,13 @@ describe('DISCOVERY_UNCAPPED=on —— 报价按防爆安全界（余额是唯�
     expect(envelope.policy.executionLimits).toMatchObject({
       planQueries: 66,
       providerRecords: 1_000,
-      fitCompanies: 792_000,
+      fitCompanies: 858_000,
       // policyRevision 可审计标记：去帽模式的包络与产品帽模式可区分。
       discoveryUncapped: 1,
     });
-    // models: 396×2×5 + 924×2×3 + 1584×2×5 + 1650×2×5 + 50×2×3 + 792000×2×20 + 6250×2×20
-    //       = 31_972_144 cents；tools: deepseek 6600 + serper 7062 + brave 7062 + exa 6798 + google_places 792 + social_serper 50 + social_exa_people 25 = 28_389 cents（自托管 crawl4ai 0¢）；合计 32_000_533 cents。
-    expect(envelope.requiredCapMicrousd).toBe(32_000_533n * 10_000n);
+    // models: 396×2×5 + 924×2×3 + 1584×2×5 + 1650×2×5 + 50×2×3 + 858000×2×20 + 6250×2×20
+    //       = 34_612_144 cents；tools: deepseek 6600 + serper 7062 + brave 7062 + exa 6798 + google_places.search 792 + google_places.discover 792 + social_serper 50 + social_exa_people 25 = 29_181 cents（自托管 crawl4ai 0¢）；合计 34_641_325 cents。
+    expect(envelope.requiredCapMicrousd).toBe(34_641_325n * 10_000n);
   });
 
   it('产品帽模式的报价保持稳定上界（开关 off 时不含 discoveryUncapped）', () => {
@@ -521,7 +523,7 @@ describe('DISCOVERY_UNCAPPED=on —— 报价按防爆安全界（余额是唯�
       planId: PLAN_ID,
     });
     expect(envelope.policy.executionLimits).not.toHaveProperty('discoveryUncapped');
-    expect(envelope.requiredCapMicrousd).toBe(57_413n * 10_000n);
+    expect(envelope.requiredCapMicrousd).toBe(58_205n * 10_000n);
   });
 });
 

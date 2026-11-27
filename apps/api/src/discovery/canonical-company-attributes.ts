@@ -26,6 +26,8 @@ const RETAINED_TOP_LEVEL_KEYS = new Set([
   "fda",
   "fda_applicant",
   "gleif",
+  // Google Maps Places API（仅留存 place_id 与 source_class，严格遵循 Maps Terms §3.2.3）。
+  "google_places",
   "government_buyer",
   "hall",
   "hiring_signal",
@@ -93,6 +95,7 @@ const SEMANTIC_IDENTIFIER_KEYS = new Set([
   "owner_operator_numbers",
   "parent_lei",
   "parent_qid",
+  "place_id",
   "product_code",
   "publication_number",
   "qid",
@@ -189,6 +192,10 @@ const semanticIdentifierContracts = new Map<
   [
     "ch_registry.company_number",
     { validate: (value) => /^[A-Z0-9]{1,12}$/u.test(value) },
+  ],
+  [
+    "google_places.place_id",
+    { validate: (value) => /^[A-Za-z0-9_-]{1,256}$/u.test(value) && isSecretFreeText(value) },
   ],
   [
     "fda.registration_number",
@@ -444,6 +451,21 @@ function sanitizeManufacturerNamespace(value: unknown): unknown {
   return evidence ? {evidence} : undefined;
 }
 
+/** Google Maps Platform Terms §3.2.3: Canonical 层仅允许保留 place_id 与 source_class，其余字段一律拦截。 */
+function sanitizeGooglePlacesNamespace(value: unknown): unknown {
+  const input = record(value);
+  if (!input) return undefined;
+  const placeId = typeof input.place_id === "string"
+    && /^[A-Za-z0-9_-]{1,256}$/u.test(input.place_id)
+    && isSecretFreeText(input.place_id)
+    ? input.place_id
+    : undefined;
+  if (!placeId) return undefined;
+  return input.source_class === "industry_data"
+    ? { place_id: placeId, source_class: "industry_data" }
+    : { place_id: placeId };
+}
+
 const BOOKKEEPING_MARKER_VALUE = /^[a-z0-9][a-z0-9_./-]{0,63}$/u;
 const ISO_DATE_VALUE = /^\d{4}-\d{2}-\d{2}$/u;
 
@@ -571,7 +593,9 @@ export function sanitizeCanonicalCompanyAttributes(
         ? sanitizeManufacturerNamespace(item)
         : key === 'company_website_overview'
           ? readCompanyWebsiteOverview(item)
-          : sanitizeValue(key, item, state, 0, [key]);
+          : key === 'google_places'
+            ? sanitizeGooglePlacesNamespace(item)
+            : sanitizeValue(key, item, state, 0, [key]);
       return sanitized === undefined ? [] : [[key, sanitized]];
     }),
   );

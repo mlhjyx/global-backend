@@ -115,6 +115,10 @@ const PROVIDER_CONTRACT = Object.freeze({
     producerId: 'channel_catalog.query', resultSchema: 'channel-catalog-query/v1',
     consumer: 'ChannelCatalogDiscoveryProvider', classes: Object.freeze(['industry_data']),
   }),
+  google_places: Object.freeze({
+    producerId: 'google_places.discover', resultSchema: 'google-places-discover/v1',
+    consumer: 'GooglePlacesDiscoveryProvider', classes: Object.freeze(['industry_data']),
+  }),
   // WEB-1 模型联网搜索：公司回执 = 结构确认模型的持久投影（任务即 producer）。
   model_web_search: Object.freeze({
     producerId: 'discovery.web_search_candidates',

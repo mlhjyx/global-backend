@@ -42,8 +42,8 @@ function safetyBound(
     : fallback;
 }
 
-// 11→12（Batch 1.4-B channel_catalog 本地已审渠道库注册面，2026-11-25）：报价上界的适配器因子随之 +1。
-export const MAX_COMPANY_DISCOVERY_ADAPTERS = 12 as const;
+// 12→13（google_places 独立公司发现源注册面，2026-11-27）：报价上界的适配器因子随之 +1。
+export const MAX_COMPANY_DISCOVERY_ADAPTERS = 13 as const;
 /** `discovery.query_plan` output schema bound. */
 export const MAX_QUERY_PLANNER_QUERIES = 64 as const;
 /** Deterministic cold-path queries added after planning: TED and openFDA, at most one each. */
@@ -95,6 +95,7 @@ export const MAX_QUERY_TAXONOMY_COUNTRY_TERMS = 2 as const;
 export const MAX_PUBLIC_WEB_SEARCHES_PER_QUERY = 3 as const;
 export const MAX_PUBLIC_WEB_DOMAINS_PER_QUERY = 14 as const;
 export const MAX_GOOGLE_PLACES_SEARCHES_PER_QUERY = 3 as const;
+export const MAX_GOOGLE_PLACES_DISCOVER_SEARCHES_PER_QUERY = 3 as const;
 export const MAX_DIRECTORY_SEARCHES_PER_QUERY = 4 as const;
 export const MAX_DIRECTORY_LISTING_PAGES = 8 as const;
 export const MAX_DIRECTORY_PAGINATION = 3 as const;

@@ -739,7 +739,7 @@ const DISCOVERY_DOMAIN_ACK_PRODUCERS = new Set([
   'tradefair.algolia',
   'wikidata.entity', 'wikidata.sparql', 'discovery.extract_company',
   'discovery.extract_list', 'contact.find_decision_makers', 'registry.query',
-  'deepseek.search', 'serper.search', 'brave.search', 'exa.search', 'google_places.search',
+  'deepseek.search', 'serper.search', 'brave.search', 'exa.search', 'google_places.search', 'google_places.discover',
   'channel_catalog.query', 'discovery.web_search_candidates', 'vies.check',
 ]);
 
