@@ -3109,8 +3109,8 @@ export function createDiscoveryActivities(deps: {
       // 这是控制错误，会在线索已经写入之后打挂整个 run。所以在任何出网之前跳过，留给有平台写入者的进程。
       if (!deps.platformWriter) {
         if (companies.length) {
-          console.warn(
-            `[discovery] run ${args.runId} 跳过 ${companies.length} 家的网站监控注册：本进程没有平台写入者`,
+          console.log(
+            `[discovery] run ${args.runId} 已产出 ${companies.length} 家匹配企业，交由 platform-worker intent-sweep 自动纳管网站监控`,
           );
         }
         return { candidates: companies.length, registered: 0, skippedSubjects: 0, unreplayable: 0 };

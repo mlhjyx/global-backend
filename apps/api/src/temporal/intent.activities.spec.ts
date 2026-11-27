@@ -132,4 +132,63 @@ describe('intent activities — platform authority lifecycle', () => {
     })).rejects.toThrow('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
     expect(sourceFetchCreate).toHaveBeenCalledOnce();
   });
+
+  it('syncQualifiedWatchesFromWorkspaces registers new matched domains via platformWriter and skips watched ones', async () => {
+    const monitoredCreate = vi.fn(async ({ data }: { data: { sourceKey: string } }) => ({
+      id: `src-${data.sourceKey}`,
+    }));
+    const prisma = {
+      dataProvider: { findUnique: vi.fn(async () => ({ status: 'ENABLED' })) },
+      monitoredSource: {
+        findMany: vi.fn(async () => [{ sourceKey: 'web_watch:already.example' }]),
+      },
+      withWorkspace: vi.fn(async (_ws: string, fn: (tx: unknown) => Promise<unknown>) =>
+        fn({
+          canonicalCompany: {
+            findMany: vi.fn(async () => [
+              { id: 'c1', domain: 'already.example' },
+              { id: 'c2', domain: 'newbuyer.example' },
+            ]),
+            findUnique: vi.fn(async ({ where }: { where: { id: string } }) =>
+              where.id === 'c2'
+                ? { id: 'c2', name: 'New Buyer GmbH', domain: 'newbuyer.example', region: 'DE' }
+                : null,
+            ),
+          },
+          fieldEvidence: { findMany: vi.fn(async () => []) },
+        }),
+      ),
+    };
+    const platformWriter = {
+      $queryRaw: vi.fn(async () => [{ id: '10000000-0000-4000-8000-000000000001' }]),
+      monitoredSource: {
+        findUnique: vi.fn(async () => null),
+        create: monitoredCreate,
+      },
+    };
+    const activities = createIntentActivities({
+      prisma: prisma as never,
+      platformWriter: platformWriter as never,
+      fetcher: {} as never,
+      budgetStore: { attestAuthorized: vi.fn(async () => undefined) } as never,
+      activityRunId: () => 'workflow-run-1',
+    });
+
+    const out = await activities.syncQualifiedWatchesFromWorkspaces({
+      limit: 10,
+      executionContractVersion: 1,
+      executionBudget,
+    });
+    expect(out).toEqual({ workspaces: 1, registered: 1, skipped: 0 });
+    expect(monitoredCreate).toHaveBeenCalledTimes(1);
+    expect(monitoredCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          providerKey: 'web_watch',
+          sourceKey: 'web_watch:newbuyer.example',
+          status: 'ACTIVE',
+        }),
+      }),
+    );
+  });
 });

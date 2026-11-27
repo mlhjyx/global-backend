@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  */
 vi.mock('@temporalio/workflow', () => import('./testing/temporal-workflow.mock'));
 
-import { acts, resetActivities, setWorkflowInfo } from './testing/temporal-workflow.mock';
+import { acts, resetActivities, setPatched, setWorkflowInfo } from './testing/temporal-workflow.mock';
 import { intentSweepWorkflow } from './intent.workflow';
 import { PLATFORM_SCHEDULE_AUTHORITY_SCOPES } from './platform-schedule-authority';
 
@@ -27,6 +27,7 @@ function watchResult(sourceId: string, over: Record<string, unknown> = {}): Reco
 
 function primeIntent(sourceIds: string[]): void {
   acts.purgeStaleIntentEvents.mockResolvedValue({ purged: 0 });
+  acts.syncQualifiedWatchesFromWorkspaces.mockResolvedValue({ workspaces: 2, registered: 1, skipped: 0 });
   acts.listDueWatches.mockResolvedValue({ sourceIds });
   acts.watchSource.mockImplementation(async ({ sourceId }: { sourceId: string }) => watchResult(sourceId));
   acts.projectIntentAllWorkspaces.mockResolvedValue({ workspaces: 2, companiesTouched: 5, eventsProjected: 9 });
@@ -107,5 +108,20 @@ describe('intentSweepWorkflow', () => {
     expect(acts.listDueWatches).toHaveBeenLastCalledWith(
       expect.objectContaining({ limit: 50 }),
     );
+  });
+
+  it('auto-registers qualified watches before listDueWatches when patched and skips on legacy replay', async () => {
+    primeIntent(['s1']);
+    await intentSweepWorkflow(workflowInput());
+    expect(acts.syncQualifiedWatchesFromWorkspaces).toHaveBeenCalledTimes(1);
+
+    acts.syncQualifiedWatchesFromWorkspaces.mockRejectedValueOnce(new Error('sync transient error'));
+    const out = await intentSweepWorkflow(workflowInput());
+    expect(out.swept).toBe(1);
+
+    acts.syncQualifiedWatchesFromWorkspaces.mockClear();
+    setPatched(() => false);
+    await intentSweepWorkflow(workflowInput());
+    expect(acts.syncQualifiedWatchesFromWorkspaces).not.toHaveBeenCalled();
   });
 });

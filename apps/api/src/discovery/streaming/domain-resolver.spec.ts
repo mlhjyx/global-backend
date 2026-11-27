@@ -29,6 +29,8 @@ describe('L0.5 domain-resolver pure helpers', () => {
     expect(isExcludedOfficialHost('find-and-update.company-information.service.gov.uk')).toBe(true);
     expect(isExcludedOfficialHost('enfsolar.com')).toBe(true);
     expect(isExcludedOfficialHost('intersolar.de')).toBe(true);
+    expect(isExcludedOfficialHost('app.fieldwire.com')).toBe(true);
+    expect(isExcludedOfficialHost('docs.example.com')).toBe(true);
     expect(isExcludedOfficialHost('alpha-ess.de')).toBe(false);
     expect(isExcludedOfficialHost('solarparken.com')).toBe(false);
   });
@@ -83,7 +85,7 @@ describe('L0.5 domain-resolver pure helpers', () => {
     ).toBe('field.energy');
   });
 
-  it('returns null when search results contain only unrelated sites or directories', () => {
+  it('returns null when search results contain only unrelated sites, app subdomains, or partial-word collisions', () => {
     expect(
       pickOfficialDomainFromSearchResults(
         [
@@ -94,6 +96,49 @@ describe('L0.5 domain-resolver pure helpers', () => {
         'DE',
       ),
     ).toBeNull();
+
+    expect(
+      pickOfficialDomainFromSearchResults(
+        [
+          { url: 'https://www.procarton.com/sitemap/', title: 'Pro Carton' },
+          { url: 'https://app.fieldwire.com/login', title: 'Fieldwire Construction App' },
+          { url: 'https://www.fieldwire.com/', title: 'Fieldwire Construction Management' },
+        ],
+        'Field Deutschland GmbH',
+        'DE',
+      ),
+    ).toBeNull();
+
+    expect(
+      pickOfficialDomainFromSearchResults(
+        [
+          { url: 'https://www.dispatchit.com/company/locations', title: 'DispatchIt Delivery' },
+          { url: 'https://work.dispatch.me/', title: 'Dispatch Work Portal' },
+        ],
+        'Dispatch B.V.',
+        'NL',
+      ),
+    ).toBeNull();
+  });
+
+  it('prefers top-ranked multi-hit industry match over low-ranked generic newspaper domain', () => {
+    const filler = Array.from({ length: 8 }, (_, idx) => ({
+      url: `https://unrelated-${idx}.org/page`,
+      title: `Unrelated ${idx}`,
+    }));
+    expect(
+      pickOfficialDomainFromSearchResults(
+        [
+          { url: 'https://dispatchgridservices.com/projects', title: 'Dispatch Grid Services - Projects' },
+          { url: 'https://www.dispatchgridservices.com/', title: 'Dispatch Grid Services - Battery Storage' },
+          { url: 'https://dispatchgridservices.com/about', title: 'About Dispatch' },
+          ...filler,
+          { url: 'https://www.dispatch.com/', title: 'The Columbus Dispatch' },
+        ],
+        'Dispatch B.V.',
+        'NL',
+      ),
+    ).toBe('dispatchgridservices.com');
   });
 });
 
