@@ -503,12 +503,15 @@ model ToolBudgetOperation {
 /// content-addressed object storage and never enters PostgreSQL JSONB.
 model GenericOperationArtifact {
   manufacturerNetworkEvidence ManufacturerNetworkEvidence[]
+  v3ManufacturerEvidence DiscoveryV3ManufacturerEvidence?
 
   id                    String   @id @default(uuid()) @db.Uuid
   scopeKey              String   @map("scope_key") @db.VarChar(200)
   workspaceId           String?  @map("workspace_id") @db.Uuid
-  authorityId           String   @map("authority_id") @db.Uuid
-  operationId           String   @map("operation_id") @db.Uuid
+  authorityId           String?  @map("authority_id") @db.Uuid
+  operationId           String?  @map("operation_id") @db.Uuid
+  executionContractVersion Int   @default(2) @map("execution_contract_version") @db.SmallInt
+  discoveryV3OperationId String? @map("discovery_v3_operation_id") @db.Uuid
   resultSchema          String   @map("result_schema") @db.VarChar(100)
   objectKey             String   @map("object_key") @db.VarChar(200)
   sha256                String   @db.Char(64)
@@ -526,13 +529,15 @@ model GenericOperationArtifact {
   expiresAt             DateTime @map("expires_at") @db.Timestamptz(3)
 
   workspace Workspace?                       @relation(fields: [workspaceId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "generic_operation_artifact_workspace_fkey")
-  authority ExecutionBudgetAuthority         @relation(fields: [scopeKey, authorityId], references: [scopeKey, id], onDelete: NoAction, onUpdate: NoAction, map: "generic_operation_artifact_authority_scope_fkey")
-  operation ToolBudgetOperation              @relation(fields: [scopeKey, operationId], references: [scopeKey, id], onDelete: NoAction, onUpdate: NoAction, map: "generic_operation_artifact_operation_scope_fkey")
+  authority ExecutionBudgetAuthority?        @relation(fields: [scopeKey, authorityId], references: [scopeKey, id], onDelete: NoAction, onUpdate: NoAction, map: "generic_operation_artifact_authority_scope_fkey")
+  operation ToolBudgetOperation?             @relation(fields: [scopeKey, operationId], references: [scopeKey, id], onDelete: NoAction, onUpdate: NoAction, map: "generic_operation_artifact_operation_scope_fkey")
+  discoveryV3Operation DiscoveryV3Operation? @relation(fields: [workspaceId, discoveryV3OperationId], references: [workspaceId, id], onDelete: NoAction, onUpdate: NoAction, map: "generic_operation_artifact_discovery_v3_operation_fkey")
   object    GenericOperationArtifactObject   @relation(fields: [sha256, objectKey, sizeBytes, privacyClass], references: [sha256, objectKey, sizeBytes, privacyClass], onDelete: NoAction, onUpdate: NoAction, map: "generic_operation_artifact_object_content_fkey")
   subject   GenericOperationArtifactSubject?
 
   @@unique([scopeKey, id], map: "generic_operation_artifact_scope_id_key")
   @@unique([scopeKey, operationId], map: "generic_operation_artifact_scope_operation_key")
+  @@unique([workspaceId, discoveryV3OperationId], map: "generic_operation_artifact_discovery_v3_operation_key")
   @@index([scopeKey, authorityId, operationId], map: "generic_operation_artifact_scope_authority_operation_idx")
   @@index([scopeKey, sha256, resultSchema], map: "generic_operation_artifact_scope_digest_schema_idx")
   @@index([workspaceId, expiresAt], map: "generic_operation_artifact_workspace_expiry_idx")
@@ -759,10 +764,11 @@ model PersonalArtifactCleanupCommand {
   commandId         String    @id @default(uuid()) @map("command_id") @db.Uuid
   workspaceId       String    @map("workspace_id") @db.Uuid
   deletionRequestId String    @map("deletion_request_id") @db.Uuid
-  artifactId        String    @map("artifact_id") @db.Uuid
+  artifactId        String?   @map("artifact_id") @db.Uuid
+  promotionOperationId String? @map("promotion_operation_id") @db.Uuid
   objectKey         String    @map("object_key") @db.VarChar(200)
   sha256            String    @db.Char(64)
-  objectVersionId   String    @map("object_version_id") @db.VarChar(1024)
+  objectVersionId   String?   @map("object_version_id") @db.VarChar(1024)
   tombstonedAt      DateTime  @map("tombstoned_at") @db.Timestamptz(3)
   attempt           Int       @default(1)
   status            String    @default("PENDING") @db.VarChar(16)
@@ -771,6 +777,8 @@ model PersonalArtifactCleanupCommand {
   claimedAt         DateTime? @map("claimed_at") @db.Timestamptz(3)
   completedAt       DateTime? @map("completed_at") @db.Timestamptz(3)
   createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  promotion DiscoveryV3ArtifactPromotion? @relation(fields: [workspaceId, promotionOperationId], references: [workspaceId, operationId], onDelete: NoAction, onUpdate: NoAction, map: "personal_artifact_cleanup_promotion_fkey")
 
   @@unique([deletionRequestId, objectKey, objectVersionId], map: "personal_artifact_cleanup_command_request_object_key")
   @@index([workspaceId, deletionRequestId, status, createdAt], map: "personal_artifact_cleanup_command_claim_idx")
@@ -1639,6 +1647,19 @@ model DiscoveryRun {
   materializationContractVersion String?   @map("materialization_contract_version") @db.VarChar(64)
   /// Run 2.0（M0）：gain-saas 任务归因 {taskId, taskRunId}；null = 旧 run（保留兼容读取）。
   taskRef                        Json?     @map("task_ref")
+  executionContractVersion       Int       @default(2) @map("execution_contract_version")
+  v3AttemptId                    String?   @map("v3_attempt_id") @db.Uuid
+  v3RequestSha256                String?   @map("v3_request_sha256") @db.VarChar(64)
+  v3RequestedBy                  String?   @map("v3_requested_by") @db.VarChar(256)
+  v3FirstAdmission               Boolean?  @map("v3_first_admission")
+  v3TaskQueue                    String?   @map("v3_task_queue") @db.VarChar(128)
+  v3ManufacturerRevision         String?   @map("v3_manufacturer_revision") @db.VarChar(32)
+  v3AdmittedAt                   DateTime? @map("v3_admitted_at") @db.Timestamptz(3)
+  v3DispatchExpiresAt            DateTime? @map("v3_dispatch_expires_at") @db.Timestamptz(3)
+  v3WorkerAcceptedAt             DateTime? @map("v3_worker_accepted_at") @db.Timestamptz(3)
+  v3WorkerAttempt                Int?      @map("v3_worker_attempt")
+  v3PlanQueries                  Json?     @map("v3_plan_queries")
+  v3SourceRoutes                 Json?     @map("v3_source_routes")
   /// Run 2.0（M0）：阶段时间戳 {quickStartedAt, quickDoneAt, deepStartedAt, deepDoneAt}。
   phases                         Json?
   /// Run 2.0（M0）：full | quick_only | refresh。
@@ -1655,11 +1676,148 @@ model DiscoveryRun {
   memEpisodes               MemRunEpisode[]
   judgmentRecords           JudgmentRecord[]
   sourceYieldLedger         SourceYieldLedger[]
+  v3Operations              DiscoveryV3Operation[]
+  v3ManufacturerEvidence    DiscoveryV3ManufacturerEvidence[]
 
   @@unique([workspaceId, id], map: "discovery_run_workspace_id_id_key")
+  @@unique([workspaceId, planId, v3AttemptId], map: "discovery_run_v3_attempt_key")
   @@index([workspaceId])
   @@index([planId])
   @@map("discovery_run")
+}
+
+model DiscoveryV3Operation {
+  id               String    @id @default(uuid()) @db.Uuid
+  workspaceId      String    @map("workspace_id") @db.Uuid
+  runId            String    @map("run_id") @db.Uuid
+  step             String    @db.VarChar(240)
+  kind             String    @db.VarChar(12)
+  ordinal          Int
+  requestSha256    String    @map("request_sha256") @db.VarChar(64)
+  claimProofSha256 String    @map("claim_proof_sha256") @db.VarChar(64)
+  provider         String    @db.VarChar(120)
+  action           String    @db.VarChar(128)
+  method           String    @db.VarChar(64)
+  status           String    @db.VarChar(16)
+  claimedAt        DateTime  @map("claimed_at") @db.Timestamptz(3)
+  sendAuthorizedAt DateTime? @map("send_authorized_at") @db.Timestamptz(3)
+  gatewaySweepSelectedAt DateTime? @map("gateway_sweep_selected_at") @db.Timestamptz(3)
+  gatewayReadback   Json?     @map("gateway_readback")
+  deadline         DateTime  @db.Timestamptz(3)
+  finishedAt       DateTime? @map("finished_at") @db.Timestamptz(3)
+  receiptSha256    String?   @map("receipt_sha256") @db.VarChar(64)
+  recoveryReceiptSha256 String? @map("recovery_receipt_sha256") @db.VarChar(64)
+  recoveredAt      DateTime? @map("recovered_at") @db.Timestamptz(3)
+  result           Json?
+  resultSha256     String?   @map("result_sha256") @db.VarChar(64)
+  cost             Json?
+  usage            Json?
+  model            String?   @db.VarChar(160)
+  ack              String?   @db.VarChar(64)
+
+  run           DiscoveryRun             @relation(fields: [workspaceId, runId], references: [workspaceId, id], onDelete: Cascade, onUpdate: NoAction)
+  costRevisions DiscoveryV3CostRevision[]
+  rawLinks      DiscoveryV3RawLink[]
+  artifact      GenericOperationArtifact?
+  artifactPromotion DiscoveryV3ArtifactPromotion?
+  gatewayProbes DiscoveryV3GatewayProbe[]
+  v3ManufacturerLookups DiscoveryV3ManufacturerEvidence[] @relation("DiscoveryV3ManufacturerLookup")
+  v3ManufacturerFetches  DiscoveryV3ManufacturerEvidence[] @relation("DiscoveryV3ManufacturerFetch")
+
+  @@unique([workspaceId, id], map: "discovery_v3_operation_workspace_id_key")
+  @@unique([workspaceId, runId, step, kind, ordinal], map: "discovery_v3_operation_step_key")
+  @@index([workspaceId, runId, status], map: "discovery_v3_operation_run_status_idx")
+  @@map("discovery_v3_operation")
+}
+
+model DiscoveryV3ArtifactPromotion {
+  workspaceId     String  @map("workspace_id") @db.Uuid
+  operationId     String  @map("operation_id") @db.Uuid
+  subjectType     String  @map("subject_type")
+  subjectId       String  @map("subject_id") @db.Uuid
+  objectKey       String  @map("object_key") @db.VarChar(200)
+  sha256          String  @db.Char(64)
+  projection      Json
+  objectVersionId String? @map("object_version_id") @db.VarChar(1024)
+
+  operation DiscoveryV3Operation @relation(fields: [workspaceId, operationId], references: [workspaceId, id], onDelete: Cascade, onUpdate: NoAction)
+  cleanupCommands PersonalArtifactCleanupCommand[]
+
+  @@id([workspaceId, operationId])
+  @@index([workspaceId, subjectType, subjectId], map: "discovery_v3_artifact_promotion_subject_idx")
+  @@index([objectKey], map: "discovery_v3_artifact_promotion_key_idx")
+  @@map("discovery_v3_artifact_promotion")
+}
+
+model DiscoveryV3GatewayProbe {
+  id              String    @id @default(uuid()) @db.Uuid
+  workspaceId     String    @map("workspace_id") @db.Uuid
+  operationId     String    @map("operation_id") @db.Uuid
+  sequence        Int       @db.SmallInt
+  claimedAt       DateTime  @map("claimed_at") @db.Timestamptz(3)
+  observedAt      DateTime? @map("observed_at") @db.Timestamptz(3)
+  phase           String?   @db.VarChar(40)
+  httpStatusClass Int?      @map("http_status_class") @db.SmallInt
+  evidence        Json?
+  operation       DiscoveryV3Operation @relation(fields: [workspaceId, operationId], references: [workspaceId, id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([workspaceId, operationId, sequence], map: "discovery_v3_gateway_probe_sequence_key")
+  @@map("discovery_v3_gateway_probe")
+}
+
+/// Run-local evidence can only be committed with both verified v3 receipts.
+model DiscoveryV3ManufacturerEvidence {
+  workspaceId String @map("workspace_id") @db.Uuid
+  companyId String @map("company_id") @db.Uuid
+  runId String @map("run_id") @db.Uuid
+  lookupOperationId String @map("lookup_operation_id") @db.Uuid
+  fetchOperationId String @map("fetch_operation_id") @db.Uuid
+  lookupResultSha256 String @map("lookup_result_sha256") @db.VarChar(64)
+  fetchResultSha256 String @map("fetch_result_sha256") @db.VarChar(64)
+  consumerSha256 String @map("consumer_sha256") @db.VarChar(64)
+  artifactId String @unique @map("artifact_id") @db.Uuid
+  evidence Json
+  createdAt DateTime @default(dbgenerated("clock_timestamp()")) @map("created_at") @db.Timestamptz(3)
+
+  company CanonicalCompany @relation(fields: [workspaceId, companyId], references: [workspaceId, id], onDelete: Cascade, onUpdate: NoAction, map: "discovery_v3_manufacturer_company_fkey")
+  run DiscoveryRun @relation(fields: [workspaceId, runId], references: [workspaceId, id], onDelete: Cascade, onUpdate: NoAction, map: "discovery_v3_manufacturer_run_fkey")
+  lookup DiscoveryV3Operation @relation("DiscoveryV3ManufacturerLookup", fields: [workspaceId, lookupOperationId], references: [workspaceId, id], onDelete: Cascade, onUpdate: NoAction, map: "discovery_v3_manufacturer_lookup_fkey")
+  fetch DiscoveryV3Operation @relation("DiscoveryV3ManufacturerFetch", fields: [workspaceId, fetchOperationId], references: [workspaceId, id], onDelete: Cascade, onUpdate: NoAction, map: "discovery_v3_manufacturer_fetch_fkey")
+  artifact GenericOperationArtifact @relation(fields: [artifactId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([workspaceId, companyId, runId])
+  @@index([workspaceId, runId], map: "discovery_v3_manufacturer_evidence_run_idx")
+  @@map("discovery_v3_manufacturer_evidence")
+}
+
+model DiscoveryV3CostRevision {
+  workspaceId  String   @map("workspace_id") @db.Uuid
+  operationId  String   @map("operation_id") @db.Uuid
+  digest       String   @db.VarChar(64)
+  createdAt    DateTime @map("created_at") @db.Timestamptz(3)
+  observation  Json
+  supersedes   String?  @db.VarChar(64)
+  operation    DiscoveryV3Operation @relation(fields: [workspaceId, operationId], references: [workspaceId, id], onDelete: Cascade, onUpdate: NoAction)
+  prior        DiscoveryV3CostRevision? @relation("DiscoveryV3CostHistory", fields: [workspaceId, operationId, supersedes], references: [workspaceId, operationId, digest], onDelete: NoAction, onUpdate: NoAction, map: "discovery_v3_cost_revision_workspace_id_operation_id_super_fkey")
+  corrections  DiscoveryV3CostRevision[] @relation("DiscoveryV3CostHistory")
+
+  @@id([workspaceId, operationId, digest])
+  @@map("discovery_v3_cost_revision")
+}
+
+model DiscoveryV3RawLink {
+  workspaceId      String @map("workspace_id") @db.Uuid
+  operationId      String @map("operation_id") @db.Uuid
+  rawRecordId      String @map("raw_record_id") @db.Uuid
+  queryOrdinal     Int    @map("query_ordinal")
+  recordIndex      Int    @map("record_index")
+  rawPayloadSha256 String @map("raw_payload_sha256") @db.VarChar(64)
+  operation        DiscoveryV3Operation @relation(fields: [workspaceId, operationId], references: [workspaceId, id], onDelete: Cascade, onUpdate: NoAction)
+  raw              RawSourceRecord @relation(fields: [workspaceId, rawRecordId], references: [workspaceId, id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([workspaceId, operationId, recordIndex])
+  @@index([workspaceId, rawRecordId])
+  @@map("discovery_v3_raw_link")
 }
 
 /// D-MA-7 记忆层 v0（episodic）：append-only 的 run 事件记忆。
@@ -2073,6 +2231,7 @@ model RawSourceRecord {
   sourceEntity           SourceEntity?                    @relation(fields: [sourceEntityId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   governanceDispositions RawSourceGovernanceDisposition[]
   queryAttemptItems      DiscoveryQueryAttemptItem[]
+  v3Links                DiscoveryV3RawLink[]
 
   @@unique([workspaceId, id], map: "raw_source_record_workspace_id_id_key")
   @@unique([workspaceId, sourceEntityId, ingestKey], map: "raw_source_record_workspace_source_entity_ingest_key")
@@ -2422,6 +2581,7 @@ model CanonicalCompany {
   manufacturerNetworkProbes ManufacturerNetworkProbe[]
 
   manufacturerNetworkEvidence ManufacturerNetworkEvidence[]
+  v3ManufacturerEvidence DiscoveryV3ManufacturerEvidence[]
 
   id            String   @id @default(uuid()) @db.Uuid
   workspaceId   String   @map("workspace_id") @db.Uuid
@@ -5017,8 +5177,20 @@ model WorkspacePurgeReceipt {
   completedAt                DateTime? @map("completed_at") @db.Timestamptz(3)
   createdAt                  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt                  DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  dbCheckpoint               WorkspacePurgeDbCheckpoint?
 
   @@map("workspace_purge_receipt")
+}
+
+/// Owner-only database purge result retained across Worker retries until storage erasure completes.
+model WorkspacePurgeDbCheckpoint {
+  receiptId              String @id @map("receipt_id") @db.Uuid
+  dbRowsDeleted          Json   @map("db_rows_deleted")
+  personalObjectsToErase Json   @map("personal_objects_to_erase")
+
+  receipt WorkspacePurgeReceipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+
+  @@map("workspace_purge_db_checkpoint")
 }
 
 /// 整工作空间物理清理事务围栏（owner_only）：仅在 purge_workspace_tenant_data_v1 事务内持有

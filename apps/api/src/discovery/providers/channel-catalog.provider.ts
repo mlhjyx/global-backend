@@ -10,6 +10,7 @@
  *  - 第二道：`data_provider.channel_catalog` 状态（seed 默认 ENABLED）。
  */
 import type { PrismaClient } from '@prisma/client';
+import { currentDiscoveryV3OperationScope } from '../discovery-v3-operation-scope';
 import {
   DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
   type DiscoveryCompanyResultLineageV1,
@@ -66,12 +67,13 @@ export class ChannelCatalogDiscoveryProvider implements CompanyDiscoveryAdapter 
       keywords: query.keywords,
       limit: query.limit,
     });
-    const records = await queryChannelCatalogRecords(prisma, input);
+    const v3 = currentDiscoveryV3OperationScope(ctx);
+    const records = await queryChannelCatalogRecords(prisma, input, Boolean(v3));
     const emptyOutcome: DiscoveryOutcome | undefined =
       records.length === 0
         ? { errorClass: 'EMPTY_RESULT', reasonCode: 'NO_ROWS' }
         : undefined;
-    if (!this.companyResultLineage) {
+    if (!this.companyResultLineage || v3) {
       return {
         records,
         costCents: 0,

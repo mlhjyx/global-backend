@@ -17,6 +17,7 @@ import {
   PAGE_URL,
 } from "../manufacturer-network.test-fixture";
 import { MANUFACTURER_NETWORK_REVISION } from "../manufacturer-network-execution";
+import { withDiscoveryV3OperationScope } from "../discovery-v3-operation-scope";
 import type { DurableExecutionReceipt } from "../../durable-results/durable-execution-receipt";
 const searchReceipt: DurableExecutionReceipt = {
   schemaVersion: "durable-execution-receipt/v1",
@@ -106,6 +107,34 @@ function harness(
   return { provider, invoke };
 }
 describe("manufacturer deterministic adapter", () => {
+  it("uses a discovery v3 artifact binding and the original source policy without a budget receipt", async () => {
+    const search = vi.fn(async () => ({ data: { results: [{ url: PAGE_URL }] }, costCents: 0 }));
+    const fetch = vi.fn(async () => ({
+      result: {
+        data: { url: PAGE_URL, text: TEXT, contentHash: "b".repeat(24) }, costCents: 0,
+        provenance: { sourceUrl: PAGE_URL, fetchedAt: NOW.toISOString(), artifactExpiresAt: "2026-11-21T09:59:59.000Z",
+          contentHash: "b".repeat(24), parserVersion: "artifact/crawl4ai-fetch/v1" },
+      },
+      artifact: { artifactId: ARTIFACT, operationId: FETCH, resultDigest: "a".repeat(64) },
+    }));
+    const native = new ManufacturerNetworkProvider({
+      discoveryV3Wire: { search, fetch },
+      loadConfiguration: async () => ({ status: "ENABLED", config: CONFIG, policies: [POLICY_ROW] }),
+      now: () => NOW,
+    } as never);
+    const run = () => native.enrichCompany(COMPANY_INPUT, {
+      workspaceId: WS, runId: ACCOUNT, manufacturerNetworkRevision: MANUFACTURER_NETWORK_REVISION,
+      artifactSubject: { subjectType: "company", subjectId: COMPANY }, authorizeExternalAction: async () => true,
+    });
+    await expect(withDiscoveryV3OperationScope({ command: { workspaceId: WS, runId: ACCOUNT,
+      manufacturerNetworkRevision: MANUFACTURER_NETWORK_REVISION } as never, step: `manufacturer/${COMPANY}`,
+      store: {} as never, signal: new AbortController().signal }, run)).resolves.toMatchObject({
+      matched: true, manufacturerEvidence: { artifactId: ARTIFACT, operationId: FETCH, resultDigest: "a".repeat(64), sourceUrl: PAGE_URL },
+    });
+    expect(search).toHaveBeenCalledOnce();
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
   it("uses existing tools once each without an AI task identity and keeps original capture", async () => {
     const h = harness();
     const result = await h.provider.enrichCompany(COMPANY_INPUT, ctx);

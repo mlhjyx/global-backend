@@ -26,7 +26,8 @@ import {
 } from "../execution-budget/legacy-execution-budget-mode";
 import type { RateLimitStore } from "./rate-limiter";
 import type { ArtifactExecutionPort } from "./artifact-execution-port";
-import { createGenericOperationArtifactExecutionFromEnv } from "../durable-results/artifact/generic-operation-artifact.runtime";
+import type { DiscoveryV3ArtifactExecutionPort } from "./discovery-v3-artifact-execution-port";
+import { createDiscoveryV3ArtifactExecutionFromEnv, createGenericOperationArtifactExecutionFromEnv } from "../durable-results/artifact/generic-operation-artifact.runtime";
 import {
   RedisRateLimitStore,
   UnavailableRateLimitStore,
@@ -133,6 +134,7 @@ export function buildToolBroker(deps?: {
   paidLedger?: SiteBuildCostLedger;
   /** Test/composition override; managed composition derives it from PrismaService + storage env. */
   artifactExecution?: ArtifactExecutionPort;
+  discoveryV3ArtifactExecution?: DiscoveryV3ArtifactExecutionPort;
   /** Trusted RLS step/config ports; absence never falls back to ungoverned enrichment. */
   contactEnrichment?: ContactEnrichmentSafetyToolDeps;
 }): ToolBroker {
@@ -194,5 +196,7 @@ export function buildToolBroker(deps?: {
     traceRecorder,
     paidLedger: deps?.paidLedger,
     artifactExecution,
+    discoveryV3ArtifactExecution: deps?.discoveryV3ArtifactExecution ??
+      (deps?.prisma ? createDiscoveryV3ArtifactExecutionFromEnv(deps.prisma) : undefined),
   });
 }

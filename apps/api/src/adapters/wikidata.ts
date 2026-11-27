@@ -40,6 +40,15 @@ export interface WikidataCompany {
   longitude?: number;
 }
 
+export interface WikidataIndustrySearch {
+  industryQids: string[];
+  countryQid?: string;
+  requireWebsite?: boolean;
+  limit?: number;
+}
+
+type WikidataNativeDispatch = (send: (signal: AbortSignal) => Promise<Response>) => Promise<Response>;
+
 interface SparqlBinding {
   [k: string]: { type: string; value: string } | undefined;
 }
@@ -53,12 +62,7 @@ interface SparqlBinding {
  * 先跑精确匹配（快路径，P452 直连索引）；零命中时回退 `?industry wdt:P279* ?root`
  * 子类闭包再查一次（P279* 零长路径覆盖自身，WDQS 上属性路径较贵，只做回退）。
  */
-export async function discoverCompaniesByIndustry(params: {
-  industryQids: string[];
-  countryQid?: string;
-  requireWebsite?: boolean;
-  limit?: number;
-},
+export async function discoverCompaniesByIndustry(params: WikidataIndustrySearch,
   beforeRequest?: () => Promise<void>,
 ): Promise<WikidataCompany[]> {
   const { industryQids, countryQid, requireWebsite = true, limit = 50 } = params;
@@ -75,6 +79,21 @@ export async function discoverCompaniesByIndustry(params: {
   );
 }
 
+export async function discoverCompaniesByIndustryNative(
+  params: WikidataIndustrySearch,
+  phase: 'exact' | 'subclass',
+  beforeRequest: (() => Promise<void>) | undefined,
+  dispatch: WikidataNativeDispatch,
+): Promise<WikidataCompany[]> {
+  const { industryQids, countryQid, requireWebsite = true, limit = 50 } = params;
+  if (!industryQids.length || industryQids.some((qid) => !/^Q[1-9][0-9]{0,16}$/.test(qid)) ||
+      (countryQid && !/^Q[1-9][0-9]{0,16}$/.test(countryQid))) {
+    throw new Error('WIKIDATA_NATIVE_QID_INVALID');
+  }
+  return queryCompaniesByIndustry({ industryQids, countryQid, requireWebsite, limit, subclassClosure: phase === 'subclass' },
+    beforeRequest, dispatch);
+}
+
 async function queryCompaniesByIndustry(
   args: {
     industryQids: string[];
@@ -85,6 +104,7 @@ async function queryCompaniesByIndustry(
     subclassClosure: boolean;
   },
   beforeRequest?: () => Promise<void>,
+  dispatch?: WikidataNativeDispatch,
 ): Promise<WikidataCompany[]> {
   const values = args.industryQids.map((q) => `wd:${q}`).join(' ');
   const websiteClause = args.requireWebsite ? '?company wdt:P856 ?website .' : 'OPTIONAL { ?company wdt:P856 ?website }';
@@ -111,7 +131,7 @@ SELECT ?company ?companyLabel ?website ?employees ?coord ?countryCode WHERE {
   SERVICE wikibase:label { bd:serviceParam wikibase:language "en,de,zh" }
 } LIMIT ${Math.min(args.limit, 200)}`;
 
-  const rows = await runSparql(query, 40_000, beforeRequest);
+  const rows = await runSparql(query, 40_000, beforeRequest, dispatch);
   return rows.map(bindingToCompany).filter((c): c is WikidataCompany => c !== null);
 }
 
@@ -120,15 +140,19 @@ export async function runSparql(
   query: string,
   timeoutMs = 40_000,
   beforeRequest?: () => Promise<void>,
+  dispatch?: WikidataNativeDispatch,
 ): Promise<SparqlBinding[]> {
+  if (dispatch && ENDPOINT !== 'https://query.wikidata.org/sparql') throw new Error('WIKIDATA_NATIVE_ENDPOINT_NOT_REGISTERED');
   await beforeRequest?.();
-  const res = await fetch(`${ENDPOINT}?query=${encodeURIComponent(query)}`, {
+  const request = (signal: AbortSignal) => fetch(`${ENDPOINT}?query=${encodeURIComponent(query)}`, {
     headers: {
       Accept: 'application/sparql-results+json',
       'User-Agent': USER_AGENT,
     },
-    signal: AbortSignal.timeout(timeoutMs),
+    signal,
+    ...(dispatch ? { redirect: 'error' } : {}),
   });
+  const res = dispatch ? await dispatch(request) : await request(AbortSignal.timeout(timeoutMs));
   try {
     if (!res.ok) throw new Error(`wikidata ${res.status}`);
     const bytes = await readFetchResponseBodyBounded(

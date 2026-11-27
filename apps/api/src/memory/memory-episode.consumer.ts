@@ -35,6 +35,7 @@ interface OutboxRow {
   producer: string;
   correlationId: string | null;
   causationId: string | null;
+  aggregateType: string;
   aggregateId: string;
   payload: unknown;
   occurredAt: Date;
@@ -173,6 +174,7 @@ export class MemoryEpisodeConsumer implements OnModuleInit, OnModuleDestroy {
         producer: true,
         correlationId: true,
         causationId: true,
+        aggregateType: true,
         aggregateId: true,
         payload: true,
         occurredAt: true,
@@ -210,7 +212,7 @@ export class MemoryEpisodeConsumer implements OnModuleInit, OnModuleDestroy {
     if (!UUID_RE.test(event.aggregateId)) {
       throw new Error('DiscoveryRunCompleted aggregateId is not a run UUID');
     }
-    const payload = parseRunCompletedPayload(event.payload);
+    const payload = parseRunCompletedPayload(event.payload, event);
     const provenance = buildProvenance(event);
     return this.prisma.withWorkspace(event.workspaceId, async (tx) => {
       const run = await tx.discoveryRun.findUnique({

@@ -8,7 +8,7 @@ import {
 import {
   invalidGenericOperationArtifact,
   type ArtifactMaterializer,
-  type GenericOperationArtifactManifest,
+  type ArtifactMaterializationManifest,
 } from "../artifact.types";
 export const CONTACT_EMAIL_FIND_HUNTER_SCHEMA =
   "contact-email-find-hunter/v1" as const;
@@ -38,7 +38,7 @@ export interface ContactEmailFindPayload {
 }
 export type BoundedFinderArtifactReader = (
   input: AsyncIterable<Uint8Array>,
-  manifest: GenericOperationArtifactManifest,
+  manifest: ArtifactMaterializationManifest,
 ) => Promise<string>;
 const MAX_BYTES = 16384;
 function invalid(): never {
@@ -180,7 +180,7 @@ export function decodeContactEmailFindBody(
 async function originalBoundedReader(
   resultSchema: ContactEmailFindSchema,
   input: AsyncIterable<Uint8Array>,
-  manifest: GenericOperationArtifactManifest,
+  manifest: ArtifactMaterializationManifest,
 ): Promise<string> {
   // Defer loading the existing Prisma-backed registry, never replace its manifest/size/hash/UTF8 validation.
   // This path remains subject to the real client/tooling prerequisite. Private crypto tests inject only a fake bounded-reader port.
@@ -202,14 +202,14 @@ export function createContactEmailFindMaterializer(
   const resultSchema = options.resultSchema ?? CONTACT_EMAIL_FIND_HUNTER_SCHEMA;
   const read =
     options.readBounded ??
-    ((input: AsyncIterable<Uint8Array>, manifest: GenericOperationArtifactManifest) =>
+    ((input: AsyncIterable<Uint8Array>, manifest: ArtifactMaterializationManifest) =>
       originalBoundedReader(resultSchema, input, manifest));
   const now = options.now ?? (() => new Date());
   return Object.freeze({
     resultSchema,
     async materialize(
       input: AsyncIterable<Uint8Array>,
-      manifest: GenericOperationArtifactManifest,
+      manifest: ArtifactMaterializationManifest,
       expectedFacts: unknown,
     ): Promise<ContactEmailFindPayload> {
       const current = now();

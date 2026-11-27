@@ -31,6 +31,7 @@ export interface SearchProviderDeps {
   fetchImpl?: typeof fetch;
   apiKey?: string;
   beforeRequest?: () => Promise<void>;
+  dispatchDiscoveryV3Wire?: (send: (signal: AbortSignal) => Promise<Response>) => Promise<Response>;
   sleep?: (ms: number) => Promise<void>;
   baseUrl?: string;
 }
@@ -117,23 +118,29 @@ async function postJson(args: {
   deps: SearchProviderDeps;
 }): Promise<Buffer> {
   const fetchImpl = args.deps.fetchImpl ?? fetch;
+  const request = (signal: AbortSignal) => fetchImpl(args.url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', ...args.headers },
+    body: JSON.stringify(args.body),
+    redirect: 'error',
+    signal,
+  });
+  if (args.deps.dispatchDiscoveryV3Wire) {
+    await args.deps.beforeRequest?.();
+    const response = await args.deps.dispatchDiscoveryV3Wire(request);
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => undefined);
+      throw statusError(args.prefix, response.status);
+    }
+    return readFetchResponseBodyBounded(response, MAX_SEARCH_RESPONSE_BYTES, `${args.prefix}_RESPONSE_TOO_LARGE`);
+  }
   const sleep = args.deps.sleep ?? sleepDefault;
   let lastError: unknown;
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
     await args.deps.beforeRequest?.();
     let response: Response;
     try {
-      response = await fetchImpl(args.url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          ...args.headers,
-        },
-        body: JSON.stringify(args.body),
-        redirect: 'error',
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-      });
+      response = await request(AbortSignal.timeout(REQUEST_TIMEOUT_MS));
     } catch (error) {
       lastError = error;
       if (attempt === MAX_RETRIES) {

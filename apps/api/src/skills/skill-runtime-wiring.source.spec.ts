@@ -58,10 +58,16 @@ describe("skill runtime worker wiring", () => {
     }
   });
 
-  it("keeps the managed worker and fast lane understanding/discovery wiring textually identical", () => {
-    for (const anchor of ["createUnderstandingActivities(", "createDiscoveryActivities("]) {
-      expect(call(lane, anchor), anchor).toBe(call(worker, anchor));
-    }
+  it("keeps the understanding and discovery skill wiring identical across workers", () => {
+    expect(call(lane, "createUnderstandingActivities(")).toBe(
+      call(worker, "createUnderstandingActivities("),
+    );
+    expect(call(lane, "createDiscoveryActivities(")).toBe(
+      call(worker, "createDiscoveryActivities(").replace(
+        " sweepDiscoveryV3Gateway: discoveryV3Gateway.sweep,",
+        "",
+      ),
+    );
   });
 
   it("routes every packaged callsite through its registered skill key", () => {

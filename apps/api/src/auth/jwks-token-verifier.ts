@@ -1,6 +1,7 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { createRemoteJWKSet, customFetch, jwtVerify, JWTPayload } from 'jose';
 import { TokenVerifier } from './token-verifier';
+import { DISCOVERY_V3_JWT_CLAIM, parseDiscoveryV3TaskClaim } from './discovery-v3-admission-contract';
 import { RequestContext } from './request-context';
 import { normalizeTokenRoles } from './scopes';
 import {
@@ -131,12 +132,15 @@ export class JwksTokenVerifier extends TokenVerifier {
 
   async verify(token: string): Promise<RequestContext> {
     let payload: JWTPayload;
+    let signingAlgorithm: string | undefined;
     try {
-      ({ payload } = await jwtVerify(token, this.jwks, {
+      const verified = await jwtVerify(token, this.jwks, {
         issuer: this.issuer,
         audience: this.audience,
         clockTolerance: this.clockSkewS, // exp/nbf 容忍
-      }));
+      });
+      payload = verified.payload;
+      signingAlgorithm = verified.protectedHeader.alg;
     } catch {
       throw new UnauthorizedException({
         error: { code: 'TOKEN_INVALID', message: 'token verification failed' },
@@ -144,11 +148,21 @@ export class JwksTokenVerifier extends TokenVerifier {
     }
 
     try {
-      return {
-        userId: normalizeSubjectClaim(payload.sub),
-        workspaceId: normalizeWorkspaceClaim(payload[this.wsClaim]),
-        roles: normalizeTokenRoles(payload[this.rolesClaim]),
-      };
+      const userId = normalizeSubjectClaim(payload.sub);
+      const workspaceId = normalizeWorkspaceClaim(payload[this.wsClaim]);
+      const roles = normalizeTokenRoles(payload[this.rolesClaim]);
+      const claim = payload[DISCOVERY_V3_JWT_CLAIM];
+      if (claim === undefined) return { userId, workspaceId, roles };
+      const binding = parseDiscoveryV3TaskClaim(claim);
+      if (signingAlgorithm !== 'RS256' || roles.length !== 1 ||
+          !binding.admissionMode ||
+          (roles[0] !== 'saas-admin' && roles[0] !== 'saas-member') ||
+          typeof payload.iat !== 'number' || typeof payload.exp !== 'number' ||
+          payload.exp <= payload.iat || payload.exp - payload.iat > 60 ||
+          binding.workspaceId !== workspaceId) {
+        throw new Error('invalid discovery task claim');
+      }
+      return { userId, workspaceId, roles, discoveryV3Task: binding };
     } catch {
       throw new UnauthorizedException({
         error: {

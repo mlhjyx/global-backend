@@ -10,6 +10,7 @@ import type { DurableResultStrategy } from "../durable-results/durable-result-st
 import type { TransientResultScope } from "./transient-result-scope";
 import type { DurableExecutionReceipt } from "../durable-results/durable-execution-receipt";
 import type { PaidCostContext } from "../model-gateway/paid-cost-context";
+import type { CheckDiscoveryV3Robots } from "../adapters/discovery-v3-robots";
 
 export type ToolCategory =
   | "search" // 元搜索（searxng）
@@ -99,6 +100,10 @@ export interface ToolContext {
     wireId: string,
     execute: () => Promise<T>,
   ) => Promise<T>;
+  /** Trusted native discovery Worker fence for an adapter's one transport send. */
+  dispatchDiscoveryV3Wire?: <T>(send: (signal: AbortSignal) => Promise<T>) => Promise<T>;
+  /** Internal native crawl fence for the separately receipted robots decision. */
+  checkDiscoveryV3Robots?: CheckDiscoveryV3Robots;
   /**
    * Optional platform-schedule send fence. Managed platform activities inject
    * this callback; ordinary workspace requests leave it absent. The broker
@@ -196,6 +201,8 @@ export interface ToolResult<T = unknown> {
   costCents: number; // 实际成本（settle 用）
   /** Exact canonical ledger amount; explicit malformed values must not fall back. */
   costMicrousd?: string;
+  /** Actual amount reported by a provider's response, separate from tariff estimates. */
+  providerCharge?: { readonly amountMicros: number; readonly currency: string; readonly evidenceSha256: string };
   provenance?: {
     sourceUrl?: string;
     fetchedAt: string;
@@ -283,6 +290,17 @@ export interface Tool<I = unknown, O = unknown> {
    * wire be retried, so declare it only with a test that proves the call.
    */
   physicalWireObservation?: "before_each_wire";
+  /** A registered, bounded transport that delegates its only physical send to the native fence. */
+  discoveryV3SingleWireTimeoutMs?: number;
+  /** A reviewed request arm of a mixed tool that returns organization data only. */
+  discoveryV3CompanyOnly?(input: I): boolean;
+  /** Native transport arm, when the legacy adapter implements its own retries. */
+  executeDiscoveryV3?(
+    input: I,
+    ctx: ToolContext & Required<Pick<ToolContext, 'dispatchDiscoveryV3Wire'>>,
+  ): Promise<ToolResult<O>>;
+  /** Reviewed public source with no monetary charge for a successful wire. */
+  discoveryV3ChargeFree?: true;
 }
 
 /** 从 input 里尽力提取一个域名（供 source_policy 闸门做合规检查；required 工具优先用 policyDomain）。 */

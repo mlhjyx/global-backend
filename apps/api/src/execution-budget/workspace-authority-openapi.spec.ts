@@ -3,12 +3,13 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { EXECUTION_BUDGET_GRANT_HEADER } from './execution-budget-grant.decorator';
 
+const discoveryExecutePath = '/api/v1/query-plans/{planId}/execute';
 const operations = [
   '/api/v1/companies',
   '/api/v1/companies/{companyId}/icps',
   '/api/v1/icps/{icpId}/query-plans',
   '/api/v1/icps/{icpId}/rejudge',
-  '/api/v1/query-plans/{planId}/execute',
+  discoveryExecutePath,
   '/api/v1/canonical-companies/{id}/discover-contacts',
   '/api/v1/canonical-companies/{id}/guess-emails',
   '/api/v1/contact-points/{pointId}/verify',
@@ -16,7 +17,7 @@ const operations = [
 ] as const;
 
 describe('workspace execution authority OpenAPI', () => {
-  it.each(operations)('%s requires the exact grant header and stable failures', (path) => {
+  it.each(operations)('%s documents the grant header and stable failures for its supported versions', (path) => {
     const document = JSON.parse(
       readFileSync(
         resolve(process.cwd(), '../../packages/contracts/openapi/openapi.json'),
@@ -31,6 +32,7 @@ describe('workspace execution authority OpenAPI', () => {
               in?: string;
               name?: string;
               required?: boolean;
+              description?: string;
               schema?: Record<string, unknown>;
             }>;
             responses?: Record<string, unknown>;
@@ -41,18 +43,16 @@ describe('workspace execution authority OpenAPI', () => {
     const operation = document.paths[path]?.post;
 
     expect(operation, `missing POST ${path}`).toBeDefined();
-    expect(
-      operation?.parameters?.filter(
-        (parameter) =>
-          parameter.in === 'header' &&
-          parameter.name?.toLowerCase() ===
-            EXECUTION_BUDGET_GRANT_HEADER.toLowerCase(),
-      ),
-    ).toEqual([
+    const grantHeaders = operation?.parameters?.filter(
+      (parameter) =>
+        parameter.in === 'header' &&
+        parameter.name?.toLowerCase() === EXECUTION_BUDGET_GRANT_HEADER.toLowerCase(),
+    );
+    expect(grantHeaders).toEqual([
       expect.objectContaining({
         name: EXECUTION_BUDGET_GRANT_HEADER,
         in: 'header',
-        required: true,
+        required: path !== discoveryExecutePath,
         schema: expect.objectContaining({
           type: 'string',
           minLength: 1,
@@ -60,6 +60,10 @@ describe('workspace execution authority OpenAPI', () => {
         }),
       }),
     ]);
+    if (path === discoveryExecutePath) {
+      expect(grantHeaders?.[0]?.description).toContain('legacy requests');
+      expect(grantHeaders?.[0]?.description).toContain('v3 uses the authenticated tenant identity');
+    }
     expect(Object.keys(operation?.responses ?? {})).toEqual(
       expect.arrayContaining(['402', '403', '409', '503']),
     );
@@ -85,10 +89,19 @@ describe('workspace execution authority OpenAPI', () => {
     ]) {
       expect(conflict).toContain(code);
     }
-    // The other grant-bound operations keep their own 409 text.
-    expect(
-      document.paths['/api/v1/query-plans/{planId}/execute']?.post?.responses?.['409']?.description,
-    ).toBe('EXECUTION_BUDGET_GRANT_REUSED, INVALID_STATE or RERUN_REQUIRES_ATTEMPT');
+    const executionConflict = document.paths[discoveryExecutePath]?.post?.responses?.['409']?.description ?? '';
+    for (const code of [
+      'EXECUTION_BUDGET_GRANT_REUSED',
+      'INVALID_STATE',
+      'RERUN_REQUIRES_ATTEMPT',
+      'DISCOVERY_ATTEMPT_REQUEST_CONFLICT',
+      'DISCOVERY_EXECUTION_IN_PROGRESS',
+      'DISCOVERY_LEGACY_EXECUTION_UNRESOLVED',
+      'DISCOVERY_LEGACY_ADMISSION_CLOSED',
+      'DISCOVERY_V3_DISPATCH_AUTHORIZATION_EXPIRED',
+    ]) {
+      expect(executionConflict).toContain(code);
+    }
 
     const rejudgeConflict =
       document.paths['/api/v1/icps/{icpId}/rejudge']?.post?.responses?.['409']?.description ?? '';

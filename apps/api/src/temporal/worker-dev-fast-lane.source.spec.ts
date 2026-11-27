@@ -169,15 +169,24 @@ describe("development fast-lane worker", () => {
       "new SanctionsScreeningService(",
       "new DiscoveryProviderRegistry({",
       "createUnderstandingActivities(",
-      "createDiscoveryActivities(",
       "createQualifyActivities(",
       "new SiteBuildCostLedger(",
       "createWorkspaceBudgetStore(",
     ]) {
       expect(call(lane, anchor), anchor).toBe(call(worker, anchor));
     }
-    // Discovery stages stop for the run's admission lease only where the reader is wired.
-    expect(call(worker, "createDiscoveryActivities(")).toContain(
+    // The managed watchdog owns the cross-workspace v3 sweep.
+    const managedDiscovery = call(worker, "createDiscoveryActivities(");
+    const managedSweep = " sweepDiscoveryV3Gateway: discoveryV3Gateway.sweep,";
+    expect(managedDiscovery).toContain(managedSweep);
+    expect(call(worker, "configureDiscoveryV3GatewayWorker(")).toBe(
+      "configureDiscoveryV3GatewayWorker(prisma, gateway)",
+    );
+    expect(lane).not.toMatch(/\b(?:configureDiscoveryV3GatewayWorker|sweepDiscoveryV3Gateway)\b/u);
+    expect(call(lane, "createDiscoveryActivities(")).toBe(
+      managedDiscovery.replace(managedSweep, ""),
+    );
+    expect(managedDiscovery).toContain(
       "runLease: prismaDiscoveryRunLeaseReader(prisma)",
     );
     // The managed worker now gets its single broker from the contact-enrichment composition.

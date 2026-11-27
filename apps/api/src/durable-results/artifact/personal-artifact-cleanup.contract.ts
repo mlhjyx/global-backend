@@ -16,9 +16,9 @@ export interface PersonalArtifactCleanupCommand {
   readonly commandId: string;
   readonly workspaceId: string;
   readonly deletionRequestId: string;
-  readonly artifactId: string;
+  readonly artifactId: string | null;
   readonly sha256: string;
-  readonly versionId: string;
+  readonly versionId: string | null;
   readonly objectScope: PersonalArtifactObjectScope;
   readonly tombstonedAt: string;
   readonly attempt: number;
@@ -76,16 +76,16 @@ export interface PersonalArtifactCleanupCommandRepository {
  * every version and delete marker the bucket holds for that key, without
  * relying on the database version ledger being complete: a reuse refresh can
  * create a version whose settlement never commits. The supplied versionId is
- * the command's ledger version and only shapes the receipt (DELETED when the
- * erasure found it, ABSENT when it was already gone). No object key, object
- * body, subject, or PII crosses this boundary.
+ * the command's ledger version and shapes the receipt. With an unresolved
+ * workspace promotion, the command supplies null and erasure sweeps only the
+ * versions already visible. The service holds the DSR pending after that sweep.
  */
 export interface PrivilegedPersonalArtifactCleanupPort {
   eraseFinalObject(
     input: Readonly<{
       workspaceId: string;
       sha256: string;
-      versionId: string;
+      versionId: string | null;
       objectScope: PersonalArtifactObjectScope;
     }>,
   ): Promise<"DELETED" | "ABSENT">;
@@ -179,16 +179,17 @@ function canonicalTimestamp(value: unknown): string | null {
 function parseCommand(value: unknown): PersonalArtifactCleanupCommand | null {
   const source = closedRecord(value, COMMAND_KEYS);
   const tombstonedAt = canonicalTimestamp(source?.tombstonedAt);
+  const promotion = source?.artifactId === null && source.objectScope === "workspace";
+  const exactVersion = typeof source?.versionId === "string" && VERSION_ID_PATTERN.test(source.versionId);
   if (
     !source ||
     source.schemaVersion !== PERSONAL_ARTIFACT_CLEANUP_COMMAND_SCHEMA ||
     !isCanonicalArtifactUuid(source.commandId) ||
     !isCanonicalArtifactUuid(source.workspaceId) ||
     !isCanonicalArtifactUuid(source.deletionRequestId) ||
-    !isCanonicalArtifactUuid(source.artifactId) ||
+    !(isCanonicalArtifactUuid(source.artifactId) || promotion) ||
     !isCanonicalArtifactSha256(source.sha256) ||
-    typeof source.versionId !== "string" ||
-    !VERSION_ID_PATTERN.test(source.versionId) ||
+    !(exactVersion || (promotion && source.versionId === null)) ||
     (source.objectScope !== "workspace" &&
       source.objectScope !== "legacy_global") ||
     tombstonedAt === null ||
@@ -203,9 +204,9 @@ function parseCommand(value: unknown): PersonalArtifactCleanupCommand | null {
     commandId: source.commandId,
     workspaceId: source.workspaceId,
     deletionRequestId: source.deletionRequestId,
-    artifactId: source.artifactId,
+    artifactId: source.artifactId as string | null,
     sha256: source.sha256,
-    versionId: source.versionId,
+    versionId: source.versionId as string | null,
     objectScope: source.objectScope,
     tombstonedAt,
     attempt: source.attempt,
@@ -374,6 +375,11 @@ export class PersonalArtifactCleanupService {
       );
       if (objectStatus !== "DELETED" && objectStatus !== "ABSENT") {
         throw new Error("invalid privileged cleanup result");
+      }
+      if (command.versionId === null) {
+        // A timed-out or interrupted promotion may still write to storage.
+        // Keep the command claimed so a later pass sweeps any arriving version.
+        return Object.freeze({ status: "HOLD", reason: "EXACT_OBJECT_VERSION_UNAVAILABLE" });
       }
       await this.commands.complete(command, objectStatus);
       return Object.freeze({

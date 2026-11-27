@@ -239,6 +239,26 @@
       "SELECT",
       "UPDATE"
     ],
+    "discovery_v3_artifact_promotion": [],
+    "discovery_v3_cost_revision": [
+      "INSERT",
+      "SELECT"
+    ],
+    "discovery_v3_gateway_probe": [
+      "INSERT",
+      "SELECT",
+      "UPDATE"
+    ],
+    "discovery_v3_manufacturer_evidence": [],
+    "discovery_v3_operation": [
+      "INSERT",
+      "SELECT",
+      "UPDATE"
+    ],
+    "discovery_v3_raw_link": [
+      "INSERT",
+      "SELECT"
+    ],
     "domain_review_task": [
       "DELETE",
       "INSERT",
@@ -793,6 +813,7 @@
       "SELECT",
       "UPDATE"
     ],
+    "workspace_purge_db_checkpoint": [],
     "workspace_purge_receipt": [
       "SELECT"
     ],

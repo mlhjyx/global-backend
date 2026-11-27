@@ -9,12 +9,18 @@
  * 使用政策（UA、限流）。
  */
 
+import { requestDiscoverySourceJson, type DiscoverySourceDispatch } from './discovery-v3-source-http';
+
+const PRIMARY_OVERPASS_ENDPOINT = 'https://overpass-api.de/api/interpreter';
+export const OSM_NATIVE_TIMEOUT_MS = 30_000;
+const OSM_NATIVE_LIMIT = 80;
+
 // 公共 Overpass 实例限流严格且易超载（504）——多实例 fallback。
 // 生产建议自托管 Overpass（OVERPASS_URL 覆盖）以获得稳定配额。
 const OVERPASS_ENDPOINTS = process.env.OVERPASS_URL
   ? [process.env.OVERPASS_URL]
   : [
-      'https://overpass-api.de/api/interpreter',
+      PRIMARY_OVERPASS_ENDPOINT,
       'https://overpass.kumi.systems/api/interpreter',
       'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
     ];
@@ -64,15 +70,56 @@ export async function discoverByArea(params: {
   return [...byId.values()].slice(0, limit);
 }
 
+/** One tag and the primary policy-covered endpoint per native operation. */
+export async function discoverByAreaNative(
+  params: Parameters<typeof discoverByArea>[0],
+  dispatch: DiscoverySourceDispatch,
+): Promise<OsmPlace[]> {
+  if (OVERPASS_ENDPOINTS[0] !== PRIMARY_OVERPASS_ENDPOINT) {
+    throw new Error('OSM_NATIVE_ENDPOINT_NOT_REGISTERED');
+  }
+  const { areaName, tagFilters, limit = OSM_NATIVE_LIMIT } = params;
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > OSM_NATIVE_LIMIT) {
+    throw new Error('OSM_NATIVE_LIMIT_INVALID');
+  }
+  const tag = tagFilters[0];
+  if (tagFilters.length !== 1 || !tag || !/^[a-z0-9:_-]{1,80}$/iu.test(tag.k) ||
+      (tag.v !== undefined && !isOverpassQueryTerm(tag.v, 120)) || !isOverpassQueryTerm(areaName, 160)) {
+    throw new Error('OSM_NATIVE_QUERY_INVALID');
+  }
+  const selector = tag.v ? `[${JSON.stringify(tag.k)}=${JSON.stringify(tag.v)}]` : `[${JSON.stringify(tag.k)}]`;
+  const query = buildOverpassQuery(JSON.stringify(areaName), selector, limit);
+  const json = await requestDiscoverySourceJson<{ elements?: OsmElement[]; remark?: unknown }>(PRIMARY_OVERPASS_ENDPOINT, {
+    source: 'OSM', method: 'POST', timeoutMs: OSM_NATIVE_TIMEOUT_MS,
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': USER_AGENT },
+    body: `data=${encodeURIComponent(query)}`,
+  }, dispatch);
+  if (json.remark || !Array.isArray(json.elements) || json.elements.length > limit) {
+    throw new Error('OSM_NATIVE_RESPONSE_INVALID');
+  }
+  return json.elements.map(elementToPlace).filter((place): place is OsmPlace => place !== null).map((place): OsmPlace => {
+    const craft = place.tags.craft;
+    return { ...place, tags: craft === 'metal_construction' || craft === 'blacksmith' ? { craft } : {} };
+  });
+}
+
+function isOverpassQueryTerm(value: string, maxLength: number): boolean {
+  return value.length <= maxLength && Boolean(value.trim()) && !/\p{Cc}/u.test(value);
+}
+
+function buildOverpassQuery(area: string, selector: string, limit: number): string {
+  return `[out:json][timeout:25];
+area["name"=${area}]->.a;
+nwr${selector}["name"](area.a);
+out center ${limit};`;
+}
+
 // Overpass 规范：POST 以 application/x-www-form-urlencoded 的 data= 参数传查询。
 async function queryOneTag(areaName: string, f: { k: string; v?: string }, limit: number,
   beforeRequest?: () => Promise<void>,
 ): Promise<OsmPlace[]> {
   const sel = f.v ? `["${f.k}"="${f.v}"]` : `["${f.k}"]`;
-  const query = `[out:json][timeout:25];
-area["name"="${areaName}"]->.a;
-nwr${sel}["name"](area.a);
-out center ${Math.min(limit, 200)};`;
+  const query = buildOverpassQuery(`"${areaName}"`, sel, Math.min(limit, 200));
   let lastErr: unknown;
   for (const endpoint of OVERPASS_ENDPOINTS) {
     await beforeRequest?.();

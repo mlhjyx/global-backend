@@ -28,6 +28,7 @@ import {
 } from "./guarded-http";
 import { EgressBlockedError } from "./url-guard";
 import { decodeHttpTextWithCharset } from "./bounded-fetch-response";
+import type { DiscoverySourceDispatch } from "./discovery-v3-source-http";
 
 /** 诚实 UA：不做指纹伪装（curl-impersonate 类方案在观察名单，另行决策）。 */
 export const HTTP_FIRST_UA =
@@ -45,7 +46,7 @@ export function httpFirstParserVersion(page: HttpFirstPage, exact: boolean): str
  */
 export const DEFAULT_HTTP_FIRST_CACHE_MAX_CHARS = 200_000;
 /** 单页 HTTP 抓取上限：15s / 3MB（与 http.get 产物上限一致）。 */
-const HTTP_FIRST_TIMEOUT_MS = 15_000;
+export const HTTP_FIRST_TIMEOUT_MS = 15_000;
 const HTTP_FIRST_MAX_BYTES = 3_000_000;
 const HTTP_FIRST_MAX_REDIRECTS = 5;
 
@@ -156,6 +157,7 @@ export interface HttpFirstOptions {
   hooks?: {
     authorizeExternalAction?: () => Promise<boolean>;
     beforePhysicalWire?: () => Promise<void>;
+    dispatchDiscoveryV3Wire?: DiscoverySourceDispatch;
   };
 }
 
@@ -209,12 +211,13 @@ function defaultFetchHtml(
         headers,
         timeoutMs: HTTP_FIRST_TIMEOUT_MS,
         maxBytes: HTTP_FIRST_MAX_BYTES,
-        maxRedirects: exactUrl ? 0 : HTTP_FIRST_MAX_REDIRECTS,
+        maxRedirects: exactUrl || hooks?.dispatchDiscoveryV3Wire ? 0 : HTTP_FIRST_MAX_REDIRECTS,
       },
       hooks
         ? {
             authorizeExternalAction: hooks.authorizeExternalAction,
             beforePhysicalWire: hooks.beforePhysicalWire,
+            ...(hooks.dispatchDiscoveryV3Wire ? { dispatchPhysicalWire: hooks.dispatchDiscoveryV3Wire } : {}),
           }
         : undefined,
     );
@@ -357,7 +360,7 @@ async function fetchHtmlSafely(
       options.fetchHtml ?? defaultFetchHtml(options.hooks, options.exactUrl);
     return await fetcher(url, sendValidators);
   } catch (error) {
-    if (isHttpFirstFatalError(error)) throw error;
+    if (options.hooks?.dispatchDiscoveryV3Wire || isHttpFirstFatalError(error)) throw error;
     return null;
   }
 }

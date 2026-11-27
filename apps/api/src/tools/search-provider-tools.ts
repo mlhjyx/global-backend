@@ -233,6 +233,7 @@ export function createSerperSearchTool(
         ? { healthy: true, detail: 'serper' }
         : { healthy: false, detail: 'SERPER_API_KEY not configured' },
     physicalWireObservation: 'before_each_wire',
+    discoveryV3SingleWireTimeoutMs: 20_000,
     execute: async (input, ctx) => {
       if (!input || typeof input !== 'object') {
         throw new Error('SERPER_SEARCH_INPUT_INVALID: input must be an object');
@@ -248,6 +249,7 @@ export function createSerperSearchTool(
         { query, num, gl: input.gl, hl: input.hl },
         {
           apiKey,
+          ...(ctx.dispatchDiscoveryV3Wire ? { dispatchDiscoveryV3Wire: ctx.dispatchDiscoveryV3Wire } : {}),
           beforeRequest: async () => {
             await assertToolExternalActionAuthorized(ctx);
             await ctx.beforePhysicalWire?.();

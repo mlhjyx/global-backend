@@ -8,6 +8,7 @@ import {
   assertToolExternalActionAuthorized,
   Tool,
   ToolContext,
+  type ToolResult,
 } from "./tool-contract";
 import { isDegradableWorkspaceCrawlTimeout } from "./crawl4ai-timeout-resilience";
 import { ToolRegistry } from "./tool-registry";
@@ -20,6 +21,8 @@ import {
   isPersonProfileUrl,
 } from "./durable-text";
 import {
+  SEARXNG_NATIVE_TIMEOUT_MS,
+  searxSearchPageNative,
   searxSearchPaged,
   SearxResult,
   SearxCategory,
@@ -28,18 +31,22 @@ import { recordSearxngCooldownError } from "../adapters/searxng-fallback";
 import { crawlUrl } from "../adapters/web-crawler";
 import {
   fetchPageHttpFirst,
+  HTTP_FIRST_TIMEOUT_MS,
   httpFirstParserVersion,
   isHttpFirstFatalError,
   RobotsRedirectBlockedError,
   type HttpFirstCachePort,
+  type HttpFirstPage,
 } from "../adapters/http-first-fetch";
 import { isAllowedByRobots } from "../adapters/robots";
+import { isAllowedByDiscoveryV3Robots } from "../adapters/discovery-v3-robots";
 import {
   discoverCompaniesByIndustry,
+  discoverCompaniesByIndustryNative,
   WikidataCompany,
 } from "../adapters/wikidata";
 import { EgressBlockedError, requestPublicHttp } from "../adapters/guarded-http";
-import { discoverByArea, OsmPlace } from "../adapters/openstreetmap";
+import { discoverByArea, discoverByAreaNative, OSM_NATIVE_TIMEOUT_MS, OsmPlace } from "../adapters/openstreetmap";
 import { resolvePublicIp } from "../adapters/net-guard";
 import { smtpRcptProbe, SENDER_DOMAIN } from "../adapters/smtp-probe";
 import {
@@ -138,6 +145,7 @@ export const searxngSearchTool: Tool<
     language?: string;
     timeRange?: "day" | "week" | "month" | "year";
     pages?: number;
+    page?: number;
   },
   SearxngSearchOutput
 > = {
@@ -180,6 +188,18 @@ export const searxngSearchTool: Tool<
       return { healthy: r.length >= 0 };
     } catch {
       return { healthy: false };
+    }
+  },
+  discoveryV3SingleWireTimeoutMs: SEARXNG_NATIVE_TIMEOUT_MS,
+  executeDiscoveryV3: async (input, ctx) => {
+    if (input.pages !== undefined && input.pages !== 1) throw new Error("SEARXNG_NATIVE_PAGE_REQUIRED");
+    await assertToolExternalActionAuthorized(ctx);
+    try {
+      const results = await searxSearchPageNative({ ...input, pageno: input.page }, ctx.workspaceId, ctx.dispatchDiscoveryV3Wire);
+      return { data: { results: durableSearxResults(results.filter((result) => publicOrigin(result.url))) }, costCents: 0 };
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("SEARXNG HTTP ")) recordSearxngCooldownError(error);
+      throw error;
     }
   },
   execute: async (input, ctx) => {
@@ -429,12 +449,36 @@ export interface Crawl4aiFetchToolDependencies {
   urlContentCache?: HttpFirstCachePort;
 }
 
+type Crawl4aiFetchInput = { url: string; maxChars?: number; exactHtml?: true; profileTextRevision?: "manufacturer-profile/v1" };
+type Crawl4aiFetchOutput = { url: string; text: string; contentHash: string };
+
+function httpFirstCrawlResult(input: Crawl4aiFetchInput, page: HttpFirstPage, cache: boolean): ToolResult<Crawl4aiFetchOutput> {
+  const maxChars = boundedCrawl4aiFetchChars(input.maxChars);
+  // A manufacturer view must remain complete: cropping may remove its revocation or another profile.
+  if (input.profileTextRevision && page.markdown.length > maxChars) {
+    return { data: { url: input.url, text: "", contentHash: "" }, costCents: 0 };
+  }
+  const text = page.markdown.slice(0, maxChars);
+  if (Buffer.byteLength(text, "utf8") > MAX_CRAWL4AI_FETCH_ARTIFACT_BYTES) {
+    throw new Error("CRAWL4AI_FETCH_RESULT_TOO_LARGE");
+  }
+  const contentHash = hash(text);
+  return {
+    data: { url: input.url, text, contentHash },
+    costCents: 0,
+    provenance: {
+      sourceUrl: input.url,
+      fetchedAt: new Date().toISOString(),
+      contentHash,
+      parserVersion: httpFirstParserVersion(page, input.exactHtml === true),
+      ...(cache ? { cache: page.fromCache ?? "miss" } : {}),
+    },
+  };
+}
+
 export function createCrawl4aiFetchTool(
   dependencies: Crawl4aiFetchToolDependencies = { crawlUrl, isAllowedByRobots },
-): Tool<
-  { url: string; maxChars?: number; exactHtml?: true; profileTextRevision?: "manufacturer-profile/v1" },
-  { url: string; text: string; contentHash: string }
-> {
+): Tool<Crawl4aiFetchInput, Crawl4aiFetchOutput> {
   return {
     id: "crawl4ai.fetch",
     version: "1.0.0",
@@ -492,6 +536,26 @@ export function createCrawl4aiFetchTool(
       };
     },
     healthCheck: async () => ({ healthy: true, detail: "crawl4ai" }),
+    discoveryV3SingleWireTimeoutMs: HTTP_FIRST_TIMEOUT_MS,
+    executeDiscoveryV3: async (input, ctx) => {
+      manufacturerProfileCaptureKey(input);
+      const empty = { data: { url: input.url, text: "", contentHash: "" }, costCents: 0, degraded: true };
+      if (!ctx.checkDiscoveryV3Robots) throw new Error("DISCOVERY_V3_ROBOTS_FENCE_UNAVAILABLE");
+      if (!await isAllowedByDiscoveryV3Robots(input.url, ctx.checkDiscoveryV3Robots)) return empty;
+      const page = await fetchPageHttpFirst(input.url, {
+        captureNavigation: captureCompanyContactNavigation,
+        exactUrl: input.exactHtml === true,
+        ...(input.profileTextRevision ? {
+          profileTextRevision: input.profileTextRevision,
+          captureProfileText: captureManufacturerProfileText,
+        } : {}),
+        hooks: {
+          authorizeExternalAction: ctx.authorizeExternalAction,
+          dispatchDiscoveryV3Wire: ctx.dispatchDiscoveryV3Wire,
+        },
+      });
+      return page ? httpFirstCrawlResult(input, page, false) : empty;
+    },
     execute: async (input, ctx) => {
       manufacturerProfileCaptureKey(input);
 
@@ -562,29 +626,7 @@ export function createCrawl4aiFetchTool(
             costCents: 0,
           };
         }
-        if (page) {
-          const maxChars = boundedCrawl4aiFetchChars(input.maxChars);
-          // A manufacturer view must remain complete: cropping may remove its
-          // revocation or another profile. Use the existing exact MISS result.
-          if (input.profileTextRevision && page.markdown.length > maxChars)
-            return { data: { url: input.url, text: "", contentHash: "" }, costCents: 0 };
-          const httpText = page.markdown.slice(0, maxChars);
-          if (Buffer.byteLength(httpText, "utf8") > MAX_CRAWL4AI_FETCH_ARTIFACT_BYTES) {
-            throw new Error("CRAWL4AI_FETCH_RESULT_TOO_LARGE");
-          }
-          const contentHash = hash(httpText);
-          return {
-            data: { url: input.url, text: httpText, contentHash },
-            costCents: 0,
-            provenance: {
-              sourceUrl: input.url,
-              fetchedAt: new Date().toISOString(),
-              contentHash,
-              parserVersion: httpFirstParserVersion(page, exact),
-              ...(cache ? { cache: page.fromCache ?? "miss" } : {}),
-            },
-          };
-        }
+        if (page) return httpFirstCrawlResult(input, page, Boolean(cache));
       }
       // Exact provenance must never fall back to the renderer (or a cached redirect).
       if (exact) return { data: { url: input.url, text: "", contentHash: "" }, costCents: 0 };
@@ -641,7 +683,7 @@ export const crawl4aiFetchTool = createCrawl4aiFetchTool();
 
 /** wikidata.sparql —— 结构化企业发现（免费 CC0，无需 source_policy）。 */
 export const wikidataTool: Tool<
-  { industryQids: string[]; countryQid?: string; limit?: number },
+  { industryQids: string[]; countryQid?: string; limit?: number; phase?: "exact" | "subclass" },
   { companies: WikidataCompany[] }
 > = {
   id: "wikidata.sparql",
@@ -672,15 +714,17 @@ export const wikidataTool: Tool<
     schema: CATALOG_RESULT_PROJECTION_SCHEMAS["wikidata.sparql"],
   },
   healthCheck: async () => ({ healthy: true, detail: "wdqs" }),
+  discoveryV3SingleWireTimeoutMs: 40_000,
+  discoveryV3ChargeFree: true,
   execute: async (input, ctx) => {
-    const companies = await discoverCompaniesByIndustry(
-      {
-        industryQids: input.industryQids,
-        countryQid: input.countryQid,
-        limit: input.limit ?? 50,
-      },
-      beforeExternalRequest(ctx),
-    );
+    const query = { industryQids: input.industryQids, countryQid: input.countryQid, limit: input.limit ?? 50 };
+    const beforeRequest = beforeExternalRequest(ctx);
+    if (ctx.dispatchDiscoveryV3Wire && input.phase !== "exact" && input.phase !== "subclass") {
+      throw new Error("WIKIDATA_NATIVE_PHASE_REQUIRED");
+    }
+    const companies = ctx.dispatchDiscoveryV3Wire && input.phase
+      ? await discoverCompaniesByIndustryNative(query, input.phase, beforeRequest, ctx.dispatchDiscoveryV3Wire)
+      : await discoverCompaniesByIndustry(query, beforeRequest);
     return {
       data: { companies },
       costCents: 0,
@@ -722,6 +766,20 @@ export const osmOverpassTool: Tool<
     schema: CATALOG_RESULT_PROJECTION_SCHEMAS["osm.overpass"],
   },
   healthCheck: async () => ({ healthy: true, detail: "overpass" }),
+  discoveryV3SingleWireTimeoutMs: OSM_NATIVE_TIMEOUT_MS,
+  executeDiscoveryV3: async (input, ctx) => {
+    await assertToolExternalActionAuthorized(ctx);
+    const places = await discoverByAreaNative(input, ctx.dispatchDiscoveryV3Wire);
+    return {
+      data: { places },
+      costCents: 0,
+      provenance: {
+        sourceUrl: "https://overpass-api.de/api/interpreter",
+        fetchedAt: new Date().toISOString(),
+        parserVersion: "osm/1",
+      },
+    };
+  },
   execute: async (input, ctx) => {
     const places = await discoverByArea(
       {

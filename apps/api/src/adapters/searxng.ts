@@ -6,6 +6,10 @@
  * 仅内网调用（limiter off，勿对外暴露）。
  */
 
+import { lookup } from 'node:dns/promises';
+import { requestDiscoverySourceJson, type DiscoverySourceDispatch } from './discovery-v3-source-http';
+import type { ResolvedAddress } from './net-guard';
+
 export type SearxCategory =
   | 'general'
   | 'news'
@@ -67,13 +71,7 @@ function baseUrl(): string {
   return process.env.SEARXNG_URL ?? 'http://localhost:8081';
 }
 
-/** 一次 SearXNG JSON 搜索。失败抛错（由调用方决定容错）。 */
-export async function searxSearch(
-  query: SearxQuery,
-  timeoutMs = 30_000,
-  workspaceId?: string,
-  semaphore: TenantConcurrencySemaphore = getSearxngTenantSemaphore(),
-): Promise<SearxResponse> {
+function searchParams(query: SearxQuery): URLSearchParams {
   const params = new URLSearchParams({ q: query.q, format: 'json' });
   if (query.categories?.length) params.set('categories', query.categories.join(','));
   if (query.engines?.length) params.set('engines', query.engines.join(','));
@@ -81,6 +79,17 @@ export async function searxSearch(
   if (query.timeRange) params.set('time_range', query.timeRange);
   if (query.pageno && query.pageno > 1) params.set('pageno', String(query.pageno));
   params.set('safesearch', String(query.safesearch ?? 0));
+  return params;
+}
+
+/** 一次 SearXNG JSON 搜索。失败抛错（由调用方决定容错）。 */
+export async function searxSearch(
+  query: SearxQuery,
+  timeoutMs = 30_000,
+  workspaceId?: string,
+  semaphore: TenantConcurrencySemaphore = getSearxngTenantSemaphore(),
+): Promise<SearxResponse> {
+  const params = searchParams(query);
 
   return semaphore.withTenantSlot(workspaceId, async () => {
     const res = await fetch(`${baseUrl()}/search?${params.toString()}`, {
@@ -99,6 +108,48 @@ export async function searxSearch(
       infoboxes: json.infoboxes ?? [],
       numberOfResults: json.numberOfResults ?? (json.results?.length ?? 0),
     };
+  });
+}
+
+export const SEARXNG_NATIVE_TIMEOUT_MS = 30_000;
+
+/** Fetch an explicit page through the fixed, operator-configured SearXNG service. */
+export async function searxSearchPageNative(
+  query: SearxQuery,
+  workspaceId: string,
+  dispatch: DiscoverySourceDispatch,
+): Promise<SearxResult[]> {
+  const page = query.pageno ?? 1;
+  if (!query.q.trim() || query.q.length > 1_000 || !Number.isSafeInteger(page) || page < 1 || page > 20) {
+    throw new Error('SEARXNG_NATIVE_QUERY_INVALID');
+  }
+  const endpoint = new URL(baseUrl());
+  if ((endpoint.protocol !== 'http:' && endpoint.protocol !== 'https:') || endpoint.username || endpoint.password ||
+      endpoint.search || endpoint.hash || endpoint.hostname.startsWith('[')) {
+    throw new Error('SEARXNG_NATIVE_ENDPOINT_INVALID');
+  }
+  endpoint.pathname = `${endpoint.pathname.replace(/\/$/u, '')}/search`;
+  endpoint.search = searchParams(query).toString();
+  return getSearxngTenantSemaphore().withTenantSlot(workspaceId, async () => {
+    const json = await requestDiscoverySourceJson<Partial<SearxResponse>>(endpoint, {
+      source: 'SEARXNG', timeoutMs: SEARXNG_NATIVE_TIMEOUT_MS, headers: { Accept: 'application/json' },
+    }, dispatch, async (url) => {
+      // The private endpoint is deployment configuration. Query input contributes only URL parameters.
+      if (url !== endpoint.href) throw new Error('SEARXNG_NATIVE_ENDPOINT_INVALID');
+      const resolved = await lookup(endpoint.hostname, { all: true, verbatim: true });
+      const addresses = resolved.flatMap<ResolvedAddress>(({ address, family }) => family === 4 || family === 6
+        ? [{ address, family }] : []);
+      const pin = addresses[0];
+      if (!pin) throw new Error('SEARXNG_NATIVE_ENDPOINT_UNRESOLVED');
+      return { url: endpoint, addresses, ip: pin.address, family: pin.family };
+    });
+    if (!Array.isArray(json.results)) throw new Error('SEARXNG_NATIVE_RESPONSE_INVALID');
+    const seen = new Set<string>();
+    return json.results.filter((result) => {
+      if (typeof result?.url !== 'string' || seen.has(result.url)) return false;
+      seen.add(result.url);
+      return true;
+    });
   });
 }
 

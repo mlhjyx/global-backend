@@ -46,6 +46,11 @@ describe("http.get artifact text boundary", () => {
 
     expect(result.data.text).toHaveLength(1_000_000);
     expect(Buffer.byteLength(result.data.text, "utf8")).toBe(3_000_000);
+    expect(result.provenance).toEqual({
+      sourceUrl: "https://public.example/result",
+      fetchedAt: expect.any(String),
+      parserVersion: "http-get/v1",
+    });
   });
 
   it("rejects a raw maximum-size response that is not strict UTF-8", async () => {

@@ -10,7 +10,7 @@ import {
 import {
   invalidGenericOperationArtifact,
   type ArtifactMaterializer,
-  type GenericOperationArtifactManifest,
+  type ArtifactMaterializationManifest,
 } from '../artifact.types';
 
 const MAX_HTTP_GET_ARTIFACT_BYTES = 3_000_000;
@@ -29,7 +29,7 @@ export const httpGetMaterializer: ArtifactMaterializer<HttpGetOutput> =
     resultSchema: 'http-get/v1',
     async materialize(
       input: AsyncIterable<Uint8Array>,
-      manifest: GenericOperationArtifactManifest,
+      manifest: ArtifactMaterializationManifest,
       expectedFacts: unknown,
     ): Promise<HttpGetOutput> {
       const facts = parseArtifactExpectedFacts(

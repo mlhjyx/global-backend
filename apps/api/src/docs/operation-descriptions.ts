@@ -173,8 +173,10 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
     '人工确认查询计划：DRAFT → READY，确认后才能执行发现。需要 acquisition:review。',
 
   // ── Discovery ─────────────────────────────────────────────────────────────
+  'GET /api/v1/query-plans/{planId}/execution-context':
+    '只读查询当前租户内的计划 ID、所属 ICP 和计划状态。SaaS 在写入寻源受理意图前以此核对任务和计划的归属。',
   'POST /api/v1/query-plans/{planId}/execute':
-    '执行一个查询计划：READY 首跑；EXECUTED 计划携带新 attemptId 即重跑（新请求哈希/新预算 Grant，同一 attempt 重放报 EXECUTION_BUDGET_GRANT_REUSED，缺 attemptId 报 RERUN_REQUIRES_ATTEMPT）。多源发现 → Raw → Canonical，由 Temporal 异步编排，返回 202 与 runId。',
+    '异步受理寻源，返回 202 与 runId。READY 计划可以首跑，重跑使用新的 attemptId。v3 依据已认证的租户和调用者受理，同一 attemptId 与同一请求摘要返回原运行，admissionReadOnly 可用来恢复已受理的尝试。旧合同要求执行预算 Grant，并按旧合同核对 Grant 重放。',
   'POST /api/v1/discovery-runs/{runId}/cancel':
     '停止深挖：向 Temporal 发取消请求。已完成公司的结果保留，未完成公司标 skipped（下一次 run 会重新排队），run 以 CANCELLED 收尾。已结束的 run 幂等返回当前状态。',
   'GET /api/v1/icps/{icpId}/feedback':

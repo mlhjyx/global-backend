@@ -76,6 +76,9 @@ import { centsToMicrousd, usdToMicrousdCeil } from "../tools/microusd";
 import { microusdFromTokens } from "./model-token-cost";
 import { buildStructuredRepairPrompt } from "./repair-prompt";
 import { withOptionalSignal, withTaskTimeoutSignal } from "./task-timeout";
+import { currentDiscoveryV3OperationScope } from "../durable-results/discovery-v3-operation-scope";
+import { executeDiscoveryV3ModelCall } from "./discovery-v3-model";
+import type { DiscoveryV3GatewayReadbackRuntime } from "./discovery-v3-gateway-readback";
 import { assertCandidatePhysicalExecutionAllowed } from "../runtime/development-candidate";
 function providerReportedMicrousd(usage?: ModelUsage): bigint | null {
   const costUsd = usage?.costUsd;
@@ -272,6 +275,7 @@ export class RouterModelGateway extends ModelGateway {
   /** Strict startup snapshots required by every new paid physical wire. */
   settlementDerivationKeyring?: SettlementDerivationKeyring;
   settlementReadbackResolver?: NewApiRequestBoundSettlementResolverPort;
+  discoveryV3SettlementReadback?: DiscoveryV3GatewayReadbackRuntime;
   legacyBudgetMode?: LegacyExecutionBudgetMode;
   maxBypassModelCallsPerAccount?: number;
   dailyCostBreaker?: TenantDailyCostBreaker;
@@ -739,8 +743,17 @@ export class RouterModelGateway extends ModelGateway {
       op,
       input.model,
     );
-    await assertTenantDailyCostAllowed(this.dailyCostBreaker, ctx, input.task);
+    const discovery = currentDiscoveryV3OperationScope(ctx);
+    if (!discovery) await assertTenantDailyCostAllowed(this.dailyCostBreaker, ctx, input.task);
     const registeredTask = (await import("../ai-tasks/task-registry")).getTask(input.task);
+    if (discovery) {
+      return executeDiscoveryV3ModelCall({
+        scope: discovery, context: ctx, task: input.task, signal: input.signal,
+        provider: chain[0]!, registeredTask, call, dailyCostBreaker: this.dailyCostBreaker,
+        settlementReadback: this.discoveryV3SettlementReadback,
+        authorizeExternalAction: () => this.assertExternalActionAuthorized(ctx),
+      });
+    }
     const bypassBudget = isWorkspaceModelBudgetBypass(ctx, this.legacyBudgetMode);
     const taskSignal = withTaskTimeoutSignal(input.signal, resolveModelTaskTimeoutMs(registeredTask?.timeoutMs, bypassBudget));
     const baseCents = input.maxCostCents ?? registeredTask?.maxCostCents ?? DEFAULT_LLM_EST_CENTS;

@@ -337,6 +337,12 @@
       "expiresAt": "2027-01-31",
       "reason": "无 workspace_id、RLS 开且有策略（非 workspace 键的租户表）"
     },
+    "workspace_purge_db_checkpoint": {
+      "class": "owner_only",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "工作区删除的精确对象版本仅供受控删除 RPC 在存储擦除前恢复"
+    },
     "workspace_purge_tx_fence": {
       "class": "owner_only",
       "owner": "backend-platform",

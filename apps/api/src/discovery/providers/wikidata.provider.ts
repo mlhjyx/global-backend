@@ -10,6 +10,7 @@ import {
 } from '../provider-contract';
 import type { WikidataCompany } from '../../adapters/wikidata';
 import type { ExecutionBroker } from '../../tools/tool-contract';
+import { currentDiscoveryV3OperationScope } from '../discovery-v3-operation-scope';
 import { ToolDurableResultProjectionError } from '../../tools/tool-broker';
 import { mapIndustryToQids, mapCountryToQid } from '../vocab';
 import {
@@ -110,17 +111,26 @@ export class WikidataDiscoveryProvider implements CompanyDiscoveryAdapter {
       parentOnDurableReceipt: ctx.onDurableReceipt,
     });
     collector.markExpectedInvocation();
+    const native = currentDiscoveryV3OperationScope(ctx);
+    const invoke = (phase?: 'exact' | 'subclass') => this.deps!.broker!.invoke<
+      { industryQids: string[]; countryQid?: string; limit?: number; phase?: 'exact' | 'subclass' },
+      { companies: WikidataCompany[] }
+    >(
+      'wikidata.sparql',
+      { industryQids: gate.accepted, countryQid, limit: Math.min(query.limit, 60), ...(phase ? { phase } : {}) },
+      { ...ctx, onDurableReceipt: native ? undefined : collector.onDurableReceipt, purpose: 'discovery' },
+    );
+    if (native) {
+      const first = await invoke('exact');
+      const result = first.data.companies.length > 0 ? first : await invoke('subclass');
+      const fetchedAt = result.provenance?.fetchedAt;
+      if (!fetchedAt) throw new Error('DISCOVERY_V3_WIKIDATA_PROVENANCE_MISSING');
+      return { records: result.data.companies.map((company) =>
+        mapWikidataCompanyToRecord({ company, sourceClass: query.sourceClass, fetchedAt })), costCents: 0 };
+    }
     let companies: WikidataCompany[];
     try {
-      const res = await this.deps.broker.invoke<
-        { industryQids: string[]; countryQid?: string; limit?: number },
-        { companies: WikidataCompany[] }
-      >(
-        'wikidata.sparql',
-        { industryQids: gate.accepted, countryQid, limit: Math.min(query.limit, 60) },
-        // #51：传本次调用用途，用途门按 discovery 判（否则退回"声明集任一交集"会绕过域策略仅允许 enrichment 的限制）
-        { ...ctx, onDurableReceipt: collector.onDurableReceipt, purpose: 'discovery' },
-      );
+      const res = await invoke();
       companies = res.data.companies ?? [];
     } catch (err) {
       if (collector.isForwardingFailure(err) || isDiscoveryCompanyLineageInvalid(err)) {

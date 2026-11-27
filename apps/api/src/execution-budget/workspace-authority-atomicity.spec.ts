@@ -15,6 +15,7 @@ vi.mock('../adapters/url-guard', () => ({
 
 const WORKSPACE_ID = '10000000-0000-4000-8000-000000000001';
 const AUTHORITY_ID = '20000000-0000-4000-8000-000000000002';
+const PLAN_ID = '50000000-0000-4000-8000-000000000005';
 const CTX = {
   workspaceId: WORKSPACE_ID,
   userId: '30000000-0000-4000-8000-000000000003',
@@ -51,10 +52,25 @@ describe('workspace authority transaction and replay semantics', () => {
   it('commits execute authority/account, preallocated run and outbox in one workspace transaction', async () => {
     const order: string[] = [];
     const transaction = {
+      $queryRaw: vi.fn()
+        .mockImplementationOnce(async (sql: TemplateStringsArray, planId: string, workspaceId: string) => {
+          expect(sql.join(' ')).toContain('FOR UPDATE');
+          expect(planId).toBe(PLAN_ID);
+          expect(workspaceId).toBe(WORKSPACE_ID);
+          order.push('lock-plan');
+          return [{ id: PLAN_ID }];
+        })
+        .mockImplementationOnce(async (sql: TemplateStringsArray, planId: string, workspaceId: string) => {
+          expect(sql.join(' ')).toContain('execution_contract_version=3');
+          expect(planId).toBe(PLAN_ID);
+          expect(workspaceId).toBe(WORKSPACE_ID);
+          order.push('check-v3-fence');
+          return [{ fenced: false }];
+        }),
       discoveryQueryPlan: {
         findUnique: vi.fn(async () => {
           order.push('plan');
-          return { id: 'plan-1', status: 'READY', icpId: 'icp-1' };
+          return { id: PLAN_ID, status: 'READY', icpId: 'icp-1' };
         }),
       },
       discoveryRun: {
@@ -105,10 +121,10 @@ describe('workspace authority transaction and replay semantics', () => {
       authority as never,
     );
 
-    const result = await service.executePlan(CTX, 'plan-1', 'grant');
+    const result = await service.executePlan(CTX, PLAN_ID, 'grant');
 
     expect(result).toMatchObject({ status: 'QUEUED' });
-    expect(order).toEqual(['verify', 'transaction', 'consume', 'plan', 'run', 'outbox']);
+    expect(order).toEqual(['verify', 'transaction', 'lock-plan', 'check-v3-fence', 'consume', 'plan', 'run', 'outbox']);
     expect(transaction.discoveryRun.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         id: expect.stringMatching(/^[0-9a-f-]{36}$/),

@@ -14,9 +14,10 @@ import type {
   EnrichmentResult,
   ExecutionContext,
 } from "../provider-contract";
-import type { ExecutionBroker, ToolResult } from "../../tools/tool-contract";
+import type { ExecutionBroker, ToolContext, ToolResult } from "../../tools/tool-contract";
 import { parseDurableExecutionReceipt } from "../../durable-results/durable-execution-receipt";
 import { ExecutionControlError } from "../../execution-budget/execution-control-error";
+import { currentDiscoveryV3OperationScope } from "../discovery-v3-operation-scope";
 import {
   isManufacturerNetworkRevision,
   MANUFACTURER_NETWORK_PROFILE_REVISION,
@@ -40,6 +41,18 @@ export interface ManufacturerSourceConfiguration {
   config: unknown;
   policies: ManufacturerSourcePolicy[];
 }
+
+type LookupRequest = { q: string; pages: number };
+type LookupResult = ToolResult<{ results: Array<{ url: string }> }>;
+type FetchRequest = { url: string; maxChars: number; exactHtml: true; profileTextRevision?: "manufacturer-profile/v1" };
+type PageResult = ToolResult<{ url: string; text: string; contentHash: string }>;
+type EvidenceArtifact = Pick<ManufacturerNetworkEvidence, "artifactId" | "operationId" | "resultDigest">;
+
+export interface ManufacturerNetworkWire {
+  search(input: LookupRequest, context: ToolContext): Promise<LookupResult>;
+  fetch(input: FetchRequest, context: ToolContext): Promise<{ result: PageResult; artifact: EvidenceArtifact } | undefined>;
+}
+
 const miss = (): EnrichmentResult => ({
   matched: false,
   attributes: {},
@@ -52,6 +65,7 @@ export class ManufacturerNetworkProvider implements CompanyEnrichmentAdapter {
   constructor(
     private readonly deps: {
       broker?: ExecutionBroker;
+      discoveryV3Wire?: ManufacturerNetworkWire;
       readIdentityAliases?: (
         subject: ManufacturerIdentitySubject,
         references: readonly ManufacturerIdentityEvidenceRef[],
@@ -73,15 +87,23 @@ export class ManufacturerNetworkProvider implements CompanyEnrichmentAdapter {
   ): Promise<EnrichmentResult> {
     if (
       !isManufacturerNetworkRevision(ctx.manufacturerNetworkRevision) ||
-      !this.deps.broker ||
       !this.deps.loadConfiguration ||
-      !this.deps.readArtifactSubject ||
-      !ctx.admitManufacturerProbe ||
       ctx.artifactSubject?.subjectType !== "company" ||
       !input.domain ||
       input.country !== "DE"
     )
       return miss();
+    const native = this.deps.discoveryV3Wire;
+    if (native) {
+      const scope = currentDiscoveryV3OperationScope(ctx);
+      if (!scope || scope.command.manufacturerNetworkRevision !== ctx.manufacturerNetworkRevision ||
+        scope.step !== `manufacturer/${ctx.artifactSubject.subjectId}` || !ctx.authorizeExternalAction ||
+        ctx.durableBudgetAuthority || ctx.admitManufacturerProbe) {
+        throw new ExecutionControlError("DURABLE_EXECUTION_RECEIPT_SCOPE_MISMATCH");
+      }
+    }
+    const wire = native ?? this.legacyWire(ctx, ctx.artifactSubject.subjectId);
+    if (!wire) return miss();
     const now = this.deps.now?.() ?? new Date();
     const setup = await this.deps.loadConfiguration();
     const config =
@@ -102,28 +124,19 @@ export class ManufacturerNetworkProvider implements CompanyEnrichmentAdapter {
     if (!sources.length) return miss();
     // One query for this company across the reviewed publishers; never retry/fan out.
     const query = `"${input.name.replace(/["\\]/gu, " ")}" "${input.domain}" (${sources.map((s) => `site:${s.domain}`).join(" OR ")}) distributor Germany`;
-    const searchInput = { q: query, pages: 1 };
-    if (
-      !(await ctx.admitManufacturerProbe(
-        "lookup",
-        paidOperationKey([
-          ctx.runId ?? ctx.workspaceId,
-          "tool-budget",
-          searxngSearchTool.id,
-          searxngSearchTool.version,
-          searxngSearchTool.idempotencyKey(searchInput),
-        ]),
-      ))
-    )
-      throw new ExecutionControlError(
-        "DURABLE_EXECUTION_RECEIPT_SCOPE_MISMATCH",
-      );
-    const toolCtx = { ...ctx, purpose: "enrichment" };
-    const found = await this.deps.broker.invoke<
-      { q: string; pages: number },
-      { results: Array<{ url: string }> }
-    >("searxng.search", { q: query, pages: 1 }, toolCtx);
-    requireReceipt(found, "searxng-search/v1", "typed_projection", ctx);
+    const toolCtx: ToolContext = { ...ctx, purpose: "enrichment" };
+    const lookupCtx = native ? { ...toolCtx, authorizeExternalAction: async () => {
+      if (!await ctx.authorizeExternalAction!()) return false;
+      const fresh = await this.deps.loadConfiguration!();
+      const configuration = fresh?.status === 'ENABLED' ? readManufacturerNetworkSources(fresh.config) : undefined;
+      const checkedAt = this.deps.now?.() ?? new Date();
+      return Boolean(configuration && sources.every((original) => {
+        const current = configuration.sources.find((source) => source.publisherId === original.publisherId);
+        return current && current.domain === original.domain && current.reviewRef === original.reviewRef &&
+          currentManufacturerReview(current, checkedAt) && manufacturerIndependence(configuration, current, subject, checkedAt);
+      }));
+    } } : toolCtx;
+    const found = await wire.search({ q: query, pages: 1 }, lookupCtx);
     const candidates = found.data.results.flatMap((r) => {
       const governed = manufacturerSourceForUrl(
         r.url,
@@ -135,7 +148,7 @@ export class ManufacturerNetworkProvider implements CompanyEnrichmentAdapter {
     });
     const candidate = candidates[0];
     if (!candidate) return miss();
-    const fetchInput = {
+    const fetchInput: FetchRequest = {
       url: candidate.url,
       maxChars: 60000,
       exactHtml: true as const,
@@ -144,30 +157,7 @@ export class ManufacturerNetworkProvider implements CompanyEnrichmentAdapter {
         ? { profileTextRevision: "manufacturer-profile/v1" as const }
         : {}),
     };
-    if (
-      !(await ctx.admitManufacturerProbe(
-        "fetch",
-        paidOperationKey([
-          ctx.runId ?? ctx.workspaceId,
-          "tool-budget",
-          crawl4aiFetchTool.id,
-          crawl4aiFetchTool.version,
-          crawl4aiFetchTool.idempotencyKey(fetchInput),
-        ]),
-      ))
-    )
-      throw new ExecutionControlError(
-        "DURABLE_EXECUTION_RECEIPT_SCOPE_MISMATCH",
-      );
-    const page = await this.deps.broker.invoke<
-      {
-        url: string;
-        maxChars: number;
-        exactHtml: true;
-        profileTextRevision?: "manufacturer-profile/v1";
-      },
-      { url: string; text: string; contentHash: string }
-    >("crawl4ai.fetch", fetchInput, {
+    const fetched = await wire.fetch(fetchInput, {
       ...toolCtx,
       authorizeExternalAction: async () => {
         if (
@@ -201,22 +191,8 @@ export class ManufacturerNetworkProvider implements CompanyEnrichmentAdapter {
         );
       },
     });
-    const receipt = requireReceipt(
-      page,
-      "crawl4ai-fetch/v1",
-      "artifact_reference",
-      ctx,
-    );
-    if (
-      !(await this.deps.readArtifactSubject(
-        ctx.workspaceId,
-        ctx.artifactSubject.subjectId,
-        receipt.artifactId!,
-      ))
-    )
-      throw new ExecutionControlError(
-        "DURABLE_EXECUTION_RECEIPT_SCOPE_MISMATCH",
-      );
+    if (!fetched) return miss();
+    const { result: page, artifact } = fetched;
     if (
       page.data.url !== candidate.url ||
       page.provenance?.sourceUrl !== candidate.url ||
@@ -233,9 +209,39 @@ export class ManufacturerNetworkProvider implements CompanyEnrichmentAdapter {
       subject,
       candidate,
       page,
-      receipt,
+      artifact,
       found,
     );
+  }
+
+  private legacyWire(ctx: ExecutionContext, companyId: string): ManufacturerNetworkWire | undefined {
+    const { broker, readArtifactSubject } = this.deps;
+    const admit = ctx.admitManufacturerProbe;
+    if (!broker || !readArtifactSubject || !admit) return undefined;
+    const authorize = async (phase: 'lookup' | 'fetch', toolId: string, toolVersion: string, requestKey: string) => {
+      if (!await admit(phase, paidOperationKey([ctx.runId ?? ctx.workspaceId, 'tool-budget', toolId, toolVersion, requestKey]))) {
+        throw new ExecutionControlError('DURABLE_EXECUTION_RECEIPT_SCOPE_MISMATCH');
+      }
+    };
+    return {
+      search: async (input, context) => {
+        const tool = searxngSearchTool;
+        await authorize('lookup', tool.id, tool.version, tool.idempotencyKey(input));
+        const result = await broker.invoke<LookupRequest, LookupResult['data']>('searxng.search', input, context);
+        requireReceipt(result, 'searxng-search/v1', 'typed_projection', ctx);
+        return result;
+      },
+      fetch: async (input, context) => {
+        const tool = crawl4aiFetchTool;
+        await authorize('fetch', tool.id, tool.version, tool.idempotencyKey(input));
+        const result = await broker.invoke<FetchRequest, PageResult['data']>('crawl4ai.fetch', input, context);
+        const { artifactId, operationId, resultDigest } = requireReceipt(result, 'crawl4ai-fetch/v1', 'artifact_reference', ctx);
+        if (!artifactId || !await readArtifactSubject(ctx.workspaceId, companyId, artifactId)) {
+          throw new ExecutionControlError('DURABLE_EXECUTION_RECEIPT_SCOPE_MISMATCH');
+        }
+        return { result, artifact: { artifactId, operationId, resultDigest } };
+      },
+    };
   }
 
   /** Post-wire governance and deterministic projection, after receipt/Subject/URL validation. */
@@ -244,9 +250,9 @@ export class ManufacturerNetworkProvider implements CompanyEnrichmentAdapter {
     ctx: ExecutionContext,
     subject: Omit<ManufacturerIdentitySubject, "country">,
     candidate: { url: string; source: ManufacturerNetworkSource },
-    page: ToolResult<{ url: string; text: string; contentHash: string }>,
-    receipt: ReturnType<typeof requireReceipt>,
-    found: ToolResult<{ results: Array<{ url: string }> }>,
+    page: PageResult,
+    artifact: EvidenceArtifact,
+    found: LookupResult,
   ): Promise<EnrichmentResult> {
     const now = this.deps.now?.() ?? new Date();
     const fetchedAt = page.provenance!.fetchedAt;
@@ -356,9 +362,7 @@ export class ManufacturerNetworkProvider implements CompanyEnrichmentAdapter {
       expiresAt,
       relationship: "authorized_distributor",
       spans: detail.spans,
-      artifactId: receipt.artifactId!,
-      operationId: receipt.operationId,
-      resultDigest: receipt.resultDigest,
+      ...artifact,
       contentHash: page.data.contentHash,
       sourcePolicyId: governed.policy.id,
       licenseLabel: governed.source.licenseLabel,

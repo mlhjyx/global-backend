@@ -97,8 +97,8 @@ function holdNotReady(code: string): Promise<never> {
  *   site-builder, browser, renderer or erasure dependency is needed;
  * - takes migration revision and schema digest from its source tree, and
  *   requires the schema digest to equal the managed image's.
- * The gateway, broker and activity wiring stays textually identical to
- * worker.ts (worker-dev-fast-lane.source.spec.ts enforces it).
+ * The shared acquisition activities retain the managed wiring. The watchdog
+ * that reconciles v3 gateway calls across workspaces runs on the managed worker.
  */
 export async function runDevFastLaneWorker(
   lane: EnabledDevFastLane,

@@ -108,32 +108,28 @@ function command(
 }
 
 type Where = {
-  publishedAt: null;
-  parkedAt: null;
   workspaceId?: string;
-  eventType?: { in: string[] };
-  NOT?: { workspaceId: string; eventType: { in: string[] } };
+  eventType?: { in?: string[]; not?: string };
+  schemaVersion?: { not: number };
+  NOT?: Where;
+  OR?: Where[];
 };
 
 /** Honors exactly the filters the relay uses, so batch starvation is observable. */
 function makeDb(rows: Row[]) {
-  const matches = (row: Row, where: Where) =>
-    row.publishedAt === null &&
-    row.parkedAt === null &&
+  const matches = (row: Row, where: Where): boolean =>
     (where.workspaceId === undefined ||
       row.workspaceId === where.workspaceId) &&
-    (where.eventType === undefined ||
-      where.eventType.in.includes(row.eventType)) &&
-    (where.NOT === undefined ||
-      !(
-        row.workspaceId === where.NOT.workspaceId &&
-        where.NOT.eventType.in.includes(row.eventType)
-      ));
+    (where.eventType?.in?.includes(row.eventType) ?? true) &&
+    row.eventType !== where.eventType?.not &&
+    row.schemaVersion !== where.schemaVersion?.not &&
+    (where.OR?.some((entry) => matches(row, entry)) ?? true) &&
+    (where.NOT === undefined || !matches(row, where.NOT));
   return {
     outboxEvent: {
       findMany: vi.fn(async ({ where, take }: { where: Where; take: number }) =>
         rows
-          .filter((row) => matches(row, where))
+          .filter((row) => row.publishedAt === null && row.parkedAt === null && matches(row, where))
           .sort((a, b) => Number(a.id - b.id))
           .slice(0, take),
       ),
@@ -377,6 +373,35 @@ describe("relay routing with the development fast lane", () => {
     expect(temporal.client.workflow.start).not.toHaveBeenCalled();
   });
 
+  it("starts a v3 discovery command on its admitted managed queue during lane cool-down", async () => {
+    const v2 = command("DiscoveryRunRequested", LANE_WS, 1n);
+    const runId = "30000000-0000-4000-8000-000000000003";
+    const payload = {
+      executionContractVersion: 3, workspaceId: LANE_WS, runId,
+      planId: "40000000-0000-4000-8000-000000000004",
+      icpId: "50000000-0000-4000-8000-000000000005",
+      attemptId: "60000000-0000-4000-8000-000000000006",
+      requestSha256: REQUEST_SHA256, taskQueue: "batch-discovery", dispatchExpiresAt: "2026-11-27T12:00:00.000Z",
+    };
+    const v3 = { ...command("DiscoveryRunRequested", LANE_WS, 2n, runId), schemaVersion: 3, payload };
+    const db = { ...makeDb([v2, v3]), $queryRaw: vi.fn(async () => [{ admitted: true }]) };
+    const temporal = managedTemporal();
+    const lane = laneClient(laneFor(LANE_WS));
+    lane.state.coolingDown = true;
+    const service = makeService(db, temporal, lane);
+
+    await service.tick();
+    await service["laneInFlight"];
+
+    expect(temporal.client.workflow.start).toHaveBeenCalledWith(
+      "discoveryExecutionV3Workflow",
+      expect.objectContaining({ taskQueue: payload.taskQueue, args: [payload] }),
+    );
+    expect(v3.publishedAt).toBeInstanceOf(Date);
+    expect(v2.publishedAt).toBeNull();
+    expect(lane.start).not.toHaveBeenCalled();
+  });
+
   it("polls lane commands in their own pass, ends it at the first failure to reach the lane and skips the lane while it cools down", async () => {
     // Arrange
     const laneRows = Array.from({ length: 25 }, (_, index) =>
@@ -409,6 +434,10 @@ describe("relay routing with the development fast lane", () => {
           NOT: {
             workspaceId: LANE_WS,
             eventType: { in: [...DEV_FAST_LANE_ACQUISITION_COMMANDS] },
+            OR: [
+              { eventType: { not: "DiscoveryRunRequested" } },
+              { schemaVersion: { not: 3 } },
+            ],
           },
         },
       }),
@@ -421,6 +450,10 @@ describe("relay routing with the development fast lane", () => {
           parkedAt: null,
           workspaceId: LANE_WS,
           eventType: { in: [...DEV_FAST_LANE_ACQUISITION_COMMANDS] },
+          OR: [
+            { eventType: { not: "DiscoveryRunRequested" } },
+            { schemaVersion: { not: 3 } },
+          ],
         },
         take: 20,
       }),

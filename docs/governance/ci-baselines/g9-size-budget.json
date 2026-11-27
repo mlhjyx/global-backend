@@ -564,15 +564,6 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/discovery/discovery.service.ts#<anonymous>#41": {
-      "file": "apps/api/src/discovery/discovery.service.ts",
-      "name": "<anonymous>",
-      "line": 861,
-      "complexity": 42,
-      "owner": "P6-CI-10",
-      "expiresAt": "2027-01-31",
-      "reason": "存量高复杂度函数（棘轮：只许降低）"
-    },
     "apps/api/src/discovery/email-guess-persist.ts#persistGuessedEmail": {
       "file": "apps/api/src/discovery/email-guess-persist.ts",
       "name": "persistGuessedEmail",
@@ -2329,15 +2320,6 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/temporal/discovery.activities.ts#<anonymous>#60": {
-      "file": "apps/api/src/temporal/discovery.activities.ts",
-      "name": "<anonymous>",
-      "line": 1585,
-      "complexity": 31,
-      "owner": "P6-CI-10",
-      "expiresAt": "2027-01-31",
-      "reason": "存量高复杂度函数（棘轮：只许降低）"
-    },
     "apps/api/src/temporal/discovery.activities.ts#qualifyFitForRun": {
       "file": "apps/api/src/temporal/discovery.activities.ts",
       "name": "qualifyFitForRun",
@@ -2370,15 +2352,6 @@
       "name": "enrichSignalsRun",
       "line": 2676,
       "complexity": 36,
-      "owner": "P6-CI-10",
-      "expiresAt": "2027-01-31",
-      "reason": "存量高复杂度函数（棘轮：只许降低）"
-    },
-    "apps/api/src/temporal/discovery.activities.ts#<anonymous>#129": {
-      "file": "apps/api/src/temporal/discovery.activities.ts",
-      "name": "<anonymous>",
-      "line": 3072,
-      "complexity": 26,
       "owner": "P6-CI-10",
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"

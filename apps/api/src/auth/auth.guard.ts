@@ -8,6 +8,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { TokenVerifier } from './token-verifier';
+import { DISCOVERY_TASK_CLAIM_ROUTE } from './discovery-task-claim.decorator';
 import {
   ROLES_TO_SCOPES_POLICY,
   type RolesToScopesPolicy,
@@ -42,6 +43,10 @@ export class AuthGuard implements CanActivate {
       });
     }
     const verified = await this.verifier.verify(token);
+    if (verified.discoveryV3Task &&
+        (req.method !== 'POST' || Reflect.getMetadata(DISCOVERY_TASK_CLAIM_ROUTE, context.getHandler()) !== true)) {
+      throw new ForbiddenException({ error: { code: 'TOKEN_SCOPE_INVALID', message: 'token is scoped to discovery execution' } });
+    }
     if (!candidateWorkspaceAllowed(verified.workspaceId)) {
       throw new ForbiddenException({ error: { code: 'WORKSPACE_NOT_ADMITTED', message: 'workspace is not admitted by this runtime' } });
     }
@@ -51,6 +56,7 @@ export class AuthGuard implements CanActivate {
       workspaceId: verified.workspaceId,
       roles,
       scopes: this.rolesToScopes.resolve(roles),
+      ...(verified.discoveryV3Task ? { discoveryV3Task: verified.discoveryV3Task } : {}),
     });
     return true;
   }

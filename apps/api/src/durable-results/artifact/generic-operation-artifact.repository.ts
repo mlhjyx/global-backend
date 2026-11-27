@@ -19,6 +19,7 @@ import {
 } from "./artifact-expected-facts";
 import { parseArtifactReference } from "./artifact-reference.schema";
 import {
+  DISCOVERY_V3_ARTIFACT_MANIFEST_SCHEMA,
   GENERIC_OPERATION_ARTIFACT_MANIFEST_SCHEMA,
   GenericOperationArtifactError,
   invalidGenericOperationArtifact,
@@ -26,7 +27,9 @@ import {
   isCanonicalArtifactSizeBytes,
   isCanonicalArtifactUuid,
   type ArtifactPrivacyClass,
+  type ArtifactMaterializationManifest,
   type ArtifactScopeKind,
+  type DiscoveryV3ArtifactManifest,
   type GenericOperationArtifactManifest,
   type GenericOperationArtifactReference,
 } from "./artifact.types";
@@ -57,6 +60,7 @@ const MANIFEST_KEYS = [
   "expiresAt",
 ] as const satisfies readonly (keyof GenericOperationArtifactManifest)[];
 const MANIFEST_KEY_SET = new Set<string>(MANIFEST_KEYS);
+const V3_MANIFEST_KEYS = new Set<string>(MANIFEST_KEYS.filter((key) => key !== "authorityId"));
 const ROW_KEYS = new Set([
   "artifact_id",
   "scope_key",
@@ -201,14 +205,10 @@ export interface ParseArtifactManifestOptions {
   readonly allowLegacyPersonalData?: boolean;
 }
 
-export function parseGenericOperationArtifactManifest(
-  value: unknown,
+function parseManifestContent(
+  value: Record<string, unknown>,
   options?: ParseArtifactManifestOptions,
-): GenericOperationArtifactManifest {
-  if (!isPlainClosedObject(value, MANIFEST_KEY_SET, MANIFEST_KEYS.length)) {
-    return invalidGenericOperationArtifact();
-  }
-
+): Omit<GenericOperationArtifactManifest, "schemaVersion" | "authorityId"> {
   const createdAt = canonicalTimestamp(value.createdAt);
   const expiresAt = canonicalTimestamp(value.expiresAt);
   assertScope(value.scopeKind, value.workspaceId);
@@ -223,9 +223,7 @@ export function parseGenericOperationArtifactManifest(
       ? { scopeKind: "platform", workspaceId: null }
       : { scopeKind: "workspace", workspaceId: value.workspaceId as string };
   if (
-    value.schemaVersion !== GENERIC_OPERATION_ARTIFACT_MANIFEST_SCHEMA ||
     !isCanonicalArtifactUuid(value.artifactId) ||
-    !isCanonicalArtifactUuid(value.authorityId) ||
     !isCanonicalArtifactUuid(value.operationId) ||
     !isCanonicalArtifactSha256(value.sha256) ||
     !isCanonicalArtifactSizeBytes(value.sizeBytes) ||
@@ -249,12 +247,10 @@ export function parseGenericOperationArtifactManifest(
     return invalidGenericOperationArtifact();
   }
 
-  return Object.freeze({
-    schemaVersion: GENERIC_OPERATION_ARTIFACT_MANIFEST_SCHEMA,
+  return {
     artifactId: value.artifactId,
     scopeKind: value.scopeKind,
     workspaceId: value.workspaceId as string | null,
-    authorityId: value.authorityId,
     operationId: value.operationId,
     resultSchema: value.resultSchema,
     objectKey: value.objectKey,
@@ -265,7 +261,54 @@ export function parseGenericOperationArtifactManifest(
     sourceDigest: value.sourceDigest,
     createdAt,
     expiresAt,
+  };
+}
+
+export function parseGenericOperationArtifactManifest(
+  value: unknown,
+  options?: ParseArtifactManifestOptions,
+): GenericOperationArtifactManifest {
+  if (
+    !isPlainClosedObject(value, MANIFEST_KEY_SET, MANIFEST_KEYS.length) ||
+    value.schemaVersion !== GENERIC_OPERATION_ARTIFACT_MANIFEST_SCHEMA ||
+    !isCanonicalArtifactUuid(value.authorityId)
+  ) return invalidGenericOperationArtifact();
+
+  const { artifactId, scopeKind, workspaceId, ...content } = parseManifestContent(value, options);
+  return Object.freeze({
+    schemaVersion: GENERIC_OPERATION_ARTIFACT_MANIFEST_SCHEMA,
+    artifactId,
+    scopeKind,
+    workspaceId,
+    authorityId: value.authorityId,
+    ...content,
   });
+}
+
+export function parseDiscoveryV3ArtifactManifest(value: unknown): DiscoveryV3ArtifactManifest {
+  if (
+    !isPlainClosedObject(value, V3_MANIFEST_KEYS, V3_MANIFEST_KEYS.size) ||
+    value.schemaVersion !== DISCOVERY_V3_ARTIFACT_MANIFEST_SCHEMA ||
+    value.scopeKind !== "workspace" ||
+    !isCanonicalArtifactUuid(value.workspaceId) ||
+    value.privacyClass !== "PERSONAL_DATA"
+  ) return invalidGenericOperationArtifact();
+
+  return Object.freeze({
+    schemaVersion: DISCOVERY_V3_ARTIFACT_MANIFEST_SCHEMA,
+    ...parseManifestContent(value),
+    scopeKind: value.scopeKind,
+    workspaceId: value.workspaceId,
+    privacyClass: value.privacyClass,
+  });
+}
+
+export function parseArtifactMaterializationManifest(value: unknown): ArtifactMaterializationManifest {
+  if (
+    typeof value === "object" && value !== null &&
+    Object.getOwnPropertyDescriptor(value, "schemaVersion")?.value === DISCOVERY_V3_ARTIFACT_MANIFEST_SCHEMA
+  ) return parseDiscoveryV3ArtifactManifest(value);
+  return parseGenericOperationArtifactManifest(value, { allowLegacyPersonalData: true });
 }
 
 export function parseGenericOperationArtifactSnapshot(

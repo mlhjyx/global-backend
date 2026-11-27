@@ -55,6 +55,8 @@ async function signed(
     subject?: string | null;
     workspaceId?: unknown;
     roles?: unknown;
+    discoveryExecutionV3?: unknown;
+    ttl?: string;
     expired?: boolean;
     notBeforeFuture?: boolean;
   } = {},
@@ -64,6 +66,7 @@ async function signed(
       ? {}
       : { workspace_id: overrides.workspaceId ?? workspaceId }),
     roles: overrides.roles ?? ['operator'],
+    ...(overrides.discoveryExecutionV3 ? { discoveryExecutionV3: overrides.discoveryExecutionV3 } : {}),
     scope: 'compliance:manage',
     scp: ['compliance:manage'],
   })
@@ -71,7 +74,7 @@ async function signed(
     .setIssuer(overrides.issuer ?? issuer)
     .setAudience(overrides.audience ?? audience)
     .setIssuedAt()
-    .setExpirationTime(overrides.expired ? '-10m' : '10m');
+    .setExpirationTime(overrides.expired ? '-10m' : overrides.ttl ?? '10m');
   if (overrides.subject !== null) {
     jwt = jwt.setSubject(overrides.subject ?? 'user-1');
   }
@@ -128,6 +131,20 @@ function configure(): void {
 }
 
 describe('JwksTokenVerifier contract', () => {
+  it('validates the signed discovery task claim with the normal trust root and a bounded lifetime', async () => {
+    configure();
+    const claim = {
+      workspaceId, taskId: workspaceId, taskRunId: workspaceId, planId: workspaceId,
+      attemptId: workspaceId, requestSha256: 'a'.repeat(64), admissionMode: 'dispatch',
+    };
+    const options = { roles: ['saas-member'], ttl: '60s', discoveryExecutionV3: claim };
+    await expect(new JwksTokenVerifier().verify(await signed(oldKey, options))).resolves.toMatchObject({ discoveryV3Task: claim });
+    await invalid(await signed(unknownKey, options));
+    await invalid(await signed(oldKey, { ...options, ttl: '5m' }));
+    await invalid(await signed(oldKey, { ...options, roles: ['operator'] }));
+    await invalid(await signed(oldKey, { ...options, discoveryExecutionV3: { ...claim, workspaceId: '22222222-2222-4222-8222-222222222222' } }));
+  });
+
   it('verifies issuer, audience, subject, workspace and roles without trusting scope claims', async () => {
     configure();
     const verifier = new JwksTokenVerifier();

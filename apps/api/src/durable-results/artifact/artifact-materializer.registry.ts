@@ -5,13 +5,13 @@ import {
 } from "./artifact-expected-facts";
 import type {
   ArtifactMaterializer,
-  GenericOperationArtifactManifest,
+  ArtifactMaterializationManifest,
 } from "./artifact.types";
 import {
   GenericOperationArtifactError,
   invalidGenericOperationArtifact,
 } from "./artifact.types";
-import { parseGenericOperationArtifactManifest } from "./generic-operation-artifact.repository";
+import { parseArtifactMaterializationManifest } from "./generic-operation-artifact.repository";
 
 export const REQUIRED_ARTIFACT_RESULT_SCHEMAS = Object.freeze([
   "sanctions-download/v1",
@@ -126,14 +126,12 @@ export class ArtifactMaterializerRegistry {
   async materialize<T>(
     resultSchema: ArtifactResultSchema,
     input: AsyncIterable<Uint8Array>,
-    manifest: GenericOperationArtifactManifest,
+    manifest: ArtifactMaterializationManifest,
     expectedFacts: unknown,
   ): Promise<T> {
-    let parsedManifest: GenericOperationArtifactManifest;
+    let parsedManifest: ArtifactMaterializationManifest;
     try {
-      parsedManifest = parseGenericOperationArtifactManifest(manifest, {
-        allowLegacyPersonalData: true,
-      });
+      parsedManifest = parseArtifactMaterializationManifest(manifest);
     } catch {
       return invalid();
     }
@@ -163,13 +161,11 @@ export class ArtifactMaterializerRegistry {
  */
 export async function readBoundedArtifactUtf8(
   input: AsyncIterable<Uint8Array>,
-  manifest: GenericOperationArtifactManifest,
+  manifest: ArtifactMaterializationManifest,
   contract: ArtifactPayloadContract,
 ): Promise<string> {
   try {
-    const parsed = parseGenericOperationArtifactManifest(manifest, {
-      allowLegacyPersonalData: true,
-    });
+    const parsed = parseArtifactMaterializationManifest(manifest);
     const declaredSize = BigInt(parsed.sizeBytes);
     if (
       parsed.resultSchema !== contract.resultSchema ||

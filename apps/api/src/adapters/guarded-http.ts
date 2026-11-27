@@ -15,7 +15,7 @@ export { EgressBlockedError } from './url-guard';
 export type { PinnedPublicUrl, PublicUrlResolver } from './url-guard';
 
 /** Around one actual transport and its bounded response read, not a preflight counter. */
-export type DispatchPhysicalWire = <T>(execute: () => Promise<T>) => Promise<T>;
+export type DispatchPhysicalWire = <T>(execute: (signal?: AbortSignal) => Promise<T>) => Promise<T>;
 
 export interface PublicHttpResponse {
   status: number;
@@ -69,6 +69,7 @@ export type PinnedHttpExecutor = (
   options: Required<Omit<PublicHttpRequestOptions, 'headers' | 'operatorTimeoutMs' | 'body'>> & {
     headers: Record<string, string>;
     body?: Buffer;
+    signal?: AbortSignal;
   },
 ) => Promise<PinnedHttpResult>;
 
@@ -187,6 +188,7 @@ const executePinnedHttp: PinnedHttpExecutor = async (target, options) =>
       path: `${target.url.pathname}${target.url.search}`,
       method: options.method,
       headers: options.headers,
+      ...(options.signal ? { signal: options.signal } : {}),
       agent: false,
       // 强制 Node 取回完整的已验证地址集并做 Happy Eyeballs；不会回到系统 DNS。
       autoSelectFamily: true,
@@ -319,11 +321,15 @@ export async function requestPublicHttp(
     const target = await resolver(current);
     await assertExternalHttpActionAuthorized(dependencies.authorizeExternalAction);
     await assertPhysicalWireAuthorized(dependencies.beforePhysicalWire);
-    const executePhysicalWire = () => execute(target, {
-      ...effective,
-      timeoutMs: hop === 0 ? effective.timeoutMs : Math.max(1, overallDeadlineAt - Date.now()),
-      headers: currentHeaders,
-    });
+    const executePhysicalWire = (signal?: AbortSignal) => {
+      signal?.throwIfAborted();
+      return execute(target, {
+        ...effective,
+        timeoutMs: hop === 0 ? effective.timeoutMs : Math.max(1, overallDeadlineAt - Date.now()),
+        headers: currentHeaders,
+        ...(signal ? { signal } : {}),
+      });
+    };
     const response = dependencies.dispatchPhysicalWire
       ? await dependencies.dispatchPhysicalWire(executePhysicalWire)
       : await executePhysicalWire();

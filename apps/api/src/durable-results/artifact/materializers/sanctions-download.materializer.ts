@@ -14,7 +14,7 @@ import {
   GenericOperationArtifactError,
   invalidGenericOperationArtifact,
   type ArtifactMaterializer,
-  type GenericOperationArtifactManifest,
+  type ArtifactMaterializationManifest,
 } from '../artifact.types';
 
 const CONTRACT: ArtifactPayloadContract = Object.freeze({
@@ -75,7 +75,7 @@ export const sanctionsDownloadMaterializer: ArtifactMaterializer<SanctionsDownlo
     resultSchema: 'sanctions-download/v1',
     async materialize(
       input: AsyncIterable<Uint8Array>,
-      manifest: GenericOperationArtifactManifest,
+      manifest: ArtifactMaterializationManifest,
     ): Promise<SanctionsDownloadOutput> {
       const boundManifest = parseGenericOperationArtifactManifest(manifest, {
         allowLegacyPersonalData: true,

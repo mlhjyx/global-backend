@@ -72,6 +72,10 @@ export const CancellationScope = {
   nonCancellable: <T>(fn: () => Promise<T>): Promise<T> => fn(),
 };
 
+export const ActivityCancellationType = {
+  WAIT_CANCELLATION_COMPLETED: 'WAIT_CANCELLATION_COMPLETED',
+} as const;
+
 /**
  * 真实的 `TemporalFailure` 基类（`@temporalio/workflow` 原样转出）：编排据此区分 Temporal 上报的失败
  * （活动失败、超时、取消）与工作流代码自身的缺陷。测试用 `@temporalio/common` 的真实失败类构造。

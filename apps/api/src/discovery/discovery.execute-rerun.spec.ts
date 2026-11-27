@@ -30,8 +30,11 @@ function serviceWith(tx: Record<string, unknown>) {
   return new DiscoveryService(prisma as never, {} as never, authority as never);
 }
 
-function baseTx(status: string) {
+function baseTx(status: string, fenced = false) {
   return {
+    $queryRaw: vi.fn()
+      .mockResolvedValueOnce([{ id: PLAN_ID }])
+      .mockResolvedValueOnce([{ fenced }]),
     discoveryQueryPlan: {
       findUnique: vi.fn(async () => ({ id: PLAN_ID, icpId: 'icp-1', status })),
     },
@@ -88,6 +91,19 @@ describe('P1 execute 重跑：EXECUTED 计划凭新 attemptId（取代独立 rer
       response: { error: { code: 'INVALID_STATE' } },
     });
     expect(tx.discoveryRun.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects a legacy admission for a plan already bound to v3 before consuming the Grant', async () => {
+    const tx = baseTx('READY', true);
+    const service = serviceWith(tx);
+
+    await expect(service.executePlan(CTX, PLAN_ID, 'grant')).rejects.toMatchObject({
+      status: 409,
+      response: { error: { code: 'DISCOVERY_LEGACY_ADMISSION_CLOSED' } },
+    });
+    expect(service['authority'].consumeVerifiedWorkspaceGrantInTransaction).not.toHaveBeenCalled();
+    expect(tx.discoveryRun.create).not.toHaveBeenCalled();
+    expect(tx.outboxEvent.create).not.toHaveBeenCalled();
   });
 });
 

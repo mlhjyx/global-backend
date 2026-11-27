@@ -20,6 +20,7 @@ import {
   SourceClass,
 } from '../provider-contract';
 import { ModelGateway } from '../../model-gateway/model-gateway';
+import type { GenerateStructuredInput } from '../../model-gateway/types';
 import {
   withUntrustedWebContentGuard,
   wrapUntrustedWebContent,
@@ -119,7 +120,7 @@ const MAX_SEARCH_EVIDENCE_CHARS = 4_000;
 /** Raw governance stores at most 20 products and 20 keywords (TypeScript boundary and database writer alike). */
 const MAX_RAW_TERMS = 20;
 
-type SearchHit = Readonly<{ url: string; title: string; document?: true }>;
+export type PublicWebSearchHit = Readonly<{ url: string; title: string; document?: true }>;
 
 export interface ExtractedCompany {
   is_company_site: boolean;
@@ -131,6 +132,22 @@ export interface ExtractedCompany {
   keywords?: string[];
   evidence?: string;
   confidence?: number;
+}
+
+export function publicWebCompanyExtractionRequest(
+  domain: string, text: string, query: CompanyDiscoveryQuery,
+): GenerateStructuredInput {
+  const contract = getTask('discovery.extract_company');
+  return {
+    task: contract?.id ?? 'discovery.extract_company',
+    prompt: `目标画像上下文（仅用于判断相关性，禁止照抄进字段）：${JSON.stringify({
+      filters: query.filters,
+      keywords: query.keywords,
+    }).slice(0, 1200)}\n\n搜索结果（同一域名 ${domain}，只含标题与 URL）：\n${wrapUntrustedWebContent(domain, text)}`,
+    system: withUntrustedWebContentGuard(contract?.description),
+    model: contract?.model,
+    schema: contract?.outputSchema ?? { required: ['is_company_site'] },
+  };
 }
 
 /**
@@ -435,7 +452,7 @@ export class PublicWebDiscoveryProvider
 
   private async mineDomain(
     domain: string,
-    hits: readonly SearchHit[],
+    hits: readonly PublicWebSearchHit[],
     query: CompanyDiscoveryQuery,
     ctx: ExecutionContext,
   ): Promise<Readonly<{
@@ -451,7 +468,6 @@ export class PublicWebDiscoveryProvider
       return Object.freeze({ record: null });
     }
 
-    const contract = getTask('discovery.extract_company');
     const collector = createDiscoveryCompanyReceiptCollector({
       providerKey: 'public_web',
       producerId: 'discovery.extract_company',
@@ -462,16 +478,7 @@ export class PublicWebDiscoveryProvider
     try {
       result = await executeStructuredTaskWithRuntime<ExtractedCompany>(
         this.deps.gateway,
-        {
-          task: contract?.id ?? 'discovery.extract_company',
-          prompt: `目标画像上下文（仅用于判断相关性，禁止照抄进字段）：${JSON.stringify({
-            filters: query.filters,
-            keywords: query.keywords,
-          }).slice(0, 1200)}\n\n搜索结果（同一域名 ${domain}，只含标题与 URL）：\n${wrapUntrustedWebContent(domain, text)}`,
-          system: withUntrustedWebContentGuard(contract?.description),
-          model: contract?.model,
-          schema: contract?.outputSchema ?? { required: ['is_company_site'] },
-        },
+        publicWebCompanyExtractionRequest(domain, text, query),
         // 真租户归属（收口②）：ai_trace/usage_ledger 按真实 workspace 记账；runId 供预算归账。
         {
           ...ctx,
@@ -773,6 +780,17 @@ function sourcePageUrl(domain: string, hitUrls: readonly string[], preferProject
   return firstDetail ?? home ?? `https://${domain}/`;
 }
 
+/** V3 only consumes an observed, storable page URL with actual title evidence. */
+export function observedPublicWebEvidenceUrl(raw: string): string | undefined {
+  const url = provenanceUrl(raw);
+  return url && isStorableSourceUrl(url) && raw.split(/[?#]/u, 1)[0] === url ? url : undefined;
+}
+
+export function publicWebEvidencePage(domain: string, urls: readonly string[], preferProjectPage: boolean): string | undefined {
+  const selected = sourcePageUrl(domain, urls, preferProjectPage);
+  return urls.includes(selected) ? selected : undefined;
+}
+
 /**
  * Keep the existing conservative percent-escape rule. Check underscores as
  * word breaks too: the database contact/secret rule interprets them as such.
@@ -861,7 +879,7 @@ export function collectPublicWebCandidateHits(
   perQuery: readonly (readonly Pick<SearxngSearchResult, 'url' | 'title'>[])[],
   query: CompanyDiscoveryQuery,
   opts?: DiscoveryOptions,
-): Map<string, SearchHit[]> {
+): Map<string, PublicWebSearchHit[]> {
   const blocked = new Set((opts?.blockedDomains ?? []).map((d) => d.toLowerCase()));
   // Domains this run already accepted: search overlap across a plan's queries is heavy, and
   // judging one again only spends model calls to produce a record ingestion would discard.
@@ -870,7 +888,7 @@ export function collectPublicWebCandidateHits(
   const scene = readBuyerProcurementScenario(query.filters);
   const retainDocuments = scene === 'factory_direct' || scene === 'equipment_integration';
   // G3（规格 2026-09-24 §3）：搜索优先、建档后再抓——发现阶段只用搜索结果判站，不抓任何页面。
-  const candidates = new Map<string, SearchHit[]>(); // domain → 该域名的搜索命中（按出现顺序）
+  const candidates = new Map<string, PublicWebSearchHit[]>(); // domain → 该域名的搜索命中（按出现顺序）
 
   // Round-robin across queries so each role query contributes candidates
   // before the per-query domain cap applies.
@@ -953,7 +971,7 @@ function procurementDocumentUrl(raw: string): string | null {
 }
 
 /** 同一域名的搜索命中 → 给模型的证据文本（标题/URL；无标题的命中不算证据）。 */
-export function searchEvidenceText(hits: readonly SearchHit[]): string {
+export function searchEvidenceText(hits: readonly PublicWebSearchHit[]): string {
   if (hits.some((hit) => hit.document)) {
     const picked: string[] = [];
     let used = 0;
@@ -1046,7 +1064,7 @@ function dedupeSearchResults(hits: readonly SearxngSearchResult[]): SearxngSearc
   return out;
 }
 
-function resolveTargetCountryIso(query: CompanyDiscoveryQuery): string | undefined {
+export function resolveTargetCountryIso(query: CompanyDiscoveryQuery): string | undefined {
   const raw = query.filters?.country;
   if (typeof raw !== 'string') return undefined;
   return countryIso(raw);

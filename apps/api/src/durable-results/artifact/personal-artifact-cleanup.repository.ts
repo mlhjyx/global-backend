@@ -18,6 +18,7 @@ type CleanupRow = Readonly<{
   workspace_id: unknown;
   deletion_request_id: unknown;
   artifact_id: unknown;
+  promotion_operation_id?: unknown;
   object_key: unknown;
   sha256: unknown;
   object_version_id: unknown;
@@ -76,8 +77,6 @@ function commandFromRow(row: CleanupRow): PersonalArtifactCleanupCommand {
   if (
     typeof row.sha256 !== 'string' ||
     !/^[0-9a-f]{64}$/.test(row.sha256) ||
-    typeof row.object_version_id !== 'string' ||
-    !/^[A-Za-z0-9._~+/=-]{1,1024}$/.test(row.object_version_id) ||
     typeof row.attempt !== 'number' ||
     !Number.isSafeInteger(row.attempt) ||
     row.attempt < 1
@@ -101,14 +100,21 @@ function commandFromRow(row: CleanupRow): PersonalArtifactCleanupCommand {
   } else {
     return invalid();
   }
+  const promotion = objectScope === 'workspace' && row.artifact_id === null
+    && typeof row.promotion_operation_id === 'string';
+  if (promotion) uuid(row.promotion_operation_id);
+  const artifactId = promotion ? null : uuid(row.artifact_id);
+  const versionId = row.object_version_id;
+  if (!((typeof versionId === 'string' && /^[A-Za-z0-9._~+/=-]{1,1024}$/.test(versionId)) ||
+    (promotion && versionId === null && row.status !== 'COMPLETED'))) return invalid();
   return Object.freeze({
     schemaVersion: PERSONAL_ARTIFACT_CLEANUP_COMMAND_SCHEMA,
     commandId: uuid(row.command_id),
     workspaceId,
     deletionRequestId: uuid(row.deletion_request_id),
-    artifactId: uuid(row.artifact_id),
+    artifactId,
     sha256: row.sha256,
-    versionId: row.object_version_id,
+    versionId,
     objectScope,
     tombstonedAt: timestamp(row.tombstoned_at),
     attempt: row.attempt,

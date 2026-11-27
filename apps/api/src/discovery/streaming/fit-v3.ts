@@ -9,6 +9,8 @@ import type { RuntimeTelemetry } from '../../model-runtime/types';
 import type { DurableExecutionReceipt } from '../../durable-results/durable-execution-receipt';
 import { scrubPiiKeepingTaxIds } from '../../common/pii-scrub';
 import type { FitJudgment } from '../fit-judge';
+import { currentDiscoveryV3OperationScope } from '../discovery-v3-operation-scope';
+import type { ManufacturerNetworkEvidence } from '../manufacturer-network-evidence';
 import {
   extractCompanyWebsiteOverview, prepareCompanyOverviewPage,
   type CompanyOverviewPage, type CompanyWebsiteOverview,
@@ -50,6 +52,7 @@ export interface FitV3CompanyEvidence {
   readonly visibleText: string;
   readonly channelsSummary: string;
   readonly jsonLdSummary?: string | null;
+  readonly manufacturerEvidence?: ManufacturerNetworkEvidence;
   readonly overviewPage?: CompanyOverviewPage;
 }
 
@@ -155,6 +158,11 @@ export function buildFitV3Prompt(input: {
       meta_description: input.company.metaDescription,
       channels_summary: input.company.channelsSummary,
       ...(input.company.jsonLdSummary ? { json_ld: input.company.jsonLdSummary } : {}),
+      ...(input.company.manufacturerEvidence ? { manufacturer_evidence: {
+        relationship: input.company.manufacturerEvidence.relationship,
+        source_url: input.company.manufacturerEvidence.sourceUrl,
+        spans: input.company.manufacturerEvidence.spans.map((span) => scrubPiiKeepingTaxIds(span)),
+      } } : {}),
       website_visible_text: safeBody,
     },
     null,
@@ -239,9 +247,9 @@ export async function judgeCompanyFitV3(args: {
   readonly runtimeTelemetry?: RuntimeTelemetry;
   readonly workspaceId: string;
   readonly runId: string;
+  readonly authorizeExternalAction?: () => Promise<boolean>;
   readonly icp: FitV3IcpContext;
   readonly company: FitV3CompanyEvidence;
-  readonly authorizeExternalAction?: () => Promise<boolean>;
 }): Promise<FitV3Result> {
   if (hasPeerDomainExclusion(args.icp, args.company.domain)) {
     return {
@@ -291,8 +299,9 @@ export async function judgeCompanyFitV3(args: {
     {
       workspaceId: args.workspaceId,
       runId: args.runId,
-      authorizeExternalAction: args.authorizeExternalAction,
       correlationId: `${args.runId}:${args.company.id ?? args.company.domain ?? args.company.name}:fit-v3`,
+      ...(args.authorizeExternalAction ? { authorizeExternalAction: args.authorizeExternalAction } : {}),
+      ...(currentDiscoveryV3OperationScope(args) ? { durableResultSchema: 'fit-judgment/v1' as const } : {}),
     },
     { telemetry: args.runtimeTelemetry },
   );

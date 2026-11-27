@@ -5,11 +5,12 @@
  * 个人联系人字段（contactName/email/phone）留在本表不带入公司级 Raw 记录（遵循数据最小化）。
  */
 import { createHash } from 'node:crypto';
-import type { PrismaClient } from '@prisma/client';
+import type { Prisma, PrismaClient } from '@prisma/client';
 import { normalizeCompanyNameTypography } from './company-name-format';
 import { normalizeDomain } from './identity';
 import { isIso3166Alpha2 } from '../common/iso3166';
 import { isStableSafeHttpsUrl } from './raw-source-provider-normalizer';
+import { validateRawSourceProviderPayload } from './raw-source-provider-schema';
 import { targetCountryCodes } from './search-localization';
 import { lookupCountryIso } from './vocab';
 import type { ProviderCompanyRecord } from './provider-contract';
@@ -198,15 +199,16 @@ const CHANNEL_CATALOG_ROW_SELECT = {
 async function* findChannelMatches(
   prisma: PrismaClient,
   channelId: string,
-  reviewStatus: (typeof REVIEWED_FIRST)[number],
+  reviewedRecordFilter: Prisma.SourceChannelRecordWhereInput,
   input: ChannelCatalogQueryInput,
+  requireCurrentApproval: boolean,
 ): AsyncGenerator<ProviderCompanyRecord> {
   let after: string | undefined;
   while (true) {
     const page = await prisma.sourceChannelRecord.findMany({
       where: {
         channelId,
-        reviewStatus,
+        ...reviewedRecordFilter,
         channel: { status: 'ENABLED' },
         ...(input.countries.length > 0 ? { country: { not: null } } : {}),
         ...(after === undefined ? {} : { dedupeKey: { gt: after } }),
@@ -219,7 +221,15 @@ async function* findChannelMatches(
       // Keep the same matching rules for legacy countries, localized names and JSON list fields.
       if (!rowMatchesFilters(row, input)) continue;
       const mapped = mapChannelCatalogRowToRecord(row);
-      if (mapped) yield mapped;
+      if (!mapped) continue;
+      if (!requireCurrentApproval) {
+        yield mapped;
+        continue;
+      }
+      // Legacy rows can use an inferred hash, while v3 only uses the approved bytes.
+      if (!row.contentHash || !SHA256_HEX_RE.test(row.contentHash)) continue;
+      const { industry: _industry, ...company } = mapped;
+      if (validateRawSourceProviderPayload('channel_catalog', company).ok) yield company;
     }
     if (page.length < CHANNEL_ROW_PAGE_SIZE) return;
     after = page[page.length - 1]!.dedupeKey;
@@ -230,22 +240,28 @@ async function* findChannelMatches(
 export async function queryChannelCatalogRecords(
   prisma: PrismaClient,
   input: ChannelCatalogQueryInput,
+  requireCurrentApproval = false,
 ): Promise<ProviderCompanyRecord[]> {
   const records: ProviderCompanyRecord[] = [];
   const seen = new Set<string>();
-  for (const reviewStatus of REVIEWED_FIRST) {
+  const statuses = requireCurrentApproval ? ['APPROVED'] : REVIEWED_FIRST;
+  for (const reviewStatus of statuses) {
+    const reviewedRecordFilter = {
+      reviewStatus,
+      ...(requireCurrentApproval ? { contentHash: { equals: prisma.sourceChannelRecord.fields.reviewedContentHash } } : {}),
+    } satisfies Prisma.SourceChannelRecordWhereInput;
     const channels = await prisma.sourceChannel.findMany({
       where: {
         status: 'ENABLED',
         records: { some: {
-          reviewStatus,
+          ...reviewedRecordFilter,
           ...(input.countries.length > 0 ? { country: { not: null } } : {}),
         } },
       },
       select: { id: true },
       orderBy: { id: 'asc' },
     });
-    let active = channels.map(({ id }) => findChannelMatches(prisma, id, reviewStatus, input));
+    let active = channels.map(({ id }) => findChannelMatches(prisma, id, reviewedRecordFilter, input, requireCurrentApproval));
     while (active.length > 0) {
       const nextRound: typeof active = [];
       for (let offset = 0; offset < active.length; offset += CHANNEL_QUERY_CONCURRENCY) {

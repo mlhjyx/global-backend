@@ -475,6 +475,37 @@ describe("routeEvent — 三分支路由（收口③核心）", () => {
     }
   });
 
+  it.each([true, false])('routes discovery v3 only after the durable admission is verified (%s)', async (admitted) => {
+    const workspaceId = '10000000-0000-4000-8000-000000000001';
+    const runId = '20000000-0000-4000-8000-000000000002';
+    const command = {
+      executionContractVersion: 3, workspaceId, runId,
+      planId: '30000000-0000-4000-8000-000000000003',
+      icpId: '40000000-0000-4000-8000-000000000004',
+      attemptId: '50000000-0000-4000-8000-000000000005',
+      requestSha256: 'a'.repeat(64), taskQueue: 'batch-discovery', dispatchExpiresAt: '2026-11-27T12:00:00.000Z',
+    };
+    const event = makeEvent({
+      workspaceId, eventType: 'DiscoveryRunRequested', schemaVersion: 3,
+      aggregateType: 'DiscoveryRun', aggregateId: runId, payload: command,
+    });
+    const { db } = makeDb([event]);
+    const query = vi.fn(async () => [{ admitted }]);
+    Object.assign(db, { $queryRaw: query });
+    const temporal = makeTemporal();
+    await makeService(db, temporal).routeEvent(event);
+    expect(query).toHaveBeenCalledOnce();
+    if (!admitted) {
+      expect(temporal.client.workflow.start).not.toHaveBeenCalled();
+      expect(event.parkedAt).toBeInstanceOf(Date);
+      return;
+    }
+    expect(temporal.client.workflow.start).toHaveBeenCalledWith('discoveryExecutionV3Workflow', expect.objectContaining({
+      taskQueue: command.taskQueue, args: [command], workflowIdReusePolicy: WorkflowIdReusePolicy.REJECT_DUPLICATE,
+    }));
+    expect(event.publishedAt).toBeInstanceOf(Date);
+  });
+
   it("B 边界：AlreadyStarted 之外的错误照旧不标 published（下轮重试）", async () => {
     const ev = makeEvent({
       eventType: "CompanyProfileCreated",

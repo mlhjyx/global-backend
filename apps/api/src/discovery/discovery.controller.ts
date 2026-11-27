@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -17,6 +18,7 @@ import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, Is
   Max, MaxLength, Min, MinLength, ValidateNested, ValidateIf,
 } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
+import { AllowDiscoveryTaskClaim } from '../auth/discovery-task-claim.decorator';
 import { Ctx } from '../auth/ctx.decorator';
 import { RequireScopes } from '../auth/require-scopes.decorator';
 import { RequestContext } from '../auth/request-context';
@@ -377,6 +379,15 @@ class ExecuteTaskRefDto {
 }
 
 class ExecuteQueryPlanDto {
+  @ApiPropertyOptional({ type: Boolean, description: 'Retrieves only a previously admitted v3 attempt using the same request identity.' })
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsBoolean()
+  admissionReadOnly?: boolean;
+  @ApiPropertyOptional({ enum: [3], description: 'Selects the native discovery execution contract when the Worker is available.' })
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsIn([3])
+  executionContractVersion?: 3;
+
   @ApiPropertyOptional({ enum: ['manufacturer-network/v1', 'manufacturer-network/v2'], description: 'Explicit frozen manufacturer evidence execution revision.' })
   @ValidateIf((_object, value) => value !== undefined)
   @IsIn(['manufacturer-network/v1', 'manufacturer-network/v2'])
@@ -413,12 +424,35 @@ export class DiscoveryController {
     private readonly contactEnrichment: ContactEnrichmentService,
   ) {}
 
+  @Get('query-plans/:planId/execution-context')
+  @ApiOperation({ summary: '读取租户计划归属与寻源受理状态' })
+  @ApiEnvelope({
+    type: 'object', required: ['id', 'icpId', 'status'], properties: {
+      id: { type: 'string', format: 'uuid' }, icpId: { type: 'string', format: 'uuid' }, status: { type: 'string' },
+    },
+  })
+  async v3PlanContext(@Ctx() ctx: RequestContext, @Param('planId', ParseUUIDPipe) planId: string) {
+    return envelope(await this.discovery.getV3PlanContext(ctx, planId));
+  }
+
   @Post('query-plans/:planId/execute')
+  @AllowDiscoveryTaskClaim()
   @RequireScopes('acquisition:write')
   @HttpCode(202)
   @ApiOperation({ summary: '执行查询计划（READY 首跑；EXECUTED 重跑须携带新 attemptId）：多源发现 → Raw → Canonical（异步，Temporal 编排）',
   })
-  @ApiExecutionBudgetGrant({ additionalConflictCodes: ['INVALID_STATE', 'RERUN_REQUIRES_ATTEMPT'] })
+  @ApiExecutionBudgetGrant({
+    optionalForVersionedOperation: true,
+    additionalConflictCodes: [
+      'INVALID_STATE',
+      'RERUN_REQUIRES_ATTEMPT',
+      'DISCOVERY_ATTEMPT_REQUEST_CONFLICT',
+      'DISCOVERY_EXECUTION_IN_PROGRESS',
+      'DISCOVERY_LEGACY_EXECUTION_UNRESOLVED',
+      'DISCOVERY_LEGACY_ADMISSION_CLOSED',
+      'DISCOVERY_V3_DISPATCH_AUTHORIZATION_EXPIRED',
+    ],
+  })
   @ApiBody({ type: ExecuteQueryPlanDto, required: false })
   @ApiEnvelope(
     {
@@ -427,6 +461,12 @@ export class DiscoveryController {
       properties: {
         runId: { type: 'string', format: 'uuid' },
         status: { type: 'string' },
+        executionContractVersion: { type: 'integer', enum: [3] },
+        planId: { type: 'string', format: 'uuid' },
+        icpId: { type: 'string', format: 'uuid' },
+        attemptId: { type: 'string', format: 'uuid' },
+        requestSha256: { type: 'string', pattern: '^[0-9a-f]{64}$' },
+        replayed: { type: 'boolean' },
       },
     },
     { status: 202 },
@@ -437,6 +477,21 @@ export class DiscoveryController {
     @Body() dto?: ExecuteQueryPlanDto,
     @ExecutionBudgetGrant() compactJws?: string,
   ) {
+    if (dto?.executionContractVersion === 3 || ctx.discoveryV3Task || this.discovery.usesDiscoveryV3) {
+      if (dto?.taskRef !== undefined || compactJws !== undefined) {
+        throw new BadRequestException({
+          error: { code: 'DISCOVERY_V3_LEGACY_FIELDS', message: 'discovery v3 expects the authenticated execution binding' },
+        });
+      }
+      return envelope(await this.discovery.executePlanV3(ctx, planId, {
+        attemptId: dto?.attemptId,
+        manufacturerNetworkRevision: dto?.manufacturerNetworkRevision,
+        admissionReadOnly: dto?.admissionReadOnly,
+      }));
+    }
+    if (dto?.admissionReadOnly !== undefined) {
+      throw new BadRequestException({ error: { code: 'DISCOVERY_V3_REQUIRED', message: 'read-only recovery requires discovery v3' } });
+    }
     const run = await asExecutionBudgetHttpBoundary(() =>
       this.discovery.executePlan(ctx, planId, compactJws, dto?.taskRef, dto?.attemptId, dto?.manufacturerNetworkRevision),
     );

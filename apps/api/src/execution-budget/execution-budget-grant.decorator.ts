@@ -46,6 +46,7 @@ export const ExecutionBudgetGrant = createParamDecorator(
 
 export function ApiExecutionBudgetGrant(options?: {
   additionalForbiddenCodes?: readonly string[];
+  optionalForVersionedOperation?: boolean;
   /** Operation-specific 409 codes, listed in the response description; the schema stays open. */
   additionalConflictCodes?: readonly string[];
 }): MethodDecorator {
@@ -79,9 +80,11 @@ export function ApiExecutionBudgetGrant(options?: {
   return applyDecorators(
     ApiHeader({
       name: EXECUTION_BUDGET_GRANT_HEADER,
-      required: true,
+      required: !options?.optionalForVersionedOperation,
       schema: { type: 'string', minLength: 1, maxLength: 16_384 },
-      description: 'SaaS signed authority bound to this exact workspace mutation',
+      description: options?.optionalForVersionedOperation
+        ? 'SaaS signed authority for legacy requests. Discovery execution contract v3 uses the authenticated tenant identity.'
+        : 'SaaS signed authority bound to this exact workspace mutation',
     }),
     ApiResponse({
       status: 402,

@@ -45,6 +45,9 @@ import { createDiscoveryActivities } from "./discovery.activities";
 import { createRun2Activities } from "./discovery.run2.activities";
 import { createRun2PipelineActivities } from "./discovery.run2.pipeline.activities";
 import { createStreamingDiscoveryActivities } from "./discovery.streaming.activities";
+import { createDiscoveryV3WorkerActivities } from "./discovery-v3.worker-activities";
+import { createNativeDiscoveryV3Executor } from "./discovery-v3-native-executor";
+import { configureDiscoveryV3GatewayWorker } from "./discovery-v3-gateway-reconciliation";
 import { prismaDiscoveryRunLeaseReader } from "./discovery-run-lease";
 import { createRawSourceActivities } from "./raw-source.activities";
 import { createToolBudgetReconciliationActivities } from "./tool-budget-reconciliation.activities";
@@ -515,6 +518,7 @@ async function main(): Promise<void> {
   gateway.costReconciliationCatalog = costReconciliationCatalog;
   gateway.settlementDerivationKeyring = settlementReadbackRuntime?.keyring;
   gateway.settlementReadbackResolver = settlementReadbackRuntime?.resolver;
+  const discoveryV3Gateway = await configureDiscoveryV3GatewayWorker(prisma, gateway);
 
   // 收口②：**唯一执行闸门**——全部原始出网（搜索/抓取/结构化 API/SMTP）经同一个 ToolBroker
   // （allowedTools 白名单 + source_policy fail-closed + 预算 reserve-settle + 限流 + Trace）。
@@ -644,6 +648,7 @@ async function main(): Promise<void> {
         runtimeTelemetry: runtimeTelemetry.telemetry,
         budgetStore,
         runLease: prismaDiscoveryRunLeaseReader(prisma),
+        sweepDiscoveryV3Gateway: discoveryV3Gateway.sweep,
         skills: skillResolver,
         agentRuntime: { agents: agentResolver, traces: agentTraces },
       }),
@@ -659,6 +664,9 @@ async function main(): Promise<void> {
       // Run 2.0（M0④）：深挖单公司活动（画像/精判/信号/联系人 + job 状态写回）；Phase 2 方案 B 流式三段漏斗。
       ...createRun2PipelineActivities({ prisma, providers, gateway, broker, runtimeTelemetry: runtimeTelemetry.telemetry, budgetStore, skills: skillResolver, contactEnrichmentSafety: safetyComposition.service }),
       ...createStreamingDiscoveryActivities({ prisma, providers, gateway, broker, runtimeTelemetry: runtimeTelemetry.telemetry, budgetStore, contactEnrichmentSafety: safetyComposition.service }),
+      ...createDiscoveryV3WorkerActivities(prisma, createNativeDiscoveryV3Executor({
+        prisma, providers, gateway, broker, runtimeTelemetry: runtimeTelemetry.telemetry,
+      }), discoveryV3Gateway.reconcile),
       ...createRawSourceActivities({ prisma }),
       ...createQualifyActivities({ prisma, sanctionsScreening }),
       ...createRejudgeActivities({ prisma, providers, gateway, broker, runtimeTelemetry: runtimeTelemetry.telemetry, budgetStore, skills: skillResolver }),

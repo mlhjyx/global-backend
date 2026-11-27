@@ -50,6 +50,7 @@ import type { DiscoveryRunFailure } from './discovery.run-failure';
 import { projectDiscoveryCompletedStats } from './discovery-run-final-stats';
 import { startActivityHeartbeat } from './activity-heartbeat';
 import { enrichMatchedStreamingCompany, resolveStreamingContactDiscoveryLawfulBasis } from './streaming-contact-enrichment';
+import { MAX_STREAMING_L1_COMPANIES } from '../discovery/execution-envelope';
 
 export interface StreamingAuthorityInput {
   readonly workspaceId: string;
@@ -84,8 +85,6 @@ export interface StreamingFinalizeSummary {
   readonly l2Failed: number;
   readonly watchesRegistered: number;
 }
-
-const MAX_STREAMING_L1_COMPANIES = 200;
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);

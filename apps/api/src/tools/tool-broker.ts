@@ -49,6 +49,12 @@ import {
 } from "../common/paid-cost-ledger-contract";
 import type { SiteBuildCostLedger } from "../site-builder/site-build-cost-ledger";
 import { assertPlatformEgressFenceAvailable } from "../platform-authority/platform-egress-fence";
+import { currentDiscoveryV3OperationScope } from "../durable-results/discovery-v3-operation-scope";
+import { assertNoCallerDiscoveryV3WireFence, invokeDiscoveryV3Tool } from "./discovery-v3-tool-admission";
+import type { DiscoveryV3ArtifactExecutionPort } from "./discovery-v3-artifact-execution-port";
+import { ToolPolicyDenied } from "./tool-policy-denied";
+
+export { ToolPolicyDenied } from "./tool-policy-denied";
 
 /**
  * These schemas require the GenericOperationArtifactService plus a Task 5
@@ -83,6 +89,11 @@ function subjectBoundArtifactSchema(tool: Tool): string | null {
     : null;
 }
 
+function workspaceSubjectBoundArtifactSchema(tool: Tool): string | null {
+  const schema = subjectBoundArtifactSchema(tool);
+  return schema && !PLATFORM_HELD_ARTIFACT_SCHEMAS.has(schema) ? schema : null;
+}
+
 /**
  * ToolBroker（PRD 9.2 Tool Registry + Policy 层）——**唯一工具执行入口**，
  * 所有确定性闸门收敛于此（工具内部不自证）。顺序（评审确定）：
@@ -92,16 +103,6 @@ function subjectBoundArtifactSchema(tool: Tool): string | null {
  * 这是「无超级 Agent」的执行面保证：LLM/Task 永远只能调它在契约里声明的工具，
  * 且每次调用的权限/预算/合规/审计由确定性代码兜底。
  */
-
-export class ToolPolicyDenied extends Error {
-  constructor(
-    public readonly toolId: string,
-    public readonly reason: string,
-  ) {
-    super(`tool ${toolId} denied: ${reason}`);
-    this.name = "ToolPolicyDenied";
-  }
-}
 
 /**
  * The physical tool ran, but its result cannot be represented by the approved
@@ -146,6 +147,7 @@ export interface BrokerDeps {
   paidLedger?: SiteBuildCostLedger;
   /** G3 subject-bound artifact execution. Absent → subject-bound calls stay held. */
   artifactExecution?: ArtifactExecutionPort;
+  discoveryV3ArtifactExecution?: DiscoveryV3ArtifactExecutionPort;
   legacyBudgetMode?: LegacyExecutionBudgetMode;
   maxBypassToolCallsPerAccount?: number;
 }
@@ -284,12 +286,37 @@ export class ToolBroker implements ExecutionBroker {
     throw new ToolPolicyDenied(tool.id, reason);
   }
 
+  private async assertSourceAdmission<I, O>(
+    tool: Tool<I, O>, input: I, ctx: ToolContext, now: () => number, started: number,
+  ): Promise<void> {
+    const { sourcePolicy, policyDomain } = tool.compliance;
+    const domain = sourcePolicy === "none" ? null : (policyDomain ?? extractToolGovernableDomain(input));
+    if (!domain && sourcePolicy === "required") {
+      this.trace(ctx, tool, "DENIED", "no governable domain for required source_policy", 0, now() - started);
+      throw new ToolPolicyDenied(tool.id, "no governable domain (required source_policy)");
+    }
+    if (domain) {
+      const check = await this.checkSourcePolicy(tool.id, domain, ctx.purpose);
+      if (!check.allowed) {
+        const detail =
+          check.reason === "suspended" ? `source_policy SUSPENDED: ${domain}`
+            : check.reason === "purpose_not_allowed" ? `purpose not allowed for ${domain}`
+              : `source_policy ${check.reason}: ${domain}`;
+        this.trace(ctx, tool, "DENIED", detail, 0, now() - started);
+        throw new ToolPolicyDenied(tool.id, check.reason === "suspended" ? `domain ${domain} is SUSPENDED` : detail);
+      }
+    }
+    // 抓取工具自行核对 robots；源合规闸门继续核对工具声明的 sourceKey。
+    await this.assertSourceCompliance(tool, ctx, now, started);
+  }
+
   /** 唯一执行入口。所有闸门在此强制。 */
   async invoke<I, O>(
     toolId: string,
     input: I,
     ctx: ToolContext,
   ): Promise<ToolResult<O>> {
+    assertNoCallerDiscoveryV3WireFence(toolId, ctx);
     assertPlatformEgressPaidContext(ctx);
     assertPlatformEgressFenceAvailable(ctx);
     const now = this.deps.now ?? Date.now;
@@ -329,51 +356,21 @@ export class ToolBroker implements ExecutionBroker {
       }
     }
 
-    // 2) 合规门：source_policy（未登记 fail-closed / SUSPENDED / 用途）——与早跳过共用
-    //    checkSourcePolicy（单点判定）。治理域优先取工具声明的 policyDomain（API 类固定域），
-    //    缺省从 input 提取；required 工具提不出域 = 拒（不再静默跳过合规门）。
-    const mode = tool.compliance.sourcePolicy;
-    if (mode !== "none") {
-      const domain = tool.compliance.policyDomain ?? extractToolGovernableDomain(input);
-      if (!domain) {
-        if (mode === "required") {
-          this.trace(
-            ctx,
-            tool,
-            "DENIED",
-            "no governable domain for required source_policy",
-            0,
-            now() - started,
-          );
-          throw new ToolPolicyDenied(
-            toolId,
-            "no governable domain (required source_policy)",
-          );
-        }
-        // advisory：无域可查 → 交给工具自己的 robots/DAT-011 合规处理；这不构成 SSRF 兜底。
-      } else {
-        const chk = await this.checkSourcePolicy(toolId, domain, ctx.purpose);
-        if (!chk.allowed) {
-          const detail =
-            chk.reason === "suspended"
-              ? `source_policy SUSPENDED: ${domain}`
-              : chk.reason === "purpose_not_allowed"
-                ? `purpose not allowed for ${domain}`
-                : `source_policy ${chk.reason}: ${domain}`;
-          this.trace(ctx, tool, "DENIED", detail, 0, now() - started);
-          throw new ToolPolicyDenied(
-            toolId,
-            chk.reason === "suspended"
-              ? `domain ${domain} is SUSPENDED`
-              : detail,
-          );
-        }
-      }
-    }
-    // 注：robots 由抓取类工具内部 isAllowedByRobots 强制（已实现），此处不重复。
+    await this.assertSourceAdmission(tool, input, ctx, now, started);
 
-    // 2b) 源合规矩阵闸门（新源工具声明 sourceKey 时；SOURCE_COMPLIANCE_GATE=enforce 才生效）
-    await this.assertSourceCompliance(tool, ctx, now, started);
+    const discovery = currentDiscoveryV3OperationScope(ctx);
+    if (discovery) {
+      return invokeDiscoveryV3Tool({
+        scope: discovery, context: ctx, tool, request: input,
+        artifactSchema: workspaceSubjectBoundArtifactSchema(tool),
+        artifactExecution: this.deps.discoveryV3ArtifactExecution,
+        acquireLimit: () => this.limiter.acquire(toolId, now(), ctx.workspaceId),
+        releaseLimit: (release) => this.releaseLimiterSafely(release),
+        authorizeSource: () => this.assertSourceAdmission(tool, input, ctx, now, started),
+        project: (result) => this.projectToolDurableResult(tool, result),
+        restore: (result) => this.replayGenericToolProjection(tool, result),
+      });
+    }
 
     // 3) 预算 reserve（reserve-then-settle）。R4-B paidCost uses the Site Builder
     // ledger; every other product caller uses the injected durable BudgetStore.
@@ -997,8 +994,7 @@ export class ToolBroker implements ExecutionBroker {
     tool: Tool<I, O>,
     ctx: ToolContext,
   ): { subjectRef: ArtifactSubjectRef } | { reason: string } {
-    const schema = subjectBoundArtifactSchema(tool as Tool);
-    if (!schema || PLATFORM_HELD_ARTIFACT_SCHEMAS.has(schema) || !ctx.artifactSubject) {
+    if (!workspaceSubjectBoundArtifactSchema(tool as Tool) || !ctx.artifactSubject) {
       return { reason: SUBJECT_BINDING_HOLD };
     }
     if (!this.deps.artifactExecution) {

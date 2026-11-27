@@ -33,6 +33,9 @@ function serviceWith(tx: Record<string, unknown>) {
 
 function baseTx(overrides: Record<string, unknown> = {}) {
   return {
+    $queryRaw: vi.fn()
+      .mockResolvedValueOnce([{ id: PLAN_ID }])
+      .mockResolvedValueOnce([{ fenced: false }]),
     discoveryQueryPlan: {
       findUnique: vi.fn(async () => ({ id: PLAN_ID, icpId: 'icp-1', status: 'READY' })),
     },

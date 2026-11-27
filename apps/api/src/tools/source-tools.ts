@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import { ExecutionControlError } from "../execution-budget/execution-control-error";
-import { gunzipSync } from "node:zlib";
 import { CATALOG_RESULT_PROJECTION_SCHEMAS } from "../durable-results/catalog-result-projections";
 import { SOURCE_RESULT_PROJECTION_SCHEMAS } from "../durable-results/source-result-projections";
 import { assertToolExternalActionAuthorized, Tool, ToolContext } from "./tool-contract";
@@ -10,6 +9,7 @@ import { crawlHtml, CrawlHtmlResult } from "../adapters/web-crawler";
 import { isAllowedByRobots } from "../adapters/robots";
 import {
   EgressBlockedError,
+  PUBLIC_HTTP_TIMEOUT_MAX_MS,
   requestPublicHttp,
   type DispatchPhysicalWire,
 } from "../adapters/guarded-http";
@@ -29,6 +29,7 @@ import {
 import {
   searchAwardNotices,
   searchContractNotices,
+  TED_NATIVE_TIMEOUT_MS,
   SearchAwardParams,
   TedAwardNotice,
   TedContractNotice,
@@ -41,12 +42,10 @@ import {
   OpenFdaEstablishment,
   Fda510kClearance,
 } from "../adapters/openfda-api";
+import { queryAlgoliaExhibitors } from "../adapters/trade-fair-algolia";
+import { ALGOLIA_PAGE_NATIVE_TIMEOUT_MS } from "../adapters/trade-fair-algolia-native";
 import {
-  queryAlgoliaExhibitors,
-  AlgoliaFairConfig,
-  FairExhibitor,
-} from "../adapters/trade-fair-algolia";
-import {
+  CH_COMPANY_SEARCH_NATIVE_TIMEOUT_MS,
   searchCompanies,
   listOfficers,
   ChCompanyHit,
@@ -57,6 +56,7 @@ import {
   FrCompanyHit,
 } from "../adapters/inpi-rne";
 import {
+  OPENCORPORATES_SEARCH_TIMEOUT_MS,
   searchOpenCorporatesCompanies,
   OpenCorporatesCompanyHit,
 } from "../adapters/opencorporates-api";
@@ -79,10 +79,13 @@ import {
   boundedPlatformAcquisitionFetchLimit,
   platformExecutionToolContract,
 } from "../platform-authority/platform-execution-contract";
+import { decodeJsonBytes } from "../adapters/bounded-fetch-response";
 import {
-  decodeHttpTextWithCharset,
-  decodeJsonBytes,
-} from "../adapters/bounded-fetch-response";
+  executeAlgoliaNative, executeCompaniesHouseNative, executeHttpGetNative, executeOpenCorporatesNative,
+  executeTedNative, httpGetResult, HTTP_GET_UA, isTradeFairAlgoliaPage,
+  MAX_HTTP_GET_ARTIFACT_BYTES, type TradeFairAlgoliaInput, type TradeFairAlgoliaOutput,
+} from "./source-tool-execution";
+export type { TradeFairAlgoliaInput, TradeFairAlgoliaOutput, TradeFairAlgoliaPageInput } from "./source-tool-execution";
 
 /**
  * 受治理数据源 + 标的站点的 L0 工具（收口②：主链出网收编进 ToolBroker）。
@@ -227,9 +230,7 @@ export interface HttpGetOutput {
   blocked?: string;
 }
 
-const HTTP_GET_UA = "Mozilla/5.0 (compatible; GlobalBot/1.0)";
 const MAX_REDIRECT_HOPS = 3;
-const MAX_HTTP_GET_ARTIFACT_BYTES = 3_000_000;
 export const HTTP_GET_ARTIFACT_MEDIA_TYPE = "text/plain" as const;
 export const MAX_SANCTIONS_DOWNLOAD_ARTIFACT_BYTES =
   PLATFORM_SANCTIONS_ARTIFACT_MAX_BYTES;
@@ -239,13 +240,6 @@ function canonicalSanctionsMediaType(value: string | null): string | null {
   if (!value) return null;
   const canonical = value.split(";", 1)[0]?.trim().toLowerCase() ?? "";
   return SANCTIONS_DOWNLOAD_MEDIA_TYPES.has(canonical) ? canonical : null;
-}
-
-function decodeHttpGetArtifactText(body: Buffer, contentType?: string): string {
-  let text: string;
-  try { text = decodeHttpTextWithCharset(body, contentType, { strictWithoutDeclaredCharset: true }); } catch { throw new Error("HTTP_GET_ARTIFACT_UTF8_INVALID"); }
-  if (Buffer.byteLength(text, "utf8") > MAX_HTTP_GET_ARTIFACT_BYTES) throw new Error("HTTP_GET_ARTIFACT_TOO_LARGE");
-  return text;
 }
 
 /**
@@ -281,6 +275,8 @@ export const httpGetTool: Tool<HttpGetInput, HttpGetOutput> = {
     ttlSeconds: 86_400,
   },
   healthCheck: async () => ({ healthy: true, detail: "fetch" }),
+  discoveryV3SingleWireTimeoutMs: PUBLIC_HTTP_TIMEOUT_MAX_MS,
+  executeDiscoveryV3: executeHttpGetNative,
   // One guarded request; every redirect hop calls ctx.beforePhysicalWire (D13).
   physicalWireObservation: "before_each_wire",
   execute: async (input, ctx) => {
@@ -299,34 +295,7 @@ export const httpGetTool: Tool<HttpGetInput, HttpGetOutput> = {
           beforePhysicalWire: ctx.beforePhysicalWire,
         },
       );
-      // gzip 魔数透明解压（sitemap.xml.gz 常见；与原 fetchText 实现对齐）
-      let buf = res.body;
-      if (buf.length > 2 && buf[0] === 0x1f && buf[1] === 0x8b) {
-        try {
-          buf = gunzipSync(buf, {
-            maxOutputLength: MAX_HTTP_GET_ARTIFACT_BYTES,
-          });
-        } catch {
-          throw new Error("HTTP_GET_ARTIFACT_GZIP_INVALID_OR_TOO_LARGE");
-        }
-      }
-      const text =
-        input.method === "HEAD"
-          ? ""
-          : decodeHttpGetArtifactText(buf, res.headers["content-type"]);
-      return {
-        data: {
-          status: res.status,
-          ok: res.ok,
-          mediaType: HTTP_GET_ARTIFACT_MEDIA_TYPE,
-          text,
-          finalUrl: res.finalUrl,
-        },
-        ...(res.ok ? {
-          provenance: { sourceUrl: res.finalUrl, fetchedAt: new Date().toISOString(), parserVersion: "http-get/v1" },
-        } : {}),
-        costCents: 0,
-      };
+      return httpGetResult(res, input.method);
     } catch (error) {
       if (error instanceof EgressBlockedError) {
         return {
@@ -550,6 +519,9 @@ export const tedSearchTool: Tool<TedSearchInput, TedSearchOutput> = {
     degraded: result.degraded,
   }),
   healthCheck: async () => ({ healthy: true, detail: "ted" }),
+  discoveryV3SingleWireTimeoutMs: TED_NATIVE_TIMEOUT_MS,
+  discoveryV3CompanyOnly: (input) => input.kind === "award",
+  executeDiscoveryV3: executeTedNative,
   execute: async (input, ctx) => {
     const beforeRequest = beforeExternalRequest(ctx);
     if (input.kind === "award") {
@@ -711,6 +683,9 @@ export const companiesHouseSearchTool: Tool<
     schema: CATALOG_RESULT_PROJECTION_SCHEMAS["companies_house.search"],
   },
   healthCheck: async () => ({ healthy: true, detail: "companies-house" }),
+  discoveryV3SingleWireTimeoutMs: CH_COMPANY_SEARCH_NATIVE_TIMEOUT_MS,
+  discoveryV3CompanyOnly: (input) => input.op === "search",
+  executeDiscoveryV3: executeCompaniesHouseNative,
   execute: async (input, ctx) => {
     const beforeRequest = beforeExternalRequest(ctx);
     if (input.op === "search") {
@@ -872,16 +847,11 @@ export const googlePatentsSearchTool: Tool<
   },
 };
 
-export interface TradeFairAlgoliaInput {
-  cfg: AlgoliaFairConfig;
-  limit?: number;
-}
-
 /** tradefair.algolia —— RX 展会参展商（Algolia 托管搜索）。⚠️ ToS 灰偏红源（trade-fair-intelligence.md §0）——
  *  required 治理：source_policy 行是显性风险登记点，SUSPENDED 即全链停抓。 */
 export const tradeFairAlgoliaTool: Tool<
   TradeFairAlgoliaInput,
-  { exhibitors: FairExhibitor[] }
+  TradeFairAlgoliaOutput
 > = {
   id: platformTradeFairContract.toolId,
   version: platformTradeFairContract.version,
@@ -905,27 +875,34 @@ export const tradeFairAlgoliaTool: Tool<
     risk: "medium",
   },
   capabilities: { produces: ["company", "contact"], accepts: ["keywords"] },
-  idempotencyKey: (i) =>
-    `tradefair.algolia:${stableKey({ appId: i.cfg.appId, index: i.cfg.indexName, edition: i.cfg.eventEditionId, limit: i.limit })}`,
+  idempotencyKey: (i) => isTradeFairAlgoliaPage(i)
+    ? `tradefair.algolia.page:${stableKey(i)}`
+    : `tradefair.algolia:${stableKey({ appId: i.cfg.appId, index: i.cfg.indexName, edition: i.cfg.eventEditionId, limit: i.limit })}`,
   durableResultStrategy: {
     kind: "typed_projection",
     schema: CATALOG_RESULT_PROJECTION_SCHEMAS["tradefair.algolia"],
   },
   healthCheck: async () => ({ healthy: true, detail: "algolia" }),
+  discoveryV3SingleWireTimeoutMs: ALGOLIA_PAGE_NATIVE_TIMEOUT_MS,
+  discoveryV3CompanyOnly: isTradeFairAlgoliaPage,
+  executeDiscoveryV3: executeAlgoliaNative,
   // Every Algolia page calls ctx.beforePhysicalWire before its POST (D13).
   physicalWireObservation: "before_each_wire",
-  execute: async (input, ctx) => ({
-    data: {
-      exhibitors: await queryAlgoliaExhibitors(
-        input.cfg,
-        input.limit,
-        beforeExternalRequest(ctx),
-        ctx.beforePhysicalWire,
-        sourcePhysicalWire(ctx, "tradefair.algolia.page"),
-      ),
-    },
-    costCents: 0,
-  }),
+  execute: async (input, ctx) => {
+    if (!("cfg" in input)) throw new Error("ALGOLIA_LEGACY_CONFIG_REQUIRED");
+    return {
+      data: {
+        exhibitors: await queryAlgoliaExhibitors(
+          input.cfg,
+          input.limit,
+          beforeExternalRequest(ctx),
+          ctx.beforePhysicalWire,
+          sourcePhysicalWire(ctx, "tradefair.algolia.page"),
+        ),
+      },
+      costCents: 0,
+    };
+  },
 };
 
 export interface MapYourShowFetchInput {
@@ -1151,6 +1128,8 @@ export const openCorporatesSearchTool: Tool<
     degraded: result.degraded,
   }),
   healthCheck: async () => ({ healthy: true, detail: "opencorporates" }),
+  discoveryV3SingleWireTimeoutMs: OPENCORPORATES_SEARCH_TIMEOUT_MS,
+  executeDiscoveryV3: executeOpenCorporatesNative,
   execute: async (input, ctx) => {
     const apiToken = process.env.OPENCORPORATES_API_TOKEN?.trim();
     if (!apiToken) {
