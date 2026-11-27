@@ -1,4 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  DOCLING_PDF_PARSER_VERSION,
+  PdfNotRenderableError,
+} from '../adapters/docling-pdf-fetch';
 import { createCrawl4aiFetchTool, readCrawl4aiFetchLimits } from './builtin-tools';
 
 const ctx = {
@@ -240,4 +244,69 @@ it.each(['conditional-304', undefined] as const)('keeps ordinary cache forwardin
   expect(ordinary.provenance).toMatchObject({cache:fromCache ?? 'miss'});
   await tool.execute({url:'https://manufacturer.example/location',exactHtml:true,profileTextRevision:'manufacturer-profile/v1'}, {workspaceId:'offline'});
   expect(fetchHttpFirst.mock.calls[1]![1]).not.toHaveProperty('cache');
+});
+
+describe('crawl4ai.fetch PDF Docling routing (prevents Crawl4AI 502)', () => {
+  const PDF_URL = 'https://solartage.example/downloads/Ausstellerverzeichnis-Solartage-2026.pdf';
+
+  it('routes .pdf exhibitor directories to Docling instead of headless Crawl4AI /md', async () => {
+    const crawlUrl = vi.fn();
+    const fetchHttpFirst = vi.fn();
+    const fetchPdf = vi.fn(async () => ({
+      markdown: '# Ausstellerverzeichnis Solartage 2026\n- SunGrid GmbH https://sungrid.example',
+      title: 'Ausstellerverzeichnis-Solartage-2026.pdf',
+      contentHash: 'f'.repeat(64),
+      parserVersion: DOCLING_PDF_PARSER_VERSION,
+    }));
+    const tool = createCrawl4aiFetchTool({
+      crawlUrl: crawlUrl as never,
+      isAllowedByRobots: async () => true,
+      fetchHttpFirst: fetchHttpFirst as never,
+      fetchPdf: fetchPdf as never,
+    });
+
+    const out = await tool.execute({ url: PDF_URL, maxChars: 60_000 }, ctx);
+    expect(fetchPdf).toHaveBeenCalledOnce();
+    expect(fetchHttpFirst).not.toHaveBeenCalled();
+    expect(crawlUrl).not.toHaveBeenCalled();
+    expect(out.data.text).toContain('SunGrid GmbH');
+    expect(out.provenance?.parserVersion).toBe(DOCLING_PDF_PARSER_VERSION);
+    expect(out.costCents).toBe(0);
+  });
+
+  it('degrades cleanly at $0 when Docling fails on a .pdf URL (even with HTTP_FIRST_FETCH=off) and never calls crawlUrl', async () => {
+    process.env.HTTP_FIRST_FETCH = 'off';
+    const crawlUrl = vi.fn();
+    const fetchPdf = vi.fn(async () => null);
+    const tool = createCrawl4aiFetchTool({
+      crawlUrl: crawlUrl as never,
+      isAllowedByRobots: async () => true,
+      fetchPdf: fetchPdf as never,
+    });
+
+    const out = await tool.execute({ url: PDF_URL }, ctx);
+    expect(fetchPdf).toHaveBeenCalledOnce();
+    expect(crawlUrl).not.toHaveBeenCalled();
+    expect(out).toEqual({
+      data: { url: PDF_URL, text: '', contentHash: '' },
+      costCents: 0,
+      degraded: true,
+    });
+  });
+
+  it('never falls back to crawlUrl 502 when a non-.pdf URL returns application/pdf and Docling is unavailable', async () => {
+    const crawlUrl = vi.fn();
+    const fetchHttpFirst = vi.fn(async () => {
+      throw new PdfNotRenderableError('https://expo.example/download?id=2026');
+    });
+    const tool = makeTool({ crawlUrl, fetchHttpFirst });
+
+    const out = await tool.execute({ url: 'https://expo.example/download?id=2026' }, ctx);
+    expect(crawlUrl).not.toHaveBeenCalled();
+    expect(out).toEqual({
+      data: { url: 'https://expo.example/download?id=2026', text: '', contentHash: '' },
+      costCents: 0,
+      degraded: true,
+    });
+  });
 });

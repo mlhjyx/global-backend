@@ -29,9 +29,12 @@ import type { SearxngSearchOutput } from '../../tools/builtin-tools';
 import type { SearchProviderOutput } from '../../tools/search-provider-tools';
 import { resolveBraveSearchApiKey, resolveSerperApiKey } from '../../adapters/search-providers';
 import { fuseSearchEngineHits, type SearchSourceBucket } from '../cross-source-fusion';
-import { buildTradeFairSearchQueries, selectCatalogFairs } from '../trade-fair-catalog';
+import {
+  buildTradeFairSearchQueries,
+  isTradeFairDirectlyCrawlable,
+  selectCatalogFairs,
+} from '../trade-fair-catalog';
 import type { CrawlResult } from '../../adapters/web-crawler';
-import { extractSameSiteLinks } from '../../adapters/site-links';
 import { isAllowedByRobots } from '../../adapters/robots';
 import { normalizeDomain } from '../identity';
 import {
@@ -279,26 +282,30 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
   ): Promise<string[]> {
     const listingUrls = new Set<string>();
     const seen = new Set<string>();
-    // 1) 优先直注已批准的行业协会名录入口（严格经 blockedDomains + source_policy 准入闸门）
+    const tryAdd = (url: string, requireShaped: boolean, title = ''): void => {
+      const domain = normalizeDomain(url);
+      if (!domain || blocked.has(domain)) return;
+      if (NOISE_DOMAINS.some((n) => domain === n || domain.endsWith(`.${n}`))) return;
+      if ((requireShaped && !isDirectoryListingShaped(url, title)) || seen.has(url)) return;
+      seen.add(url);
+      if (admitsSource(url, policyCheck, denied)) listingUrls.add(url);
+    };
+    // 1) 合规已启用的垂直展会目录直达（至多 2 个）：无需逐站手写 CSS 选择器，直接走通用 crawl4ai.fetch + 翻页 + extract_list。
+    for (const fairUrl of selectDirectTradeFairUrls(query)) {
+      tryAdd(fairUrl, false);
+    }
+    // 2) 已批准的行业协会名录入口（严格经 blockedDomains + source_policy 准入闸门）。
     for (const seedUrl of selectApprovedAssociationDirectoryUrls(query)) {
-      const domain = normalizeDomain(seedUrl);
-      if (!domain || blocked.has(domain) || seen.has(seedUrl)) continue;
-      seen.add(seedUrl);
-      if (admitsSource(seedUrl, policyCheck, denied)) listingUrls.add(seedUrl);
+      tryAdd(seedUrl, false);
       if (listingUrls.size >= MAX_DIRECTORY_LISTING_PAGES) {
         return [...listingUrls].slice(0, MAX_DIRECTORY_LISTING_PAGES);
       }
     }
-    // 2) 搜索引擎补齐剩余名录页配额
+    // 3) 搜索引擎补齐剩余名录页配额（含 blocked 展会的 L0 搜索引擎间接召回）。
     for (const q of buildDirectorySearches(query)) {
       const hits = await this.search(q, ctx, searchLanguageFor(query));
       for (const h of hits) {
-        const domain = normalizeDomain(h.url);
-        if (!domain || blocked.has(domain)) continue;
-        if (NOISE_DOMAINS.some((n) => domain === n || domain.endsWith(`.${n}`))) continue;
-        if (!isDirectoryListingShaped(h.url, h.title) || seen.has(h.url)) continue;
-        seen.add(h.url);
-        if (admitsSource(h.url, policyCheck, denied)) listingUrls.add(h.url);
+        tryAdd(h.url, true, h.title);
       }
     }
     // Denied results must not displace approved sources from the existing page cap.
@@ -459,7 +466,7 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
         out.push(Object.freeze({ record: mapped, collector: extraction.collector }));
       }
       this.log(`✓ ${pageUrl}: +${out.length} cleaned companies (raw ${extracted.companies.length}, page ${page + 1})`);
-      pageUrl = extracted.has_next_page ? nextPageLink(text, sourceUrl) : null;
+      pageUrl = extracted.has_next_page ? nextPageLink(text, sourceUrl, visited) : null;
     }
     return Object.freeze({
       records: Object.freeze(out),
@@ -691,9 +698,58 @@ function slug(s: string): string {
   return prefix ? `${prefix}-${digest}` : digest;
 }
 
-/** 从当前页文本里找"下一页"链接（同站，含 next/weiter 或数字页码）。 */
-function nextPageLink(markdown: string, baseUrl: string): string | null {
-  const links = extractSameSiteLinks(markdown, baseUrl);
-  const next = links.find((l) => /[?&](page|p|seite|start|offset)=\d+/i.test(l) || /\/(page|seite)\/\d+/i.test(l));
-  return next ?? null;
+/** 从当前页文本里找"下一页"链接（同站，保留查询串翻页参数，跳过已抓取页）。 */
+export function nextPageLink(
+  markdown: string,
+  baseUrl: string,
+  visited?: ReadonlySet<string>,
+): string | null {
+  let base: URL;
+  try {
+    base = new URL(baseUrl);
+  } catch {
+    return null;
+  }
+  const baseHost = base.hostname.replace(/^www\./, '');
+  const baseNormalized = new URL(base.toString());
+  baseNormalized.hash = '';
+  const baseHref = baseNormalized.toString();
+  const re = /\]\(\s*(<[^>]+>|[^)\s]+)/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(markdown)) !== null) {
+    const raw = match[1].replace(/^<|>$/g, '');
+    try {
+      const url = new URL(raw, base);
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') continue;
+      if (url.hostname.replace(/^www\./, '') !== baseHost) continue;
+      url.hash = '';
+      const href = url.toString();
+      if (href === baseHref || visited?.has(href) || visited?.has(href.replace(/\/$/, ''))) continue;
+      if (/[?&](page|p|seite|start|offset)=\d+/i.test(url.search) || /\/(page|seite)\/\d+/i.test(url.pathname)) {
+        return href;
+      }
+    } catch {
+      // unparseable href — ignore
+    }
+  }
+  return null;
+}
+
+/** 选出与当前查询匹配且已通过合规审核（robots A + license + tosUrl）的展会展商页直抓 URL（至多 2 个）。 */
+export function selectDirectTradeFairUrls(query: CompanyDiscoveryQuery, limit = 2): string[] {
+  if (searchLanguageFor(query) === 'zh') return [];
+  const f = query.filters ?? {};
+  const arr = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : v == null ? [] : [String(v)]);
+  const rawIndustries = [...arr(f.industry), ...arr(f.sub_industry)];
+  const rawKeywords = query.keywords ?? [];
+  const matched = selectCatalogFairs({
+    industryTerms: [...searchableTerms(rawIndustries), ...rawIndustries],
+    keywords: [...searchableTerms(rawKeywords), ...rawKeywords],
+    countries: targetCountryCodes(query).map((code) => code.toUpperCase()),
+    regions: arr(f.region),
+  });
+  return matched
+    .filter(isTradeFairDirectlyCrawlable)
+    .slice(0, Math.max(0, limit))
+    .map((fair) => fair.exhibitorUrl);
 }

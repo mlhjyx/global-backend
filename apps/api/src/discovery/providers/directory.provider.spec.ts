@@ -3,7 +3,9 @@ import {
   buildDirectorySearches,
   isDirectoryListingShaped,
   mapDirectoryCompanyToRecord,
+  nextPageLink,
   selectApprovedAssociationDirectoryUrls,
+  selectDirectTradeFairUrls,
 } from './directory.provider';
 import { CompanyDiscoveryQuery } from '../provider-contract';
 
@@ -211,5 +213,53 @@ describe('名录发现检索串构造', () => {
     expect(rec.country).toBe('DE');
     expect(rec.externalId).toBe('directory:axitecsolar.com');
     expect(validateRawSourceProviderPayload('directory', rec).ok).toBe(true);
+  });
+
+  it('selectDirectTradeFairUrls 只直抓合规已启用展会，绝不直抓被封禁展会（如 KEY Energy / CHINAPLAS / RX Japan）', () => {
+    const hasHost = (url: string, domain: string): boolean => {
+      const hostname = new URL(url).hostname.toLowerCase();
+      return hostname === domain || hostname.endsWith(`.${domain}`);
+    };
+    const pvUrls = selectDirectTradeFairUrls(
+      q({ industry: 'photovoltaic', country: 'Italy' }, ['solar module', 'HJT']),
+    );
+    expect(pvUrls).toEqual([
+      'https://www.intersolar.de/exhibitorlist',
+      'https://www.intersolar.net.br/exhibitorlist',
+    ]);
+    expect(pvUrls.some((u) => hasHost(u, 'key-expo.com'))).toBe(false);
+
+    const usPvUrls = selectDirectTradeFairUrls(
+      q({ industry: 'photovoltaic', country: 'US' }, ['solar module']),
+    );
+    expect(usPvUrls[0]).toBe('https://re26.mapyourshow.com/8_0/explore/exhibitor-gallery.cfm?featured=false');
+
+    const plasticsUrls = selectDirectTradeFairUrls(
+      q({ industry: 'plastics machinery', country: 'Italy' }, ['extrusion']),
+    );
+    expect(plasticsUrls).toContain('https://plastonline.org/en/exhibitors/list-of-exhibitors/');
+    expect(
+      plasticsUrls.some((u) => hasHost(u, 'chinaplasonline.com') || hasHost(u, 'material-expo.jp')),
+    ).toBe(false);
+
+    // 中文国内市场保持纯中文检索，不注入海外英文展会直链
+    expect(
+      selectDirectTradeFairUrls(q({ industry: '光伏', country: '中国' }, ['异质结'])),
+    ).toEqual([]);
+  });
+
+  it('nextPageLink skips already-visited pagination URLs and non-http(s) schemes', () => {
+    const md =
+      '[bad1](javascript:void(0)?page=9) [bad2](data:text/html,?page=8) [bad3](vbscript:msgbox(1)?page=7) ' +
+      '[1](https://expomedistanbul.com/en/exhibitor-list?page=1) ' +
+      '[2](https://expomedistanbul.com/en/exhibitor-list?page=2) ' +
+      '[3](https://expomedistanbul.com/en/exhibitor-list?page=3)';
+    const visited = new Set([
+      'https://expomedistanbul.com/en/exhibitor-list?page=1',
+      'https://expomedistanbul.com/en/exhibitor-list?page=2',
+    ]);
+    expect(nextPageLink(md, 'https://expomedistanbul.com/en/exhibitor-list?page=2', visited)).toBe(
+      'https://expomedistanbul.com/en/exhibitor-list?page=3',
+    );
   });
 });
