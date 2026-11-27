@@ -965,6 +965,23 @@ describe('source coverage fill (vNext W4)', () => {
     );
     expect(hintsOf(uk)).toContain('companies_house_registry');
   });
+
+  it('uses only the country from a qualified Chinese market for source coverage', () => {
+    const sources: readonly CompanyDiscoverySource[] = [
+      ...enabledOnly('wikidata', 'openstreetmap', 'model_web_search', 'public_web'),
+      { sourceClass: 'company_registry', providerKey: 'companies_house_registry', hasCompanyLineage: true },
+    ];
+    const filled = withSourceCoverage(
+      [{ ...query('company_registry', { source_hint: 'wikidata', country: '中国' }), keywords: ['变电设备'] }],
+      { targetMarkets: ['中国大陆｜变电站及配电设施新建'], companyAttributes: { industry: '电力设备' } },
+      sources,
+    );
+    expect(hintsOf(filled)).not.toContain('companies_house_registry');
+    expect(filled.slice(1).map((planned) => planned.filters?.country)).toEqual([
+      '中国大陆', '中国大陆', '中国大陆',
+    ]);
+    expect(filled.slice(1).every((planned) => planned.keywords?.includes('变电设备'))).toBe(true);
+  });
 });
 
 describe('registry_frame loaded-country lookup (vNext W4)', () => {

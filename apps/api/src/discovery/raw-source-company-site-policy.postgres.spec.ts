@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { mapDirectoryCompanyToRecord } from "./providers/directory.provider";
 import { mapPublicWebCompanyToRecord } from "./providers/public-web.provider";
 import {
   prepareRawSourceBatch,
@@ -90,6 +91,7 @@ describe.runIf(enabled)("Raw source policy binding on PostgreSQL", { timeout: 60
     for (const [key, sourceClass] of [
       ["public_web", "public_intelligence"],
       ["registry", "company_registry"],
+      ["directory", "industry_data"],
     ] as const) {
       const prior = await owner.$queryRaw<{ status: string }[]>`
         SELECT status FROM data_provider WHERE key = ${key}`;
@@ -214,7 +216,8 @@ describe.runIf(enabled)("Raw source policy binding on PostgreSQL", { timeout: 60
           runId,
           sourceEntityId: null,
           providerKey,
-          sourceClass: providerKey === "registry" ? "company_registry" : "public_intelligence",
+          sourceClass: providerKey === "directory" ? "industry_data"
+            : providerKey === "registry" ? "company_registry" : "public_intelligence",
           row,
         });
         stored = (
@@ -234,6 +237,26 @@ describe.runIf(enabled)("Raw source policy binding on PostgreSQL", { timeout: 60
   }
 
   /** TypeScript and the writer agree: no raise, and the stored row is the prepared one. */
+  it("keeps the real www listing URL and rejects unrelated listing origins", async () => {
+    const policy = { id: policyId(9), domain: site };
+    await withPolicies([policy], async () => {
+      const sourceUrl = `https://www.${site}/elenco-soci`;
+      const record = mapDirectoryCompanyToRecord({
+        company: { name: "Synthetic Pump Distributor", website: "https://pumps.example" },
+        pageUrl: sourceUrl,
+        sourceClass: "industry_data",
+      });
+      const row = await prepare("directory", record);
+      expect(row.ingestStatus).toBe("ACCEPTED");
+      await expect(persist("directory", row)).resolves.toMatchObject({ ingestStatus: "ACCEPTED", sourceUrl });
+      const payload = row.payload as { attributes: Record<string, unknown> };
+      const forged = { ...row, payload: {
+        ...payload, attributes: { ...payload.attributes, source_directory: "unrelated.example" },
+      } };
+      await expect(persist("directory", forged)).rejects.toThrow(/RAW_SOURCE_WRITER_ORIGIN_BINDING_INVALID/u);
+    });
+  });
+
   async function expectParity(
     providerKey: string,
     record: unknown,
