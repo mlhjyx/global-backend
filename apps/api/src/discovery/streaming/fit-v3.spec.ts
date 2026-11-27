@@ -313,6 +313,76 @@ describe('fit-v3 unified rubric & R0 Ordina ora false-positive fix', () => {
     expect(vetoed.score).toBe(0);
     expect(gateway.generateStructured).not.toHaveBeenCalled();
   });
+  it('keeps byte-identical system prompt across companies under the same ICP for automatic prompt caching', async () => {
+    const captured: Array<{ system?: string; prompt: string }> = [];
+    const gateway = {
+      generateStructured: vi.fn(async (req: { system?: string; prompt: string }) => {
+        captured.push({ system: req.system, prompt: req.prompt });
+        return {
+          data: {
+            verdict: 'match',
+            material_gate: 'pass',
+            role_gate: 'pass',
+            process_gate: 'not_applicable',
+            business_model_gate: 'pass',
+            reasons: ['match'],
+          },
+          usage: { inputTokens: 300, outputTokens: 80, costCents: 0 },
+          model: 'test-model',
+          provider: 'test',
+        };
+      }),
+    } as unknown as ModelGateway;
+    const icp = {
+      name: '欧洲光伏分销商 ICP',
+      targetMarkets: ['DE', 'NL'],
+      exclusions: ['上游组件制造厂'],
+      companyAttributes: { trade_side: 'distributor', product: 'photovoltaic modules' },
+    };
+
+    await judgeCompanyFitV3({
+      gateway,
+      workspaceId: '10000000-0000-4000-8000-000000000001',
+      runId: '30000000-0000-4000-8000-000000000003',
+      icp,
+      company: {
+        id: '20000000-0000-4000-8000-000000000011',
+        name: 'deSonna',
+        domain: 'desonna.de',
+        country: 'DE',
+        industry: 'Solar',
+        visibleText: 'Photovoltaik Großhandel Deutschland',
+        title: 'deSonna',
+        metaDescription: null,
+        channelsSummary: 'roleEmails=1',
+      },
+    });
+    await judgeCompanyFitV3({
+      gateway,
+      workspaceId: '10000000-0000-4000-8000-000000000001',
+      runId: '30000000-0000-4000-8000-000000000003',
+      icp,
+      company: {
+        id: '20000000-0000-4000-8000-000000000012',
+        name: 'SolarNRG Trading B.V.',
+        domain: 'solarnrg.nl',
+        country: 'NL',
+        industry: 'Solar',
+        visibleText: 'PV groothandel Nederland',
+        title: 'SolarNRG',
+        metaDescription: null,
+        channelsSummary: 'roleEmails=1',
+      },
+    });
+
+    expect(captured).toHaveLength(2);
+    expect(captured[0]!.system).toBe(captured[1]!.system);
+    expect(captured[0]!.system).toContain('欧洲光伏分销商 ICP');
+    expect(captured[0]!.system).toContain(FIT_V3_RUBRIC_VERSION);
+    expect(captured[0]!.prompt).toContain('desonna.de');
+    expect(captured[0]!.prompt).not.toContain('欧洲光伏分销商 ICP');
+    expect(captured[1]!.prompt).toContain('solarnrg.nl');
+  });
 });
 
 describe('company overview extracted during streaming qualification', () => {

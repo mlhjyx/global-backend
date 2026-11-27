@@ -56,11 +56,14 @@ queries:
     expected_domains: []
     excluded_domains: []
   - id: de-electronics
-    icp: 德国电子制造服务商
+    icp: 德国工业电子与测试控制设备商
     target_markets: [德国]
     industry_terms: [电子, electronics]
-    expected_domains: []
-    excluded_domains: []
+    expected_domains: [autotestgeraete.de, hps-nrw.de, westfalia-waermetechnik.de, lhf.de]
+    excluded_domains: [vivo.com]
+    labeled_by: mlhjyx
+    labeled_at: 2026-11-28
+    notes: dev 库实测核实的德国工业电子、测试与温控液压控制企业（排除消费电子手机品牌）
   - id: de-medical-devices
     icp: 德国医疗器械制造商
     target_markets: [德国]
@@ -71,8 +74,11 @@ queries:
     icp: 奥地利泵与流体设备经销
     target_markets: [奥地利]
     industry_terms: [pumps, 泵]
-    expected_domains: []
+    expected_domains: [arada.at, axflow.com, hidrostal.com, tapflo.com, verderliquids.com]
     excluded_domains: []
+    labeled_by: mlhjyx
+    labeled_at: 2026-11-28
+    notes: dev 库实测核实的奥地利泵类与流体设备分销/代理企业
   - id: ch-industrial-supplies
     icp: 瑞士工业配件与密封件供应商
     target_markets: [瑞士]
@@ -172,3 +178,40 @@ queries:
     industry_terms: [pumps]
     expected_domains: []
     excluded_domains: []
+  # ---- 光伏组件与储能分销/EPC 黄金评测样例（2026-11-28，依据真实试点寻源 601983b1 逐站核验）----
+  - id: de-solar-pv-bess-channel
+    icp: 德国光伏组件与储能分销商及安装商
+    target_markets: [德国]
+    industry_terms: [solar, photovoltaic, 光伏]
+    expected_domains: [desonna.de, ikratos.de, solarcheck24.nrw, vivavolt.de]
+    excluded_domains: [fe-leads.de, fe-promotion.de, kraft-baustoffe.de, cnsolarpanel.com, huasunsolar.com]
+    labeled_by: mlhjyx
+    labeled_at: 2026-11-28
+    notes: 试点寻源 601983b1 核实的德国光伏渠道/安装商（排除营销外包、建材及上游组件制造同行）
+  - id: nl-solar-pv-distributor
+    icp: 荷兰光伏组件批发分销商与 EPC 项目商
+    target_markets: [荷兰]
+    industry_terms: [solar, photovoltaic, 光伏]
+    expected_domains: [solarnrg.nl, rexel.nl, solardeals.nl, solarfast.nl, pv-projecten.nl, blkprojects.nl]
+    excluded_domains: [cnsolarpanel.com, huasunsolar.com]
+    labeled_by: mlhjyx
+    labeled_at: 2026-11-28
+    notes: 试点寻源 601983b1 核实的荷兰光伏分销商与项目集成商
+  - id: gb-solar-pv-installer
+    icp: 英国光伏与储能系统分销商及安装商
+    target_markets: [英国]
+    industry_terms: [solar, photovoltaic, 光伏]
+    expected_domains: [giantsolar.co.uk, triplesolar.co.uk, in2gr8tedsolutions.co.uk]
+    excluded_domains: [cnsolarpanel.com]
+    labeled_by: mlhjyx
+    labeled_at: 2026-11-28
+    notes: 试点寻源 601983b1 核实的英国光伏/储能安装与供应企业
+  - id: br-solar-pv-distributor
+    icp: 巴西光伏组件批发分销商与工商业太阳能方案商
+    target_markets: [巴西]
+    industry_terms: [solar, photovoltaic, 光伏]
+    expected_domains: [aldo.com.br, aztecenergia.com.br, ecorienergiasolar.com.br, edeltecsolar.com.br, fotus.com.br]
+    excluded_domains: [cnsolarpanel.com]
+    labeled_by: mlhjyx
+    labeled_at: 2026-11-28
+    notes: 试点寻源 601983b1 核实的巴西主流光伏分销与商业项目企业
