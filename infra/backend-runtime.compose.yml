@@ -114,6 +114,12 @@ services:
         target: /run/secrets/machine
         read_only: true
         bind: { create_host_path: false }
+    healthcheck:
+      test: ["CMD", "node", "-e", "const fs=require('node:fs');const ok=fs.readdirSync('/proc').some((p)=>/^[0-9]+$/.test(p)&&Number(p)!==process.pid&&(() => {try{return fs.readFileSync('/proc/'+p+'/comm','utf8').trim()==='node';}catch{return false;}})());process.exit(ok?0:1);"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
   platform-worker:
     <<: *backend-runtime
@@ -139,3 +145,9 @@ services:
         target: /run/secrets/machine
         read_only: true
         bind: { create_host_path: false }
+    healthcheck:
+      test: ["CMD", "node", "-e", "const fs=require('node:fs');const ok=fs.readdirSync('/proc').some((p)=>/^[0-9]+$/.test(p)&&Number(p)!==process.pid&&(() => {try{return fs.readFileSync('/proc/'+p+'/comm','utf8').trim()==='node';}catch{return false;}})());process.exit(ok?0:1);"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
