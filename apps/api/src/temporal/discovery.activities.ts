@@ -111,6 +111,7 @@ import {
   buildGovernedDiscoveryQueryExecutionPlan,
   commitGovernedDiscoveryQueryExecution,
   DISCOVERY_RAW_INGEST_TX_OPTIONS,
+  legacyDiscoveryQueryAcknowledgements,
 } from './discovery-query-governed-execution';
 import { writeSourceYieldLedger } from '../evaluation/source-yield-ledger';
 import {
@@ -1385,16 +1386,7 @@ export function createDiscoveryActivities(deps: {
       const legacy = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const persisted = await applyDomainAckConsumerTransactions({
           transaction: tx,
-          acknowledgements: settled.flatMap((item) => item.status === 'fulfilled'
-            ? item.value.durableReceipts.map(({ producerId, receipt }) => ({
-                producerId,
-                receipt,
-                domainAckKey: queryKey
-                  ? `${args.runId}:${queryKey}:${item.value.key}:${receipt.operationId}`
-                  : `${args.runId}:${item.value.key}:${receipt.operationId}`,
-                domainRevision: receipt.resultDigest,
-              }))
-            : []),
+          acknowledgements: legacyDiscoveryQueryAcknowledgements(settled, args.runId, queryKey),
           apply: async (transaction) => {
             const lockedRun = receiptIdentity
               ? await lockDiscoveryRunReceiptState(transaction, {
