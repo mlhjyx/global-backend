@@ -95,7 +95,7 @@ export interface LeadPackageInput {
   readonly companySignals?: readonly LeadPackageCompanySignal[];
   /** 禁联或未清制裁命中时为 true：隐藏社媒与渠道链接，避免误导运营触达受限主体。 */
   readonly omitSocials?: boolean;
-  readonly companyOverviewAllowed?: boolean;
+  readonly allowedCompanyWebsiteUrls?: readonly string[];
   readonly evidence: readonly LeadPackageEvidence[];
   readonly sanctions: { readonly status: LeadPackageSanctionsStatus; readonly screened_at: string | null };
   readonly validUntil: string | null;
@@ -247,13 +247,13 @@ function leadCompanyOverview(
   const displayEvidence = input.evidence.filter((row) =>
     Array.isArray(row.allowedActions) && row.allowedActions.includes('display'),
   );
-  const overview = input.companyOverviewAllowed && candidate && displayEvidence.some((row) =>
+  const overview = candidate && input.allowedCompanyWebsiteUrls?.includes(candidate.source_url) && displayEvidence.some((row) =>
     row.field === COMPANY_OVERVIEW_EVIDENCE_FIELD && row.sourceUrl === candidate.source_url &&
     isoInstant(row.fetchedAt) === candidate.fetched_at,
   ) ? candidate : undefined;
   const previousProfile = record(attributes.website_profile);
   const legacyUrl = companyWebsiteSource(previousProfile.source_url, domain);
-  const legacyProof = input.companyOverviewAllowed && legacyUrl ? displayEvidence.find((row) =>
+  const legacyProof = legacyUrl && input.allowedCompanyWebsiteUrls?.includes(legacyUrl) ? displayEvidence.find((row) =>
     row.field === 'website_profile.source_url' && row.sourceUrl === legacyUrl,
   ) : undefined;
   const websiteUrl = overview?.source_url ?? (legacyProof ? legacyUrl : null);

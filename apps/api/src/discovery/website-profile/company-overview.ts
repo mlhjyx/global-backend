@@ -137,3 +137,48 @@ export function readCompanyWebsiteOverview(
   }))];
   return { description, main_business: mainBusiness, source_url, fetched_at };
 }
+
+export function nextCompanyWebsiteOverview(
+  currentValue: unknown,
+  candidateValue: CompanyWebsiteOverview | undefined,
+  domain: string | null,
+): CompanyWebsiteOverview | undefined {
+  const candidate = readCompanyWebsiteOverview(candidateValue, domain);
+  if (!candidate) return undefined;
+  const current = readCompanyWebsiteOverview(currentValue, domain);
+  if (current && (
+    current.fetched_at >= candidate.fetched_at ||
+    (current.description && !candidate.description) ||
+    (current.main_business.length > 0 && candidate.main_business.length === 0)
+  )) return undefined;
+  return candidate;
+}
+
+export async function loadCompanyOverviewPublication(
+  tx: Pick<Prisma.TransactionClient, 'sourcePolicy' | 'fieldEvidence'>,
+  workspaceId: string,
+  company: { id: string; domain: string | null; attributes: unknown },
+) {
+  const attributes = record(company.attributes);
+  const overview = readCompanyWebsiteOverview(attributes?.company_website_overview, company.domain);
+  const previousProfile = record(attributes?.website_profile);
+  const legacyUrl = companyWebsiteSource(previousProfile?.source_url, company.domain);
+  const sourceUrls = new Set([overview?.source_url, legacyUrl].filter((url) => url != null));
+  const allowedUrls: string[] = [];
+  for (const url of sourceUrls) {
+    if (await companyWebsiteDisplayAllowed(tx, url)) allowedUrls.push(url);
+  }
+  // The exact publication proof can be older than the activity evidence shown to the user.
+  const proof = overview && allowedUrls.includes(overview.source_url)
+    ? await tx.fieldEvidence.findFirst({
+      where: {
+        workspaceId, entityType: 'company', entityId: company.id,
+        field: COMPANY_OVERVIEW_EVIDENCE_FIELD, sourceUrl: overview.source_url,
+        fetchedAt: new Date(overview.fetched_at),
+        dataClass: 'green', allowedActions: { array_contains: ['display'] },
+      },
+      select: { field: true, sourceUrl: true, fetchedAt: true, allowedActions: true },
+    })
+    : null;
+  return { allowedUrls, proof };
+}

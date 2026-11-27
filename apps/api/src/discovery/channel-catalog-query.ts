@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto';
 import type { PrismaClient } from '@prisma/client';
 import { normalizeCompanyNameTypography } from './company-name-format';
 import { normalizeDomain } from './identity';
-import { isIso3166Alpha2 } from './iso3166';
+import { isIso3166Alpha2 } from '../common/iso3166';
 import { isStableSafeHttpsUrl } from './raw-source-provider-normalizer';
 import { targetCountryCodes } from './search-localization';
 import { lookupCountryIso } from './vocab';

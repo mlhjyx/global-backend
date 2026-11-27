@@ -17,14 +17,9 @@ import {
   leadCandidateBatchRef,
 } from './lead-qualified-snapshot';
 import { buildLeadPackage, packageSanctionsStatus, type LeadPackage } from './lead-package';
-import {
-  COMPANY_OVERVIEW_EVIDENCE_FIELD,
-  companyWebsiteDisplayAllowed,
-  companyWebsiteSource,
-  readCompanyWebsiteOverview,
-} from '../discovery/website-profile/company-overview';
-import { filterReachableCompanyChannels, loadCompanyContactChannels, loadLeadListChannelSummaries, type LeadPackageCompanyChannel } from '../discovery/company-channels';
-import { loadCompanySignalsForLead, type LeadPackageCompanySignal } from '../signals/enrichment-signal-projection';
+import { loadCompanyOverviewPublication } from '../discovery/website-profile/company-overview';
+import { filterReachableCompanyChannels, loadCompanyContactChannels, loadLeadListChannelSummaries } from '../discovery/company-channels';
+import { loadCompanySignalsForLead } from '../signals/enrichment-signal-projection';
 import { isOutcomeReasonCode, isRejectReasonCode, REJECT_REASON_CODES } from './reason-codes';
 import { reachableCompanyContactPoints } from '../discovery/company-contact-points';
 import { DataRightsService } from '../compliance/data-rights.service';
@@ -281,12 +276,7 @@ export class LeadService {
       sourceUrl?: string | null;
       allowedActions?: unknown;
     }>,
-  ): Promise<{
-    contactPoints: Array<{ kind: string; value: string; status: string }>;
-    companyChannels: LeadPackageCompanyChannel[];
-    companySignals: LeadPackageCompanySignal[];
-    evidence: Array<{ field: string; sourceUrl: string | null; fetchedAt: Date; allowedActions?: unknown }>;
-  }> {
+  ) {
     const contactPoints = await tx.companyContactPoint.findMany({
       where: { companyId: company.id },
       select: { kind: true, value: true, status: true },
@@ -357,23 +347,7 @@ export class LeadService {
         select: { type: true, value: true },
       });
       const facts = await this.loadDeliveryFacts(tx, company, suppressions);
-      const attributes = company.attributes as Record<string, unknown> | null;
-      const companyOverview = readCompanyWebsiteOverview(attributes?.company_website_overview, company.domain);
-      const legacyWebsite = attributes?.website_profile as { source_url?: unknown } | undefined;
-      const sourceUrl = companyOverview?.source_url ?? companyWebsiteSource(legacyWebsite?.source_url, company.domain);
-      const companyOverviewAllowed = sourceUrl ? await companyWebsiteDisplayAllowed(tx, sourceUrl) : false;
-      // Fetch the exact publication proof independently of the capped activity evidence list.
-      const overviewProof = companyOverview && companyOverviewAllowed
-        ? await tx.fieldEvidence.findFirst({
-          where: {
-            workspaceId: ctx.workspaceId, entityType: 'company', entityId: company.id,
-            field: COMPANY_OVERVIEW_EVIDENCE_FIELD, sourceUrl: companyOverview.source_url,
-            fetchedAt: new Date(companyOverview.fetched_at),
-            dataClass: 'green', allowedActions: { array_contains: ['display'] },
-          },
-          select: { field: true, sourceUrl: true, fetchedAt: true, allowedActions: true },
-        })
-        : null;
+      const { allowedUrls, proof: overviewProof } = await loadCompanyOverviewPublication(tx, ctx.workspaceId, company);
       // L1：有效期按「每个字段取最新、字段之间取最早」——每 (entityId, field, dataClass) 取最新抓取，
       // 字段数有界（一家公司几十个字段），比旧的「每分级一行」略多但仍是小结果集。
       const freshness = await tx.fieldEvidence.groupBy({
@@ -401,7 +375,7 @@ export class LeadService {
         companyChannels: undeliverable ? [] : facts.companyChannels,
         companySignals: facts.companySignals,
         omitSocials: undeliverable,
-        companyOverviewAllowed,
+        allowedCompanyWebsiteUrls: allowedUrls,
         evidence: overviewProof ? [overviewProof, ...facts.evidence] : facts.evidence,
         sanctions: {
           status: sanctionsStatus,

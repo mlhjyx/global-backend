@@ -24,7 +24,7 @@ import { lockWorkspaceSuppressionPolicy } from '../discovery/suppression-policy-
 import {
   COMPANY_OVERVIEW_EVIDENCE_FIELD,
   companyWebsiteDisplayAllowed,
-  readCompanyWebsiteOverview,
+  nextCompanyWebsiteOverview,
   type CompanyWebsiteOverview,
 } from '../discovery/website-profile/company-overview';
 import { appendRunEvent } from '../discovery/run2/run-events';
@@ -371,14 +371,8 @@ async function persistExtractionFacts(
       ...(extraction.passiveDns ? { passiveDns: extraction.passiveDns } : {}),
     },
   };
-  const previousOverview = readCompanyWebsiteOverview(currentAttrs.company_website_overview, company.domain);
-  const candidateOverview = readCompanyWebsiteOverview(companyOverview, company.domain);
-  const shouldUpdateOverview = candidateOverview && (!previousOverview || (
-    previousOverview.fetched_at < candidateOverview.fetched_at &&
-    (!previousOverview.description || candidateOverview.description) &&
-    (previousOverview.main_business.length === 0 || candidateOverview.main_business.length > 0)
-  ));
-  const nextOverview = shouldUpdateOverview && await companyWebsiteDisplayAllowed(tx, candidateOverview.source_url)
+  const candidateOverview = nextCompanyWebsiteOverview(currentAttrs.company_website_overview, companyOverview, company.domain);
+  const nextOverview = candidateOverview && await companyWebsiteDisplayAllowed(tx, candidateOverview.source_url)
     ? candidateOverview
     : undefined;
   if (nextOverview) nextAttrs.company_website_overview = nextOverview;

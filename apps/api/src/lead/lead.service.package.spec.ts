@@ -51,6 +51,7 @@ function txFor(over?: Record<string, unknown>) {
     // 一次 include 读取 lead 与其公司（联系人只取 id）。
     lead: { findUnique: vi.fn(async () => ({ ...lead, canonicalCompany: { ...company, contacts: [] } })) },
     canonicalCompany: { findUnique: vi.fn(async () => company) },
+    sourcePolicy: { findMany: vi.fn(async () => []) },
     fieldEvidence: {
       // First call is the provenance probe; the later one loads evidence detail.
       findMany: vi.fn(async (args: { select?: Record<string, unknown> }) =>
@@ -128,6 +129,73 @@ describe('LeadService.package', () => {
     const pkg = await serviceWithTx(tx).leadPackage(ctx, 'lead-1');
     expect(pkg.contact_points).toEqual([]);
     expect(pkg.suggested_contact_path).toBeNull();
+  });
+
+  it('reads the exact approved company overview proof outside the activity evidence limit', async () => {
+    const sourceUrl = 'https://beispiel-pumpen.de/';
+    const fetchedAt = new Date('2026-11-26T09:00:00.000Z');
+    const overview = {
+      description: 'Beispiel Pumpen distributes industrial pumps and accessories.',
+      main_business: ['Industrial pumps'],
+      source_url: sourceUrl,
+      fetched_at: fetchedAt.toISOString(),
+    };
+    const proof = vi.fn(async () => ({
+      field: 'company_website_overview', sourceUrl, fetchedAt, allowedActions: ['display'],
+    }));
+    const base = txFor();
+    const tx = txFor({
+      lead: { findUnique: vi.fn(async () => ({
+        ...lead, canonicalCompany: {
+          ...company, contacts: [], attributes: { ...company.attributes, company_website_overview: overview },
+        },
+      })) },
+      sourcePolicy: { findMany: vi.fn(async () => [{
+        sourceType: 'official_website', reviewStatus: 'APPROVED', termsStatus: 'REVIEWED_OK',
+        allowedPurpose: ['enrichment'], allowedPaths: null, disallowedPaths: null,
+      }]) },
+      fieldEvidence: { ...base.fieldEvidence, findFirst: proof },
+    });
+    const pkg = await serviceWithTx(tx).leadPackage(ctx, 'lead-1');
+    expect(proof).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        workspaceId: 'ws-1', entityType: 'company', entityId: 'company-1',
+        field: 'company_website_overview', sourceUrl, fetchedAt,
+        dataClass: 'green', allowedActions: { array_contains: ['display'] },
+      },
+    }));
+    expect(pkg.company_overview).toMatchObject({
+      description: overview.description, main_business: ['Industrial pumps'], official_website: sourceUrl,
+      sources: expect.arrayContaining([{ field: 'description', source_url: sourceUrl, fetched_at: overview.fetched_at }]),
+    });
+  });
+
+  it.each([true, false])('requires approval for the legacy source URL itself (approved: %s)', async (approved) => {
+    const candidateUrl = 'https://beispiel-pumpen.de/';
+    const legacyUrl = 'https://beispiel-pumpen.de/impressum';
+    const fetchedAt = new Date('2026-11-26T09:00:00.000Z');
+    const attributes = {
+      ...company.attributes,
+      company_website_overview: { source_url: candidateUrl, fetched_at: fetchedAt.toISOString() },
+    };
+    const tx = txFor({
+      lead: { findUnique: vi.fn(async () => ({ ...lead, canonicalCompany: { ...company, attributes, contacts: [] } })) },
+      sourcePolicy: { findMany: vi.fn(async () => [{
+        sourceType: 'official_website', reviewStatus: 'APPROVED', termsStatus: 'REVIEWED_OK',
+        allowedPurpose: ['enrichment'], allowedPaths: ['/'],
+        disallowedPaths: approved ? null : ['/impressum'],
+      }]) },
+      fieldEvidence: {
+        ...txFor().fieldEvidence,
+        findFirst: vi.fn(async () => null),
+        findMany: vi.fn(async () => [{
+          entityId: 'company-1', field: 'website_profile.source_url', sourceUrl: legacyUrl, fetchedAt,
+          rawRecordId: null, providerKey: 'website_profile', license: 'public', allowedActions: ['display'],
+        }]),
+      },
+    });
+    const pkg = await serviceWithTx(tx).leadPackage(ctx, 'lead-1');
+    expect(pkg.company_overview?.official_website ?? null).toBe(approved ? candidateUrl : null);
   });
 
   it('reports an unresolved or not-screened sanctions state honestly', async () => {

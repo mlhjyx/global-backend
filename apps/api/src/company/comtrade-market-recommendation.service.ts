@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import type { RequestContext } from '../auth/request-context';
-import { isIso3166Alpha2 } from '../discovery/iso3166';
+import { isIso3166Alpha2 } from '../common/iso3166';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   COMTRADE_HS_CATALOG,

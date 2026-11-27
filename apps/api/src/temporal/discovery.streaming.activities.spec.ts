@@ -19,6 +19,11 @@ import {
   DISCOVERY_WORKFLOW,
 } from './understanding.constants';
 
+vi.mock(import('../discovery/providers/passive-dns'), async (importOriginal) => ({
+  ...await importOriginal(),
+  inspectPassiveDns: vi.fn(async () => null),
+}));
+
 const WORKSPACE_ID = '10000000-0000-4000-8000-000000000001';
 const RUN_ID = '20000000-0000-4000-8000-000000000002';
 const PLAN_ID = '30000000-0000-4000-8000-000000000003';

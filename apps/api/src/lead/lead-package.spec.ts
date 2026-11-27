@@ -401,7 +401,7 @@ describe('lead company overview projection', () => {
         ...input.company,
         attributes: { ...(input.company.attributes as object), company_website_overview: value },
       },
-      companyOverviewAllowed: sourcePolicyCurrent,
+      allowedCompanyWebsiteUrls: sourcePolicyCurrent ? [website.source_url] : [],
       evidence: [
         ...input.evidence,
         { field: 'company_website_overview', sourceUrl: website.source_url, fetchedAt: website.fetched_at, allowedActions },
