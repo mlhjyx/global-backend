@@ -253,7 +253,7 @@ export const httpGetTool: Tool<HttpGetInput, HttpGetOutput> = {
   category: "fetch",
   sourceClass: "public_intelligence",
   cost: { unit: "request", estimatedCents: 0, external: false },
-  rateLimit: { rps: 3, concurrency: 4, perDomainCrawlDelayMs: 500 },
+  rateLimit: { rps: 20, concurrency: 25, perDomainCrawlDelayMs: 500 }, // 40% tenant share: 8 rps / 10 conc
   compliance: {
     sourcePolicy: "advisory",
     respectsRobots: false,

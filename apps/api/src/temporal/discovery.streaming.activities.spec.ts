@@ -535,6 +535,14 @@ describe('streaming discovery activities & rollout switch', () => {
     expect(gateway.generateStructured).toHaveBeenCalledTimes(1);
     expect(tx.$queryRaw.mock.calls.length).toBeGreaterThan(0);
     expect(signalCreateMany).toHaveBeenCalledTimes(1);
+    expect(signalCreateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.arrayContaining([
+        expect.objectContaining({
+          providerKey: 'streaming_website',
+          signalKind: 'page_change',
+        }),
+      ]),
+    }));
     expect(leadUpsert).toHaveBeenCalledTimes(1);
     expect(runUpdate).toHaveBeenCalledTimes(1);
 

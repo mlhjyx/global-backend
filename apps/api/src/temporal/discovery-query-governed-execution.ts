@@ -86,6 +86,34 @@ export type GovernedDiscoveryQueryExecutionPlan = Readonly<
     }
 >;
 
+export function legacyDiscoveryQueryAcknowledgements(
+  settled: readonly SettledProviderExecution[],
+  runId: string,
+  queryKey: string | null,
+): Array<{
+  producerId: string;
+  receipt: DurableExecutionReceipt;
+  domainAckKey: string;
+  domainRevision: string;
+}> {
+  // In legacy bypass mode there are no tool_budget_operation / execution_domain_ack rows;
+  // local_query providers (channel_catalog, registry_frame) synthesize receipts outside ToolBroker
+  // and must not enter applyDomainAckConsumerTransactions under bypass.
+  if (isLegacyExecutionBudgetBypass()) return [];
+  return settled.flatMap((item) =>
+    item.status === 'fulfilled'
+      ? item.value.durableReceipts.map(({ producerId, receipt }) => ({
+          producerId,
+          receipt,
+          domainAckKey: queryKey
+            ? `${runId}:${queryKey}:${item.value.key}:${receipt.operationId}`
+            : `${runId}:${item.value.key}:${receipt.operationId}`,
+          domainRevision: receipt.resultDigest,
+        }))
+      : [],
+  );
+}
+
 export function buildGovernedDiscoveryQueryExecutionPlan(input: Readonly<{
   lineageEnabled: boolean;
   adapters: readonly CompanyDiscoveryAdapter[];
