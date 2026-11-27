@@ -186,6 +186,56 @@ describe('fetchPageHttpFirst cache (PR-B)', () => {
     expect(written.contentHash).not.toBe(page!.contentHash);
   });
 
+  it('serves a fresh cached entry directly within the fresh TTL without hitting the network', async () => {
+    const now = new Date('2026-11-28T01:00:00.000Z').getTime();
+    const entry = {
+      ...cachedPage({ etag: null, lastModified: null }),
+      fetchedAt: new Date('2026-11-28T00:30:00.000Z'),
+    };
+    const port = stubPort({ get: vi.fn(async () => entry) });
+    const fetchHtml = vi.fn();
+
+    const page = await fetchPageHttpFirst('https://acme.example/', {
+      fetchHtml,
+      cache: { workspaceId: WORKSPACE_ID, port },
+      nowMs: () => now,
+    });
+
+    expect(fetchHtml).not.toHaveBeenCalled();
+    expect(page).toEqual({
+      markdown: entry.markdown,
+      title: null,
+      contentHash: entry.contentHash,
+      fromCache: 'fresh-ttl',
+    });
+  });
+
+  it('falls back to conditional validation when a cached row is older than the fresh TTL', async () => {
+    const now = new Date('2026-11-28T10:00:00.000Z').getTime();
+    const entry = {
+      ...cachedPage(),
+      fetchedAt: new Date('2026-11-28T00:00:00.000Z'),
+    };
+    const port = stubPort({ get: vi.fn(async () => entry) });
+    const fetchHtml = vi.fn(async () => ({
+      status: 304,
+      contentType: null,
+      body: Buffer.alloc(0),
+    }));
+
+    const page = await fetchPageHttpFirst('https://acme.example/', {
+      fetchHtml,
+      cache: { workspaceId: WORKSPACE_ID, port },
+      nowMs: () => now,
+    });
+
+    expect(fetchHtml).toHaveBeenCalledWith('https://acme.example/', {
+      ifNoneMatch: '"v1-etag"',
+      ifModifiedSince: 'Mon, 03 Nov 2026 08:00:00 GMT',
+    });
+    expect(page?.fromCache).toBe('conditional-304');
+  });
+
   it('does not send conditional headers when the cached entry has no validators', async () => {
     const port = stubPort({
       get: vi.fn(async () => cachedPage({ etag: null, lastModified: null })),

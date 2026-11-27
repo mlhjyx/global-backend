@@ -44,6 +44,7 @@ import { PrismaAgentDecisionTraceStore } from "../agents/agent-decision-trace.st
 import { createDiscoveryActivities } from "./discovery.activities";
 import { createRun2Activities } from "./discovery.run2.activities";
 import { createRun2PipelineActivities } from "./discovery.run2.pipeline.activities";
+import { createPrismaUrlContentCache, type UrlContentCacheDb } from "../adapters/url-content-cache";
 import { createStreamingDiscoveryActivities } from "./discovery.streaming.activities";
 import { createDiscoveryV3WorkerActivities } from "./discovery-v3.worker-activities";
 import { createNativeDiscoveryV3Executor } from "./discovery-v3-native-executor";
@@ -663,7 +664,7 @@ async function main(): Promise<void> {
       }),
       // Run 2.0（M0④）：深挖单公司活动（画像/精判/信号/联系人 + job 状态写回）；Phase 2 方案 B 流式三段漏斗。
       ...createRun2PipelineActivities({ prisma, providers, gateway, broker, runtimeTelemetry: runtimeTelemetry.telemetry, budgetStore, skills: skillResolver, contactEnrichmentSafety: safetyComposition.service }),
-      ...createStreamingDiscoveryActivities({ prisma, providers, gateway, broker, runtimeTelemetry: runtimeTelemetry.telemetry, budgetStore, contactEnrichmentSafety: safetyComposition.service }),
+      ...createStreamingDiscoveryActivities({ prisma, providers, gateway, broker, runtimeTelemetry: runtimeTelemetry.telemetry, budgetStore, contactEnrichmentSafety: safetyComposition.service, urlContentCache: createPrismaUrlContentCache(prisma as unknown as UrlContentCacheDb) }),
       ...createDiscoveryV3WorkerActivities(prisma, createNativeDiscoveryV3Executor({
         prisma, providers, gateway, broker, runtimeTelemetry: runtimeTelemetry.telemetry,
       }), discoveryV3Gateway.reconcile),
