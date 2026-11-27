@@ -1,4 +1,4 @@
-import { attestDiscoveryV3OutboxCommand, discoveryManufacturerCommandArguments, NonRetryableOutboxCommandError, resolveDiscoveryWorkflowType } from './discovery-run-command';
+import { attestDiscoveryV3OutboxCommand, discoveryManufacturerCommandArguments, NonRetryableOutboxCommandError, resolveDiscoveryStartKnobs, resolveDiscoveryWorkflowType } from './discovery-run-command';
 import { DISCOVERY_V3_WORKFLOW } from '../runtime/discovery-v3-dispatch-contract';
 import { dispatchRejudgeCommand } from './rejudge-command';
 import { assertCandidateWorkspaceAllowed, assertRuntimeCandidateOperational, candidateWorkspaceWhere } from '../runtime/development-candidate';
@@ -27,17 +27,6 @@ import {
 import { formatTenantWorkflowId } from "../temporal/tenant-workflow-id";
 import { resolveCustomerTaskQueue } from "../temporal/tenant-task-queues";
 import { DISCOVERY_RUN_EXECUTION_TIMEOUT } from "../temporal/discovery-run-lifecycle";
-import {
-  DISCOVERY_WORKFLOW_KNOB_ENV,
-  DISCOVERY_DEEP_COMPANY_CONCURRENCY_BOUNDS,
-  DISCOVERY_DEEP_COMPANY_CONCURRENCY_DEFAULT,
-  DISCOVERY_POOL_SEARCH_FALLBACK_THRESHOLD_BOUNDS,
-  DISCOVERY_POOL_SEARCH_FALLBACK_THRESHOLD_DEFAULT,
-  DISCOVERY_QUERY_BATCH_SIZE_BOUNDS,
-  DISCOVERY_QUERY_BATCH_SIZE_DEFAULT,
-  boundedKnob,
-  type WorkflowKnobBounds,
-} from "../temporal/discovery.workflow-knobs";
 import {
   assertMigrationCompatible,
   RuntimeProcessLeaseService,
@@ -790,52 +779,6 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     return /^(1|true|on|yes)$/i.test(process.env.DISCOVERY_RUN2_SHADOW ?? "");
   }
 
-  /**
-   * B1（L01）：把参与工作流控制流的可调常量**显式**写进启动输入（随 run 记录进历史，
-   * 之后改代码常量或 env 都不影响在飞 run 的重放）。env 只在启动时读一次；非整数回落
-   * 冻结默认并告警；越界值在这里（注入点）夹取——workflow 重放从不用可变区间二次夹取，
-   * 所以日后调整 BOUNDS 不会改变已录制历史的调度结果（见 discovery.workflow-knobs.ts）。
-   */
-  private discoveryWorkflowKnobs(): {
-    run2PoolSearchFallbackThreshold: number;
-    deepCompanyConcurrency: number;
-    discoveryQueryBatchSize: number;
-  } {
-    const read = (envName: string, fallback: number, bounds: WorkflowKnobBounds): number => {
-      const raw = process.env[envName];
-      if (raw === undefined || raw.trim() === "") return fallback;
-      const parsed = Number(raw);
-      if (!Number.isInteger(parsed)) {
-        this.logger.warn(`${envName}='${raw}' is not an integer — using frozen default ${fallback}`);
-        return fallback;
-      }
-      const clamped = boundedKnob(parsed, fallback, bounds);
-      if (clamped !== parsed) {
-        this.logger.warn(
-          `${envName}=${parsed} is outside [${bounds.min}, ${bounds.max}] — using ${clamped}`,
-        );
-      }
-      return clamped;
-    };
-    return {
-      run2PoolSearchFallbackThreshold: read(
-        DISCOVERY_WORKFLOW_KNOB_ENV.run2PoolSearchFallbackThreshold,
-        DISCOVERY_POOL_SEARCH_FALLBACK_THRESHOLD_DEFAULT,
-        DISCOVERY_POOL_SEARCH_FALLBACK_THRESHOLD_BOUNDS,
-      ),
-      deepCompanyConcurrency: read(
-        DISCOVERY_WORKFLOW_KNOB_ENV.deepCompanyConcurrency,
-        DISCOVERY_DEEP_COMPANY_CONCURRENCY_DEFAULT,
-        DISCOVERY_DEEP_COMPANY_CONCURRENCY_BOUNDS,
-      ),
-      discoveryQueryBatchSize: read(
-        DISCOVERY_WORKFLOW_KNOB_ENV.discoveryQueryBatchSize,
-        DISCOVERY_QUERY_BATCH_SIZE_DEFAULT,
-        DISCOVERY_QUERY_BATCH_SIZE_BOUNDS,
-      ),
-    };
-  }
-
   private async startDeletionCommand(ev: { aggregateId: string; workspaceId: string; eventType: string; payload: unknown }): Promise<void> {
     const payload = (ev.payload ?? {}) as { subjectType?: string; subjectId?: string };
     if (ev.eventType === "SellerDocumentCleanupRequested" && (payload.subjectType !== "seller_document" || typeof payload.subjectId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(payload.subjectId)))
@@ -966,9 +909,10 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
           "EXECUTION_BUDGET_OUTBOX_COMMAND_PARKED",
         );
       }
+      const discoveryWorkflowType = resolveDiscoveryWorkflowType();
       const manufacturerArgs = discoveryManufacturerCommandArguments(payload.manufacturerNetworkExecution, executionBudget, payload.planId);
       await this.startWorkflowIdempotent(
-        resolveDiscoveryWorkflowType(),
+        discoveryWorkflowType,
         {
           taskQueue: resolveCustomerTaskQueue("batch"),
           workflowId: formatTenantWorkflowId(ev.workspaceId, "discovery", ev.aggregateId),
@@ -983,7 +927,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
               icpId: payload.icpId ?? "",
               executionContractVersion: 2,
               executionBudget,
-              ...this.discoveryWorkflowKnobs(),
+              ...resolveDiscoveryStartKnobs(discoveryWorkflowType, (msg) => this.logger.warn(msg)),
               ...(this.run2QuickScanEnabled() ? { run2QuickScan: true } : {}),
               ...(this.run2ShadowEnabled() ? { run2Shadow: true } : {}),
             },

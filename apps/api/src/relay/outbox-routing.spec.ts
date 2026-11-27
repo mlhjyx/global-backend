@@ -1941,6 +1941,43 @@ describe("B1（L01）：discovery 启动参数携带可调常量（输入化，�
     ).toHaveLength(2);
   });
 
+  it("流式寻源满血旋钮缺省写入 8/50/4，越界 env 夹取到录制上界", async () => {
+    process.env.DISCOVERY_STREAMING_WORKFLOW = "on";
+    try {
+      const ev = discoveryEvent();
+      const temporal = makeTemporal();
+      const { db } = makeDb([ev]);
+
+      await makeService(db, temporal).routeEvent(ev);
+
+      const [, options] = vi.mocked(temporal.client.workflow.start).mock
+        .calls[0] as unknown as [string, { args: [Record<string, unknown>] }];
+      expect(options.args[0]).toMatchObject({
+        streamingL1Concurrency: 8,
+        streamingTopKCap: 50,
+        streamingL2Concurrency: 4,
+      });
+
+      process.env.DISCOVERY_STREAMING_TOP_K_CAP = "999";
+      process.env.DISCOVERY_STREAMING_L1_CONCURRENCY = "2";
+      const ev2 = discoveryEvent();
+      const temporal2 = makeTemporal();
+      const { db: db2 } = makeDb([ev2]);
+      await makeService(db2, temporal2).routeEvent(ev2);
+      const [, options2] = vi.mocked(temporal2.client.workflow.start).mock
+        .calls[0] as unknown as [string, { args: [Record<string, unknown>] }];
+      expect(options2.args[0]).toMatchObject({
+        streamingL1Concurrency: 2,
+        streamingTopKCap: 50,
+        streamingL2Concurrency: 4,
+      });
+    } finally {
+      delete process.env.DISCOVERY_STREAMING_WORKFLOW;
+      delete process.env.DISCOVERY_STREAMING_TOP_K_CAP;
+      delete process.env.DISCOVERY_STREAMING_L1_CONCURRENCY;
+    }
+  });
+
   it("越界 env 在注入点夹取后才写进历史，并告警（重放不依赖可变区间）", async () => {
     process.env.DISCOVERY_QUERY_BATCH_SIZE = "99";
     process.env.DISCOVERY_DEEP_COMPANY_CONCURRENCY = "0";
