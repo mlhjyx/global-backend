@@ -17,8 +17,9 @@ import {
   leadCandidateBatchRef,
 } from './lead-qualified-snapshot';
 import { buildLeadPackage, packageSanctionsStatus, type LeadPackage } from './lead-package';
-import { filterReachableCompanyChannels, loadCompanyContactChannels, loadLeadListChannelSummaries, type LeadPackageCompanyChannel } from '../discovery/company-channels';
-import { loadCompanySignalsForLead, type LeadPackageCompanySignal } from '../signals/enrichment-signal-projection';
+import { loadCompanyOverviewPublication } from '../discovery/website-profile/company-overview';
+import { filterReachableCompanyChannels, loadCompanyContactChannels, loadLeadListChannelSummaries } from '../discovery/company-channels';
+import { loadCompanySignalsForLead } from '../signals/enrichment-signal-projection';
 import { isOutcomeReasonCode, isRejectReasonCode, REJECT_REASON_CODES } from './reason-codes';
 import { reachableCompanyContactPoints } from '../discovery/company-contact-points';
 import { DataRightsService } from '../compliance/data-rights.service';
@@ -273,13 +274,9 @@ export class LeadService {
       fetchedAt: Date;
       rawRecordId: string | null;
       sourceUrl?: string | null;
+      allowedActions?: unknown;
     }>,
-  ): Promise<{
-    contactPoints: Array<{ kind: string; value: string; status: string }>;
-    companyChannels: LeadPackageCompanyChannel[];
-    companySignals: LeadPackageCompanySignal[];
-    evidence: Array<{ field: string; sourceUrl: string | null; fetchedAt: Date }>;
-  }> {
+  ) {
     const contactPoints = await tx.companyContactPoint.findMany({
       where: { companyId: company.id },
       select: { kind: true, value: true, status: true },
@@ -291,7 +288,7 @@ export class LeadService {
       companyEvidence ??
       (await tx.fieldEvidence.findMany({
         where: { entityType: 'company', entityId: company.id },
-        select: { entityId: true, field: true, fetchedAt: true, rawRecordId: true, sourceUrl: true },
+        select: { entityId: true, field: true, fetchedAt: true, rawRecordId: true, sourceUrl: true, allowedActions: true },
         orderBy: { fetchedAt: 'desc' },
         take: 100,
       }));
@@ -320,6 +317,7 @@ export class LeadService {
         field: row.field,
         sourceUrl: row.sourceUrl ?? (row.rawRecordId ? sourceById.get(row.rawRecordId) ?? null : null),
         fetchedAt: row.fetchedAt,
+        allowedActions: row.allowedActions,
       })),
     };
   }
@@ -349,6 +347,7 @@ export class LeadService {
         select: { type: true, value: true },
       });
       const facts = await this.loadDeliveryFacts(tx, company, suppressions);
+      const { allowedUrls, proof: overviewProof } = await loadCompanyOverviewPublication(tx, ctx.workspaceId, company);
       // L1：有效期按「每个字段取最新、字段之间取最早」——每 (entityId, field, dataClass) 取最新抓取，
       // 字段数有界（一家公司几十个字段），比旧的「每分级一行」略多但仍是小结果集。
       const freshness = await tx.fieldEvidence.groupBy({
@@ -376,7 +375,8 @@ export class LeadService {
         companyChannels: undeliverable ? [] : facts.companyChannels,
         companySignals: facts.companySignals,
         omitSocials: undeliverable,
-        evidence: facts.evidence,
+        allowedCompanyWebsiteUrls: allowedUrls,
+        evidence: overviewProof ? [overviewProof, ...facts.evidence] : facts.evidence,
         sanctions: {
           status: sanctionsStatus,
           screened_at: screening?.screenedAt.toISOString() ?? null,

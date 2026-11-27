@@ -1,6 +1,6 @@
 ---
 date: 2026-11-27
-pr:
+pr: 1142
 title: Repair early acquisition draft, document ingestion, and website evidence
 ---
 

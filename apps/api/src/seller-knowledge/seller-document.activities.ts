@@ -174,6 +174,23 @@ function isSparsePdfText(markdown: string, pageCount: number): boolean {
   return compactLen < SPARSE_PDF_MIN_TOTAL_CHARS || compactLen / pages < SPARSE_PDF_MIN_CHARS_PER_PAGE;
 }
 
+function summarizePrimaryPageCoverage(
+  detectedPages: number | null,
+  doclingPageCount: number | undefined,
+  usePriorityWindow: boolean,
+) {
+  const totalPages = detectedPages ?? (usePriorityWindow ? undefined : doclingPageCount);
+  const parsedPages = usePriorityWindow
+    ? Math.min(PRIORITY_PDF_PAGES, totalPages ?? PRIORITY_PDF_PAGES)
+    : totalPages;
+  const tailPagesPending =
+    usePriorityWindow &&
+    (totalPages === undefined
+      ? (doclingPageCount ?? PRIORITY_PDF_PAGES) >= PRIORITY_PDF_PAGES
+      : totalPages > PRIORITY_PDF_PAGES);
+  return { totalPages, parsedPages, tailPagesPending };
+}
+
 function buildSyntheticMarkdownFromProducts(products: readonly SellerDocumentAiProduct[]): string {
   if (products.length === 0) return '';
   return products
@@ -427,15 +444,11 @@ export function createSellerDocumentActivities(deps: SellerDocumentActivityDeps)
       return { ok: false, code: 'DOCUMENT_PARSE_UNAVAILABLE', terminal: false };
     }
 
-    const totalPages = detectedPages ?? (usePriorityWindow ? undefined : doclingPageCount);
-    const parsedPages = usePriorityWindow
-      ? Math.min(PRIORITY_PDF_PAGES, totalPages ?? PRIORITY_PDF_PAGES)
-      : totalPages;
-    const tailPagesPending =
-      usePriorityWindow &&
-      (totalPages === undefined
-        ? (doclingPageCount ?? PRIORITY_PDF_PAGES) >= PRIORITY_PDF_PAGES
-        : totalPages > PRIORITY_PDF_PAGES);
+    const { totalPages, parsedPages, tailPagesPending } = summarizePrimaryPageCoverage(
+      detectedPages,
+      doclingPageCount,
+      usePriorityWindow,
+    );
 
     let visionUsed = false;
     let visionProducts: SellerDocumentAiProduct[] = [];

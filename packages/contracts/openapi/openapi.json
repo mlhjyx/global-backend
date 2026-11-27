@@ -7116,7 +7116,7 @@
     },
     "/api/v1/companies/{companyId}/market-recommendations": {
       "get": {
-        "description": "根据显式传入的 4-6 位 HS 码，或按卖家已勾选产品与行业确定性反推的 HS 码，返回基于 UN Comtrade 贸易流基线的目标出口国排序建议（进口规模、同比增速、全球份额与业务理由）。本接口纯只读、零预算消耗，固定返回 isRecommendationOnly=true，绝不自动写入公司确认目标市场。",
+        "description": "按显式 HS 码或卖家已选产品与行业，使用 UN Comtrade 官方同月快照计算进口额、同比和可比申报国份额。只纳入所选各 HS 码在两个期间均有正额申报的国家或地区。接口只读，固定返回 isRecommendationOnly=true。",
         "operationId": "MarketRecommendationsController_recommend_v1",
         "parameters": [
           {
@@ -7229,6 +7229,24 @@
                             },
                             "referenceYear": {
                               "type": "integer"
+                            },
+                            "referencePeriod": {
+                              "type": "string",
+                              "pattern": "^[0-9]{6}$",
+                              "example": "202608",
+                              "description": "进口额参考月份（YYYYMM），同比使用上年同月"
+                            },
+                            "coverage": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "两期均完整覆盖所选 HS 码的申报者数量，包含未显示在推荐列表中的申报者"
+                            },
+                            "shareBasis": {
+                              "type": "string",
+                              "enum": [
+                                "comparable_reporters"
+                              ],
+                              "description": "同一批完整可比申报者的当期进口额之和"
                             }
                           }
                         },
@@ -7275,7 +7293,8 @@
                                 "type": "number"
                               },
                               "globalImportSharePct": {
-                                "type": "number"
+                                "type": "number",
+                                "description": "占完整可比申报者当期进口额合计的百分比，沿用既有字段名"
                               },
                               "rationale": {
                                 "type": "string"
@@ -17810,6 +17829,69 @@
                             "city": {
                               "type": "string",
                               "nullable": true
+                            }
+                          }
+                        },
+                        "company_overview": {
+                          "type": "object",
+                          "nullable": true,
+                          "description": "买家公司的公开资料与字段来源。旧线索可能没有分析结果。",
+                          "required": [
+                            "description",
+                            "main_business",
+                            "official_website",
+                            "sources"
+                          ],
+                          "properties": {
+                            "description": {
+                              "type": "string",
+                              "nullable": true,
+                              "maxLength": 360
+                            },
+                            "main_business": {
+                              "type": "array",
+                              "maxItems": 6,
+                              "items": {
+                                "type": "string",
+                                "maxLength": 100
+                              }
+                            },
+                            "official_website": {
+                              "type": "string",
+                              "format": "uri",
+                              "nullable": true
+                            },
+                            "sources": {
+                              "type": "array",
+                              "maxItems": 6,
+                              "items": {
+                                "type": "object",
+                                "required": [
+                                  "field",
+                                  "source_url",
+                                  "fetched_at"
+                                ],
+                                "properties": {
+                                  "field": {
+                                    "type": "string",
+                                    "enum": [
+                                      "description",
+                                      "main_business",
+                                      "location",
+                                      "website"
+                                    ]
+                                  },
+                                  "source_url": {
+                                    "type": "string",
+                                    "format": "uri"
+                                  },
+                                  "fetched_at": {
+                                    "type": "string",
+                                    "format": "date-time",
+                                    "nullable": true
+                                  }
+                                }
+                              }
                             }
                           }
                         },

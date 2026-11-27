@@ -322,6 +322,9 @@ export const httpGetTool: Tool<HttpGetInput, HttpGetOutput> = {
           text,
           finalUrl: res.finalUrl,
         },
+        ...(res.ok ? {
+          provenance: { sourceUrl: res.finalUrl, fetchedAt: new Date().toISOString(), parserVersion: "http-get/v1" },
+        } : {}),
         costCents: 0,
       };
     } catch (error) {
