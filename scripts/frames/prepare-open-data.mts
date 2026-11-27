@@ -22,6 +22,7 @@ import {
   cleanAuAbnRecord,
   cleanBrCnpjRecord,
   cleanUkCompaniesHouseRow,
+  decodeXmlEntities,
   isValidBrCnpj,
 } from '../../apps/api/src/registry/open-data-cleaners';
 import { BR_SOLAR_ELECTRICAL_CNAE_CODES, normalizeBrCnae } from '../../apps/api/src/registry/industry-map';
@@ -73,15 +74,6 @@ function parseCsvLine(line: string, delimiter: string): string[] {
   }
   out.push(field);
   return out;
-}
-
-function decodeXmlEntities(text: string): string {
-  return text
-    .replace(/&amp;/gu, '&')
-    .replace(/&lt;/gu, '<')
-    .replace(/&gt;/gu, '>')
-    .replace(/&quot;/gu, '"')
-    .replace(/&apos;/gu, "'");
 }
 
 function extractXmlTag(block: string, tag: string): string {

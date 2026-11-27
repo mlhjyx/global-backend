@@ -90,6 +90,21 @@ export function isValidBrCnpj(raw: string): boolean {
   );
 }
 
+const XML_ENTITIES: Readonly<Record<string, string>> = Object.freeze({
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  apos: "'",
+  '#39': "'",
+  '#x27': "'",
+});
+
+/** 单次扫描 XML 实体反转义，避免链式 replace 把 `&amp;lt;` 双重解义为 `<`。 */
+export function decodeXmlEntities(text: string): string {
+  return text.replace(/&(amp|lt|gt|quot|apos|#39|#x27);/gu, (match, key: string) => XML_ENTITIES[key] ?? match);
+}
+
 export function cleanCorporateText(raw: string | null | undefined, max = 500): string {
   if (!raw) return '';
   return raw.replace(/\p{Cc}+/gu, ' ').replace(/\s+/gu, ' ').trim().slice(0, max);

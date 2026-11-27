@@ -4,6 +4,7 @@ import {
   cleanBrCnpjRecord,
   cleanUkCompaniesHouseRow,
   classifyAuCorporateNames,
+  decodeXmlEntities,
   isValidAuAbn,
   isValidBrCnpj,
   isValidUkCrn,
@@ -33,6 +34,13 @@ describe('registration number validators', () => {
     expect(isValidBrCnpj('11.222.333/0001-81')).toBe(true);
     expect(isValidBrCnpj('11222333000182')).toBe(false);
     expect(isValidBrCnpj('00000000000000')).toBe(false);
+  });
+
+  it('decodes XML entities in a single pass without double-unescaping', () => {
+    expect(decodeXmlEntities('A &amp; B &lt;Solar&gt; &quot;PV&quot; &apos;Co&#39; &#x27;Ltd&#x27;')).toBe(
+      `A & B <Solar> "PV" 'Co' 'Ltd'`,
+    );
+    expect(decodeXmlEntities('&amp;lt;script&amp;gt;')).toBe('&lt;script&gt;');
   });
 });
 
