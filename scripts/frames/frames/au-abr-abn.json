@@ -1,0 +1,64 @@
+{
+  "schemaVersion": "registry-frame/v1",
+  "frame": {
+    "frameKey": "au_abr_abn",
+    "country": "AU",
+    "scheme": "au_abn",
+    "label": "澳洲 ABR ABN Bulk Extract 在营法人企业（光伏/电气商贸与安装清洗子集）",
+    "providerKey": "au_abr_bulk",
+    "sourceUrl": "https://data.gov.au/data/dataset/abn-bulk-extract",
+    "licence": "CC-BY-3.0-AU",
+    "licenceUrl": "https://creativecommons.org/licenses/by/3.0/au/",
+    "fetchMode": "bulk_file",
+    "cadence": { "kind": "weekly", "dayOfWeek": "wednesday", "hourUtc": 18 },
+    "config": {
+      "fileNamePattern": "public_split_1_10.zip + public_split_11_20.zip",
+      "encoding": "utf-8",
+      "attribution": "Australian Business Register (ABR) ABN Bulk Extract, Commonwealth of Australia, licensed under CC BY 3.0 AU.",
+      "note": "严格跳过 LegalEntity/IND 个体户及家庭信托/养老金；仅导纯法人事实与州/邮编级注册地；ABN 经 ATO mod-89 校验"
+    }
+  },
+  "mapping": {
+    "schemaVersion": "registry-frame-mapping/v1",
+    "format": "csv",
+    "csv": { "delimiter": "," },
+    "constants": { "scheme": "au_abn", "country": "AU", "naceVersion": "AU-ABN-KW" },
+    "fields": {
+      "regNumber": "Abn",
+      "name": "LegalName",
+      "status": "Status",
+      "legalForm": "EntityType",
+      "city": null,
+      "region": "State",
+      "postalCode": "Postcode",
+      "addressLines": null,
+      "nace": "NaceCode",
+      "naceVersion": null,
+      "employeeBand": null,
+      "vatId": null,
+      "lei": null,
+      "website": null,
+      "identifiers": [
+        { "scheme": "au_acn", "value": "Acn" }
+      ],
+      "attributes": {
+        "entityType": "EntityType",
+        "gstStatus": "GstStatus",
+        "matchRule": "MatchRule",
+        "matchedTradingName": "MatchedTradingName"
+      }
+    },
+    "statusMap": {
+      "act": "ACTIVE",
+      "can": "DISSOLVED"
+    },
+    "legalFormMap": {
+      "prv": "pty_ltd",
+      "pub": "ltd",
+      "cop": "coop",
+      "oie": "inc",
+      "lpt": "lp"
+    },
+    "employeeBandMap": null
+  }
+}

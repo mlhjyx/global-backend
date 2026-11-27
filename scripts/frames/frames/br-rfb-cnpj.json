@@ -1,0 +1,75 @@
+{
+  "schemaVersion": "registry-frame/v1",
+  "frame": {
+    "frameKey": "br_rfb_cnpj",
+    "country": "BR",
+    "scheme": "br_cnpj",
+    "label": "巴西 Receita Federal CNPJ 开放数据在营法人总部（光伏/电气安装与批发清洗子集）",
+    "providerKey": "br_rfb_cnpj_bulk",
+    "sourceUrl": "https://dados.gov.br/dados/conjuntos-dados/cadastro-nacional-da-pessoa-juridica---cnpj",
+    "licence": "CC-BY-ND-3.0",
+    "licenceUrl": "https://creativecommons.org/licenses/by-nd/3.0/deed.pt_BR",
+    "fetchMode": "bulk_file",
+    "cadence": { "kind": "monthly", "dayOfMonth": 18, "hourUtc": 18 },
+    "config": {
+      "fileNamePattern": "Empresas0..9.zip + Estabelecimentos0..9.zip + Simples.zip + Municipios.zip",
+      "encoding": "utf-8",
+      "attribution": "Dados Abertos do CNPJ — Secretaria Especial da Receita Federal do Brasil (RFB), Lei nº 12.527/2011.",
+      "note": "严格跳过 MEI（Simples opcao_mei=S）、个体户（Natureza 2135）与 Socios 自然人合伙人表；不导街道门牌/电话/邮箱；CNAE 2.0 归一至 NACE Rev.2"
+    }
+  },
+  "mapping": {
+    "schemaVersion": "registry-frame-mapping/v1",
+    "format": "csv",
+    "csv": { "delimiter": "," },
+    "constants": { "scheme": "br_cnpj", "country": "BR", "naceVersion": "BR-CNAE-2.0" },
+    "fields": {
+      "regNumber": "Cnpj",
+      "name": "RazaoSocial",
+      "status": "SituacaoCadastral",
+      "legalForm": "NaturezaJuridica",
+      "city": "Municipio",
+      "region": "Uf",
+      "postalCode": "Cep",
+      "addressLines": null,
+      "nace": "CnaePrincipal",
+      "naceVersion": null,
+      "employeeBand": null,
+      "vatId": null,
+      "lei": null,
+      "website": null,
+      "identifiers": null,
+      "attributes": {
+        "cnae": "CnaePrincipal",
+        "naturezaJuridica": "NaturezaJuridica",
+        "porte": "Porte",
+        "tradeName": "NomeFantasia"
+      }
+    },
+    "statusMap": {
+      "02": "ACTIVE",
+      "03": "UNKNOWN",
+      "04": "UNKNOWN",
+      "08": "DISSOLVED",
+      "01": "DISSOLVED"
+    },
+    "legalFormMap": {
+      "2011": "ep",
+      "2038": "sem",
+      "2046": "sa",
+      "2054": "sa",
+      "2062": "ltda",
+      "2070": "snc",
+      "2089": "scs",
+      "2097": "sca",
+      "2127": "scp",
+      "2143": "coop",
+      "2151": "consorcio",
+      "2178": "foreign",
+      "2240": "ltda",
+      "2305": "eireli",
+      "2348": "inova"
+    },
+    "employeeBandMap": null
+  }
+}

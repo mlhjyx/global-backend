@@ -14,6 +14,7 @@
   FR Sirene 风格 `;` 分隔 CSV、US SAM 风格嵌套 JSON、召回审计的 frame/pool/基线/裁决导出），
   全部为虚构数据。
 - `import-frame.mts` — CSV/JSON frame 装载 CLI（tsx 运行，owner 连接写平台表）。
+- `prepare-open-data.mts` — 官方免费全量压缩包（UK Companies House / AU ABR ABN / BR RFB CNPJ）流式解压清洗 CLI，直接从 ZIP 流式过滤并输出无 PII 的标准 CSV（不整包解压，跳过自然人/个体户/MEI/Socios）。
 - `query-preview.mts` — `registry_frame` 查询契约预览（只读，验证 ICP→过滤条件→候选记录）。
 - `recall-audit.mjs` — 召回审计 CLI（Node ≥22.18 原生 type-strip 直接运行，无需构建）。
 - `recall-frame-export.mts` — 审计输入之一：把 frame 的 PARSED 快照冻结实体导出为
@@ -42,6 +43,33 @@ pnpm exec tsx scripts/frames/import-frame.mts ... --propose-links
 幂等：同一文件（sha256 相同）且 parserVersion 相同直接复用既有 PARSED 快照；实体按
 `(scheme, reg_number)` upsert；事件按 `(scheme, reg_number, snapshot_id, change_type)` 唯一键跳过。
 PAUSED/ARCHIVED 帧拒绝装载（kill switch）。
+
+## 官方开放数据流式清洗与许可口径
+
+原始全量包存放于工作区外（如 `/global/data/registry-imports/<source>/<date>/`，不入 git），必须经 `prepare-open-data.mts` 通过 `unzip -p` 流式读取并清洗后再交给 `import-frame.mts`，严禁整包解压或导入自然人姓名、个人街道住址、个人邮箱/电话：
+
+```bash
+# 先跑 1 万行小样本验证清洗分布
+pnpm exec tsx scripts/frames/prepare-open-data.mts \
+  --source au --input /global/data/registry-imports/au/2026-11-27 \
+  --out /global/data/registry-imports/au/2026-11-27/cleaned-sample.csv --max-rows 10000
+
+# 确认无误后流式全量清洗并装载
+pnpm exec tsx scripts/frames/prepare-open-data.mts \
+  --source au --input /global/data/registry-imports/au/2026-11-27 \
+  --out /global/data/registry-imports/au/2026-11-27/cleaned.csv
+pnpm exec tsx scripts/frames/import-frame.mts \
+  --frame scripts/frames/frames/au-abr-abn.json \
+  --file  /global/data/registry-imports/au/2026-11-27/cleaned.csv
+```
+
+已登记开放数据集与许可/署名要求：
+
+| frameKey | 国家/编号体系 | 许可 | 署名与隐私护栏 |
+| --- | --- | --- | --- |
+| `gb_companies_house` | GB / `gb_crn` | `OGL-UK-3.0` | Contains public sector information licensed under the Open Government Licence v3.0. Companies House data © Crown copyright. 不导 `CareOf`/门牌街道地址；UK SIC 2007 映射至 NACE Rev.2。 |
+| `au_abr_abn` | AU / `au_abn` | `CC-BY-3.0-AU` | Australian Business Register (ABR) ABN Bulk Extract, Commonwealth of Australia, licensed under CC BY 3.0 AU. 跳过 `<LegalEntity>`/`IND` 个体户与家庭信托/养老金；仅留法人事实与州/邮编；ATO mod-89 校验。 |
+| `br_rfb_cnpj` | BR / `br_cnpj` | `CC-BY-ND-3.0` | Dados Abertos do CNPJ — Secretaria Especial da Receita Federal do Brasil (RFB), Lei nº 12.527/2011. 跳过 MEI（`Simples` `opcao_mei=S`）、个体户（`2135`）与 `Socios*.zip`；不导街道门牌/电话/邮箱；CNAE 2.0 映射至 NACE Rev.2。 |
 
 ## 查询预览（registry_frame 契约）
 

@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
   canonicalNace,
+  extractUkSicCode,
+  mapAnzsicToNace,
+  mapBrCnaeToNace,
+  mapNationalIndustryCodeToNace,
+  mapUkSicToNace,
   matchIsicNodesForTerms,
   nacePrefixesForIndustryTerms,
   nacePrefixesForIsicCodes,
+  normalizeAuAnzsic,
+  normalizeBrCnae,
   resolveNacePrefixes,
 } from './industry-map';
 
@@ -94,5 +101,54 @@ describe('resolveNacePrefixes', () => {
     expect(resolveNacePrefixes({ nacePrefix: 42, industry: [1, 'pump'], industryCodes: '28' })).toEqual([
       '28',
     ]);
+  });
+});
+
+describe('national industry code crosswalks (UK SIC / BR CNAE / AU ANZSIC / ISIC4)', () => {
+  it('extracts and maps UK SIC 2007 strings to NACE Rev.2 while rejecting dormant placeholders', () => {
+    expect(extractUkSicCode('43210 - Electrical installation')).toBe('43210');
+    expect(extractUkSicCode('Wholesale of other machinery (46690)')).toBe('46690');
+    expect(extractUkSicCode('99999 - Dormant Company')).toBeNull();
+    expect(extractUkSicCode('74990 - Non-trading company')).toBeNull();
+    expect(extractUkSicCode('None Supplied')).toBeNull();
+    expect(mapUkSicToNace('43210 - Electrical installation')).toBe('43.21');
+    expect(mapUkSicToNace('35110 - Production of electricity')).toBe('35.11');
+    expect(mapUkSicToNace('Wholesale of other machinery (46690)')).toBe('46.69');
+  });
+
+  it('maps Brazil CNAE 2.0 codes (with or without punctuation) to NACE Rev.2', () => {
+    expect(normalizeBrCnae('4321-5/00')).toBe('4321500');
+    expect(mapBrCnaeToNace('4321-5/00')).toBe('43.21');
+    expect(mapBrCnaeToNace('4673700')).toBe('46.69');
+    expect(mapBrCnaeToNace('2731700')).toBe('27.12');
+    expect(mapBrCnaeToNace('3511501')).toBe('35.11');
+    expect(mapBrCnaeToNace('4221902')).toBe('42.22');
+    expect(mapBrCnaeToNace('2610800')).toBe('26.11');
+    expect(mapBrCnaeToNace('9999999')).toBeNull();
+  });
+
+  it('maps Australia ANZSIC 2006 codes to NACE Rev.2', () => {
+    expect(normalizeAuAnzsic('E3232')).toBe('3232');
+    expect(mapAnzsicToNace('3232')).toBe('43.21');
+    expect(mapAnzsicToNace('3494')).toBe('46.69');
+    expect(mapAnzsicToNace('2619')).toBe('35.11');
+    expect(mapAnzsicToNace('2439')).toBe('27.90');
+    expect(mapAnzsicToNace('9999')).toBeNull();
+  });
+
+  it('dispatches unified national code mapping and resolves 4-digit ISIC + multilingual solar terms', () => {
+    expect(mapNationalIndustryCodeToNace('UK-SIC-2007', '43210 - Electrical installation')).toBe('43.21');
+    expect(mapNationalIndustryCodeToNace('BR-CNAE-2.0', '4673700')).toBe('46.69');
+    expect(mapNationalIndustryCodeToNace('AU-ANZSIC-2006', '3494')).toBe('46.69');
+    expect(mapNationalIndustryCodeToNace('NAF-rev2', '28.13Z')).toBe('28.13');
+    expect(nacePrefixesForIsicCodes(['3510', '2710', '4220'])).toEqual([
+      '27.11',
+      '27.12',
+      '35.11',
+      '42.22',
+    ]);
+    expect(nacePrefixesForIndustryTerms(['光伏安装']).prefixes).toEqual(['27.9', '43.21']);
+    expect(nacePrefixesForIndustryTerms(['electrical wholesale']).prefixes).toEqual(['46', '46.69']);
+    expect(nacePrefixesForIndustryTerms(['energia solar']).prefixes).toEqual(['27.9', '35.11']);
   });
 });

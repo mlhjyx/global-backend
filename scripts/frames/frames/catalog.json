@@ -29,6 +29,20 @@
       "fixture": "../fixtures/us-sam.sample.json",
       "expectedRows": 3,
       "expectedSchemes": ["us_uei"]
+    },
+    {
+      "frameKey": "au_abr_abn",
+      "config": "au-abr-abn.json",
+      "fixture": "../fixtures/au-abr-abn.sample.csv",
+      "expectedRows": 3,
+      "expectedSchemes": ["au_abn"]
+    },
+    {
+      "frameKey": "br_rfb_cnpj",
+      "config": "br-rfb-cnpj.json",
+      "fixture": "../fixtures/br-rfb-cnpj.sample.csv",
+      "expectedRows": 3,
+      "expectedSchemes": ["br_cnpj"]
     }
   ]
 }
