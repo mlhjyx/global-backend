@@ -11,12 +11,19 @@ import {
 describe('identity resolution（PRD 8.8 确定性规则）', () => {
   it('域名规范化：协议/www/路径剥离', () => {
     expect(normalizeDomain('https://www.Acme-Tech.COM/en/about')).toBe('acme-tech.com');
+    expect(normalizeDomain('https://acme-solar.de:443/products?utm_source=bsw')).toBe('acme-solar.de');
+    expect(normalizeDomain('mailto:info@acme-solar.de')).toBeNull();
+    expect(normalizeDomain('tel:+4912345678')).toBeNull();
     expect(normalizeDomain(null)).toBeNull();
   });
 
   it('公司名规范化：法律后缀剥离 + 大小写', () => {
     expect(normalizeCompanyName('Acme Manufacturing GmbH')).toBe('acme manufacturing');
     expect(normalizeCompanyName('深圳精密制造有限公司')).toBe('深圳精密制造');
+    expect(normalizeCompanyName('Pekat Solar Sdn. Bhd.')).toBe('pekat solar');
+    expect(normalizeCompanyName('Edeltec Solar Ltda.')).toBe('edeltec solar');
+    expect(normalizeCompanyName('Alfa Solar Enerji A.Ş.')).toBe('alfa solar enerji');
+    expect(normalizeCompanyName('Ac Solar Warehouse Pty Ltd')).toBe('ac solar warehouse');
   });
 
   it('有域名 → domain_exact；无域名 → name_country', () => {

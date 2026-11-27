@@ -44,6 +44,7 @@ import {
   DIRECTORY_PUBLIC_B2B_LISTING_POLICY_DOMAIN,
   PUBLIC_WEB_COMPANY_SITE_POLICY_DOMAIN,
 } from './source-policy-scope';
+import { associationDirectorySourcePolicyInputs } from './association-directory-catalog';
 import type { CompanyDiscoverySource } from './plan-query-sources';
 import { declaresDiscoveryCompanyLineage } from './company-discovery-lineage';
 
@@ -323,6 +324,26 @@ export class DiscoveryProviderRegistry {
           notes: 'directory 公开 B2B 协会/展会名录通用兜底策略（保留键，非主机名；Batch 1.5-B）。三级准入：逐域策略（含 SUSPENDED）优先 > 社媒/商业数据商/付费黄页封闭黑名单拒收 > 其余公开名录适用本策略。',
         },
       });
+      // 已逐站核验的光伏/可再生能源协会会员名录（DE/MY/GB/CA/BR/NL/TR/AU + EU）：
+      // 逐域登记为 Tier-1 显式策略，update: {} 保证运维单域 SUSPENDED 覆盖不被启动 seed 回写。
+      for (const assoc of associationDirectorySourcePolicyInputs()) {
+        await db.sourcePolicy.upsert({
+          where: { domain: assoc.domain },
+          update: {},
+          create: {
+            domain: assoc.domain,
+            sourceType: assoc.sourceType,
+            accessMode: assoc.accessMode,
+            reviewStatus: assoc.reviewStatus,
+            robotsStatus: assoc.robotsStatus,
+            termsStatus: assoc.termsStatus,
+            personalData: assoc.personalData,
+            allowedPurpose: [...assoc.allowedPurpose],
+            retentionDays: assoc.retentionDays,
+            notes: assoc.notes,
+          },
+        });
+      }
     }
     await db.dataProvider.upsert({
       where: { key: 'trade_fair' },

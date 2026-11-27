@@ -127,6 +127,16 @@ describe('DiscoveryProviderRegistry SourceClass governance', () => {
         },
       },
     ]);
+
+    const associationPolicies = policies.filter(
+      (entry) => entry.create.sourceType === 'association',
+    );
+    expect(associationPolicies.length).toBeGreaterThanOrEqual(24);
+    expect(associationPolicies.every((entry) => Object.keys(entry.update as object).length === 0)).toBe(true);
+    expect(associationPolicies.some((entry) => entry.create.domain === 'solarwirtschaft.de')).toBe(true);
+    expect(associationPolicies.some((entry) => entry.create.domain === 'mpsea.org.my')).toBe(true);
+    expect(associationPolicies.some((entry) => entry.create.domain === 'absolar.org.br')).toBe(true);
+    expect(associationPolicies.some((entry) => entry.create.domain === 'solarpowereurope.org')).toBe(true);
   });
 
   it('seeds the BI-14 company_contact switch DISABLED and never overwrites a later change', async () => {

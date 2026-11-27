@@ -6,13 +6,16 @@ import { createHash } from 'node:crypto';
 import { normalizePersonName, personNameKeyVariants } from './person-name';
 
 const LEGAL_SUFFIXES =
-  /\b(gmbh|ag|kg|co\.?|ltd\.?|llc|inc\.?|corp\.?|s\.?a\.?|s\.?r\.?l\.?|b\.?v\.?|oy|ab|as|plc|pty|limited|company|holdings?)\b|有限公司|株式会社|주식회사/gi;
+  /(?<!\p{L})(?:gmbh|ag|kg|kgaa|ohg|mbh|e\.?v\.?|co\.?|ltd\.?\s*şti\.?|ltd\.?|llc|llp|inc\.?|corp\.?|s\.?a\.?|s\.?r\.?l\.?|b\.?v\.?|n\.?v\.?|v\.?o\.?f\.?|oy|ab|as|plc|pty|limited|company|holdings?|sdn\.?\s*bhd\.?|bhd\.?|berhad|ltda\.?|eireli|a\.?ş\.?|şti\.?|ltée|ltee)(?!\p{L})|有限公司|株式会社|주식회사/giu;
 
 export function normalizeDomain(raw?: string | null): string | null {
   if (!raw) return null;
-  let d = raw.trim().toLowerCase();
-  d = d.replace(/^https?:\/\//, '').replace(/^www\./, '');
-  d = d.split(/[/?#]/)[0];
+  const trimmed = raw.trim().toLowerCase();
+  if (!trimmed || /^(?:mailto|tel|javascript|data|ftp|file|sms|whatsapp):/u.test(trimmed)) {
+    return null;
+  }
+  let d = trimmed.replace(/^https?:\/\//, '').replace(/^www\./, '');
+  d = d.split(/[/?#]/)[0]!.replace(/:\d+$/, '').replace(/\.+$/, '');
   return d || null;
 }
 
