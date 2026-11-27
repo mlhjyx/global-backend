@@ -44,7 +44,7 @@
 
 - 明确、已授权的本地任务持续推进到可审查交付；普通技术选择不重复确认。先查可发现的事实，只暂停依赖未决信息或权限的部分，继续独立工作；同一动作、目标和范围的有效授权跨步骤沿用，变化部分另行确认。只读请求仍不授权修改。
 - 正式架构或安全方向变更保留书面规格、独立 review 和用户明确确认；已批准的同一规格不因切换 Skill 或执行阶段重复审批。Skill 不得新增操作权限、强制无关收尾或取消项目门。
-- 当前开发主体是本机的 Claude Code 代理（2026-09-21 起接替 Codex）；Codex 只在 Claude Code 指派下执行边界明确的任务；旧 Claude/Codex 会话、分支和 worktree 只作待审计 provenance，不代表当前 owner，也不得因失联而删除。
+- 当前开发主体是本机的 Claude Code 代理（2026-09-21 起接替 Codex）；Codex 只在 Claude Code 指派下执行边界明确的任务；旧 Claude/Codex 会话、分支和 worktree 只作待审计 provenance，不代表当前 owner，也不得因失联而删除。Global 治理项目的限时授权见 `/global/AGENTS.md` §3，仓内其他任务沿日常规则。
 - `/global/backend` 承载 main 与现场审计；本工作区在 `/global/.agy-worktrees/backend/<topic>` 从已核验的主线创建独立分支。一个任务一个 writer。创建和根 checkout 同步的操作见 [worktree 手册](docs/backend/worktree-management.md)。
 - 远端 PR 合入、根 checkout 同步和工作树清理分别执行。按工作区 fast-forward 规则保留本地现场；用同步脚本的 `status` 在根 checkout 检查。
 - 开始修改前运行 `pnpm worktree:inventory`，核对分支、worktree、任务与文件 owner。与其他 writer 重叠是硬停止条件；共享工作区中不得回退他人改动。

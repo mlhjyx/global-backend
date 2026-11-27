@@ -14,7 +14,7 @@
 | `/global/backend/.claude/worktrees/`、`/global/backend/.codex/worktrees/` | 既有任务注册；保留 owner 与未交付工作 |
 | `/global/wt/` | 历史现场，按 §3 审计 |
 
-一个任务一个 writer、一个隔离工作树。选用已核验的精确 Git 提交；普通任务用远端 main，固定基线任务沿用其批准的提交。
+一个任务一个 writer、一个隔离工作树。选用已核验的精确 Git 提交；普通任务用远端 main，固定基线任务沿用其批准的提交。T3 的会话仓目录和共享规则链接须分别核对。已绑定的审计副本用于读取基线，正式写入使用本节认可的任务路径或工作区已明确批准的例外。
 
 ## 2. 创建新 worktree
 

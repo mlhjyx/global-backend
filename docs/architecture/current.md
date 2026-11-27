@@ -144,15 +144,9 @@ API 与 Worker 使用同一 OCI image digest、同一 `global-runtime-build-atte
 
 ## 6. 事件目录与 LeadQualifiedPackage
 
-**事件以注册表为准**：哪些事件存在、走哪条分支，唯一真值是 `apps/api/src/relay/event-registry.ts`（当前 6 个内部命令、13 个集成事件）；本节不手抄之外的事件名。
+**事件以[注册表](../../apps/api/src/relay/event-registry.ts)为准**。内部命令由 relay 拉起 Temporal，集成事件进入 `outbox_delivery`。不同事件按注册的 payload 校验器或明确的信封约定投递，未登记或未分类的事件停靠并报错。值域、版本和字段见[事件 payload 合同](../../packages/contracts/events/payloads/)，兼容告警与阻断门分别核对。
 
-**本仓发布（集成事件，进 `outbox_delivery`）**：**LeadQualified** · LeadsScored · CandidateBatchCompleted · DiscoveryRunCompleted · ICPActivated · ClaimApproved · ClaimRevoked · ClaimExpired · KnowledgeConflictDetected · DeletionCompleted · CampaignPlanJobFailed · SanctionsListStale · SiteBuildCostSummaryUpdated。其中 LeadQualified、LeadsScored、DiscoveryRunCompleted、CandidateBatchCompleted、DeletionCompleted、SiteBuildCostSummaryUpdated 有专用 payload schema（`packages/contracts/events/payloads/`）；截至 2026-11-13，运行期只有 SiteBuildCostSummaryUpdated 在注册表内有 fail-closed 校验器，LeadsScored/DiscoveryRunCompleted 为 warn-only 兼容校验（不阻断交付），LeadQualified/DeletionCompleted 有 ajv consumer test，CandidateBatchCompleted schema 尚无消费者，其余 7 个走信封通用契约。
-
-**内部命令（relay 拉起 Temporal 工作流，不对外交付）**：CompanyProfileCreated · DiscoveryRunRequested · QualifyRequested · DeletionRequested · PersonalArtifactCleanupRequested · AssetObjectCleanupRequested。
-
-此前列在这里的 CompanyProfileActivated、DiscoveryRunPartiallyCompleted、CompanyResolved、IntentSignalDetected/Expired、ContactPointVerified、LeadQualificationRevoked、LeadSuppressed、LeadDecisionRecorded 都不在注册表里，属于目标设计、尚未实现；新增事件须先进注册表（未注册类型会被 park 并报错）。
-
-**LeadQualified 不可变交付快照**（幂等 ID + schema version）：
+**LeadQualified 不可变交付快照**。当前生产者写 [v2 schema](../../packages/contracts/events/payloads/lead-qualified.v2.schema.json)，relay 保留 [v1 schema](../../packages/contracts/events/payloads/lead-qualified.v1.schema.json) 兼容。下面是早期快照与评分规则索引，结构和版本以对应合同为准。
 
 ```
 lead_id / workspace_id / initiative_id? / icp_id + icp_version
@@ -168,7 +162,7 @@ scores 与 as-built 六维映射注记：现行六维=fit/role/intent/dataQualit
 
 **SaaS 回传（仅作学习标签）**：QgoCreated · SalesAccepted · CommercialOutcomeVerified · LeadOutcomeRejected。
 
-**投递语义（✅ 收口③已落地，PR #46）**：事件注册表三分支（`relay/event-registry.ts` 穷举）——内部 workflow command（PR #46 时 3 种，现 6 种，→Temporal，AlreadyStarted 幂等）/外部 integration event（PR #46 时 8 种，现 10 种，→`outbox_delivery` 账本单事务原子路由，`publishedAt` 语义=已路由进交付层）/未注册类型 `parkedAt` 停靠+大声报错（不假发布、不毒化轮询）。sink：`saas` 拉模式（`GET /events` 游标=**交付账本行 id**、任意重放 at-least-once、`POST /events/ack` 幂等且锁死 pull sink）+ `webhook` 推模式（URL+SECRET 且 https 才启用；HMAC-SHA256 签名、指数退避封顶 1h、10 次 DEAD=DLQ、双路径 CAS）。LeadQualified payload=快照 v1（`packages/contracts/events/payloads/lead-qualified.v1.schema.json`，ajv Consumer Test；contact_refs 只带 ref+职务元数据不嵌 PII，含具名 refs 事件分级 RESTRICTED）。**部署约束**：relay 单写者（多副本前需 advisory lock）；除 LeadQualified、DeletionCompleted、SiteBuildCostSummaryUpdated 外，其余 7 种 integration 事件的专用 payload schema 待补（现走 envelope 通契约）。交付是否真被消费（ACK）是运行事实，只见[当前状态](../status/current.md)。
+**投递与消费**。内部命令创建工作流时对 AlreadyStarted 幂等。集成事件创建交付记录，`publishedAt` 表示已路由。SaaS pull sink 按交付账本游标拉取并幂等 ACK，启用的 webhook sink 独立签名、重试与记录死信。快照按所用 schema 版本提供联系人引用与职务元数据。派发、SaaS 入箱、业务投影及 ACK 分别按证据核对，部署和接收回执见[当前状态](../status/current.md)。relay 保持单写者。
 
 ## 7. API ownership
 
