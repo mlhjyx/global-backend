@@ -212,4 +212,44 @@ describe('directory preflight runs before crawl and model extraction', () => {
       { name: 'Axitec Energy GmbH', domain: 'axitecsolar.com', country: 'DE' },
     ]);
   });
+
+  it('directly crawls compliance-approved PV trade fair URLs alongside PV associations while honoring source policy', async () => {
+    const pvQuery: CompanyDiscoveryQuery = {
+      sourceClass: 'industry_data',
+      filters: { industry: 'photovoltaic', country: 'DE' },
+      keywords: ['solar module', 'HJT'],
+      limit: 20,
+    };
+    const invoke = vi.fn(async (tool: string, input: { url?: string }) => {
+      if (tool === 'searxng.search') return { data: { results: [] }, costCents: 0 };
+      return {
+        data: {
+          url: input.url,
+          text: 'Intersolar Europe Exhibitor List: SolarPark EPC GmbH https://solarpark.example Germany '.repeat(8),
+        },
+        costCents: 0,
+      };
+    });
+    mocks.model.mockResolvedValue({
+      data: {
+        is_directory: true,
+        list_kind: 'trade_fair',
+        companies: [{ name: 'SolarPark EPC GmbH', website: 'https://solarpark.example', location: 'Germany' }],
+        has_next_page: false,
+      },
+    });
+    const provider = new DirectoryDiscoveryProvider({ gateway: {} as never, broker: { invoke } as never });
+    const result = await provider.discoverCompanies(
+      pvQuery,
+      ctx,
+      options([policy(DIRECTORY_PUBLIC_B2B_LISTING_POLICY_DOMAIN)]),
+    );
+    const crawledUrls = invoke.mock.calls
+      .filter(([tool]) => tool === 'crawl4ai.fetch')
+      .map(([, input]) => input.url);
+    expect(crawledUrls).toContain('https://www.intersolar.de/exhibitorlist');
+    expect(crawledUrls).toContain('https://www.solarwirtschaft.de/unsere-mitglieder/mitgliedersuche/');
+    expect(crawledUrls).not.toContain('https://www.key-expo.com/exhibitors-catalogue');
+    expect(result.records.map((r) => r.name)).toContain('SolarPark EPC GmbH');
+  });
 });

@@ -27,6 +27,8 @@ export interface CrawlRunOptions {
   sleep?: (ms: number) => Promise<void>;
   /** Stored manifest hosts. Legacy channel configs have no manifest host list. */
   allowedHosts?: readonly string[];
+  /** Optional generic extractor fallback (e.g. LLM list extraction) when CSS selector yields 0 items. */
+  extractGenericRecords?: (page: CrawledPage) => Promise<readonly CrawledRecord[]>;
 }
 
 export interface CrawledRecord {
@@ -146,6 +148,32 @@ function extractCardFields(
   };
 }
 
+async function appendGenericPageRecords(
+  page: CrawledPage,
+  extractGenericRecords: CrawlRunOptions['extractGenericRecords'],
+  maxItems: number,
+  remainingSlots: number,
+  records: CrawledRecord[],
+): Promise<void> {
+  if (!extractGenericRecords || remainingSlots <= 0) return;
+  const extracted = await extractGenericRecords(page);
+  for (const raw of extracted.slice(0, Math.min(maxItems, remainingSlots))) {
+    const name = raw.name?.trim();
+    if (!name || name.length < 2) continue;
+    // 列表页通用抽取仅保留公开公司事实，绝不透传个人联系点 PII。
+    const website = normalizeWebsite(raw.website ?? null);
+    records.push({
+      name: name.slice(0, 300),
+      sourceUrl: raw.sourceUrl || page.url,
+      ...(website ? { website } : {}),
+      ...(raw.country?.trim() ? { country: raw.country.trim().slice(0, 100) } : {}),
+      ...(raw.industry?.trim() ? { industry: raw.industry.trim().slice(0, 200) } : {}),
+      ...(raw.products?.length ? { products: raw.products.slice(0, 20) } : {}),
+      ...(raw.keywords?.length ? { keywords: raw.keywords.slice(0, 20) } : {}),
+    });
+  }
+}
+
 export async function crawlChannel(
   config: ChannelCrawlConfig,
   fetchPage: CrawlPageFetcher,
@@ -156,6 +184,7 @@ export async function crawlChannel(
   const maxItems = Math.max(1, options.maxItemsPerPage ?? 50);
 
   const urls = crawlPageUrls(config, options.pageCap);
+  const maxRecords = maxItems * Math.max(1, urls.length);
   const records: CrawledRecord[] = [];
   let pagesFetched = 0;
   let pageFailures = 0;
@@ -179,7 +208,12 @@ export async function crawlChannel(
     // 空页（robots 拒绝/站点空响应/翻页到底）不计失败；失败率只反映抓取异常。
     if (!page) continue;
     const items = selectAll(page.html, config.list.itemSelector).slice(0, maxItems);
-    if (items.length === 0 && config.detail.enabled && Object.keys(config.detail.fields).length === 0) continue;
+    if (items.length === 0) {
+      await appendGenericPageRecords(page, options.extractGenericRecords, maxItems, maxRecords - records.length, records);
+      if (records.length >= maxRecords) break outer;
+      if (pagesFetched >= options.pageCap) return { records, pagesFetched, pageFailures, truncatedByCap: true };
+      continue;
+    }
 
     for (const [index, item] of items.entries()) {
       // 详情页打开前检查页数预算：达到上限立即停止本轮（列表页已计入）。

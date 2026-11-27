@@ -1,5 +1,6 @@
 import type { ChannelManifestDocument } from '@global/contracts';
 import {
+  isTradeFairDirectlyCrawlable,
   TRADE_FAIR_CATALOG,
   type TradeFairCatalogEntry,
 } from '../discovery/trade-fair-catalog';
@@ -10,23 +11,39 @@ import {
 } from './connector/channel-manifest';
 import { manifestToCrawlConfig } from './html-manifest-adapter';
 
+export type TradeFairExtractionMode = 'selector' | 'generic_llm';
+
 export interface TradeFairManifestEntry {
   readonly slug: string;
   readonly name: string;
   readonly targetStatus: 'ENABLED' | 'DISABLED';
   readonly disabledReason: 'GOVERNANCE' | 'OPERATOR' | null;
   readonly verifiedAdapter: boolean;
+  readonly extractionMode: TradeFairExtractionMode;
   readonly manifest: ChannelManifestDocument;
   readonly manifestSha256: string;
   readonly crawlConfig: ChannelCrawlConfig;
 }
 
-const VERIFIED_LIST_SELECTORS: Readonly<
+/**
+ * 可选的已验证静态 CSS 选择器提速表（非启用硬门禁）。
+ * 未登记选择器的合规展会默认走 `generic_llm` 通用抓取抽取链路
+ * （`crawl4ai.fetch` 渲染 + 翻页 + `discovery.extract_list` 模型抽取；PDF 走 Docling）。
+ */
+const OPTIONAL_VERIFIED_LIST_SELECTORS: Readonly<
   Record<string, { itemSelector: string; detailFields?: Record<string, string> }>
 > = {
   'propak-asia-2026': {
     itemSelector: 'div.ex-body',
     detailFields: { name: '.company' },
+  },
+  'fespa-brasil-2027': {
+    itemSelector: 'div.expositor_item_details',
+    detailFields: { name: 'p.text-fp-dark', website: 'a::attr(href)' },
+  },
+  'plast-2026': {
+    itemSelector: 'a.exhibitor',
+    detailFields: { name: 'span.text' },
   },
 };
 
@@ -35,14 +52,15 @@ export function buildTradeFairManifestEntry(
 ): TradeFairManifestEntry {
   const parsedUrl = new URL(fair.exhibitorUrl);
   const baseUrl = `${parsedUrl.protocol}//${parsedUrl.host}`;
-  const selectorConfig = VERIFIED_LIST_SELECTORS[fair.slug];
-  const verifiedAdapter = Boolean(
-    fair.status === 'enabled' &&
-      selectorConfig &&
-      fair.robotsPolicy === 'A' &&
-      fair.license &&
-      fair.tosUrl,
-  );
+  const selectorConfig = OPTIONAL_VERIFIED_LIST_SELECTORS[fair.slug];
+  // 启用门禁收敛为合规审核：robotsPolicy='A' + 明确 license/tosUrl + 已登记有效 https 展商网址 + enabled。
+  // 专用 CSS 选择器或平台级适配器只作可选提速，不阻断合规展会启用。
+  const verifiedAdapter = isTradeFairDirectlyCrawlable(fair);
+  const extractionMode: TradeFairExtractionMode = selectorConfig
+    ? 'selector'
+    : 'generic_llm';
+  const perDomainDelayMs = fair.crawlDelayMs ?? 2000;
+  const rps = perDomainDelayMs >= 5000 ? 0.1 : 0.5;
 
   const rawManifest = {
     meta: {
@@ -61,12 +79,12 @@ export function buildTradeFairManifestEntry(
     auth: { type: 'none' as const },
     pagination: { type: 'none' as const },
     rateLimit: {
-      rps: 0.5,
+      rps,
       burst: 2,
       concurrency: 1,
       dailyRequests: 250,
       respectRetryAfter: true,
-      perDomainDelayMs: 2000,
+      perDomainDelayMs,
     },
     crawl: {
       list: {
@@ -112,6 +130,7 @@ export function buildTradeFairManifestEntry(
     targetStatus,
     disabledReason,
     verifiedAdapter,
+    extractionMode,
     manifest,
     manifestSha256: manifestSha256(manifest),
     crawlConfig,

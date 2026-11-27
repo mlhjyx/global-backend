@@ -207,4 +207,42 @@ describe('M1 配置驱动通用爬虫 v0', () => {
     expect(result.records[1]!.products).toBeUndefined();
     expect(result.records[1]!.keywords).toBeUndefined();
   });
+
+  it('delegates to optional generic extractor when CSS selector matches 0 items and strips list-page PII', async () => {
+    const genericConfig = parseChannelConfig('crawl', {
+      list: {
+        url: 'https://www.intersolar.de/exhibitorlist',
+        singlePage: true,
+        maxPages: 1,
+        itemSelector: '.exhibitor-item',
+      },
+      detail: { enabled: false, fields: {} },
+    });
+    const fetchPage = fetcher({
+      'https://www.intersolar.de/exhibitorlist': '<html><body><section>SPA rendered exhibitor table</section></body></html>',
+    });
+    const result = await crawlChannel(genericConfig as never, fetchPage, {
+      pageCap: 1,
+      perRequestDelayMs: 0,
+      sleep: async () => {},
+      extractGenericRecords: async (page) => [
+        {
+          name: 'HelioGrid EPC GmbH',
+          website: 'http://heliogrid.example',
+          country: 'Germany',
+          email: 'john.doe@heliogrid.example',
+          contactName: 'John Doe',
+          sourceUrl: page.url,
+        },
+      ],
+    });
+    expect(result.records).toEqual([
+      {
+        name: 'HelioGrid EPC GmbH',
+        website: 'https://heliogrid.example/',
+        country: 'Germany',
+        sourceUrl: 'https://www.intersolar.de/exhibitorlist',
+      },
+    ]);
+  });
 });

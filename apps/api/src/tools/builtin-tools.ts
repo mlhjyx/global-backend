@@ -30,6 +30,13 @@ import {
 import { recordSearxngCooldownError } from "../adapters/searxng-fallback";
 import { crawlUrl } from "../adapters/web-crawler";
 import {
+  extractPdfMarkdownWithDocling,
+  fetchPdfViaDocling,
+  PdfNotRenderableError,
+  type PdfMarkdownExtractor,
+} from "../adapters/docling-pdf-fetch";
+import { isPdfDocumentUrl } from "../adapters/pdf-url-guard";
+import {
   fetchPageHttpFirst,
   HTTP_FIRST_TIMEOUT_MS,
   httpFirstParserVersion,
@@ -445,12 +452,61 @@ export interface Crawl4aiFetchToolDependencies {
   isAllowedByRobots: typeof isAllowedByRobots;
   /** HTTP-first 正文抓取（测试注入点）；默认走受治理的 fetchPageHttpFirst。 */
   fetchHttpFirst?: typeof fetchPageHttpFirst;
+  /** PDF 直链抓取 + Docling 转 Markdown（测试注入点）；默认走 fetchPdfViaDocling。 */
+  fetchPdf?: typeof fetchPdfViaDocling;
+  /** Docling PDF 字节抽取器（供 PDF 直链与非 .pdf URL 返回 application/pdf 共用）。 */
+  extractPdf?: PdfMarkdownExtractor;
   /** PR-B 页面缓存端口；缺省 = 不缓存（单测/未接 DB 的组合根）。 */
   urlContentCache?: HttpFirstCachePort;
 }
 
 type Crawl4aiFetchInput = { url: string; maxChars?: number; exactHtml?: true; profileTextRevision?: "manufacturer-profile/v1" };
 type Crawl4aiFetchOutput = { url: string; text: string; contentHash: string };
+
+function emptyCrawl4aiFetchResult(url: string, degraded = false): ToolResult<Crawl4aiFetchOutput> {
+  return {
+    data: { url, text: "", contentHash: "" },
+    costCents: 0,
+    ...(degraded ? { degraded: true } : {}),
+  };
+}
+
+/**
+ * 展商名录 PDF 专用路径：严禁把 `.pdf` 送进 Crawl4AI 无头 Chromium `/md`（会触发 502）。
+ * 经受治理的公网 HTTP 下载后交 Docling 解析前 15 页；Docling 不可用或空结果时诚实降级空文本。
+ */
+async function executePdfDocumentFetch(
+  input: Crawl4aiFetchInput,
+  ctx: ToolContext,
+  dependencies: Crawl4aiFetchToolDependencies,
+): Promise<ToolResult<Crawl4aiFetchOutput>> {
+  if (input.exactHtml === true || input.profileTextRevision) {
+    return emptyCrawl4aiFetchResult(input.url);
+  }
+  const fetchPdf = dependencies.fetchPdf ?? fetchPdfViaDocling;
+  try {
+    const page = await fetchPdf(input.url, {
+      workspaceId: ctx.workspaceId,
+      extractPdf: dependencies.extractPdf ?? extractPdfMarkdownWithDocling,
+      checkRedirectAllowed: (finalUrl) =>
+        dependencies.isAllowedByRobots(finalUrl, {
+          authorizeExternalAction: ctx.authorizeExternalAction,
+        }),
+      onRobotsRedirectBlocked: (finalUrl) => {
+        throw new RobotsRedirectBlockedError(finalUrl);
+      },
+      hooks: {
+        authorizeExternalAction: ctx.authorizeExternalAction,
+        beforePhysicalWire: ctx.beforePhysicalWire,
+      },
+    });
+    return page ? httpFirstCrawlResult(input, page, false) : emptyCrawl4aiFetchResult(input.url, true);
+  } catch (error) {
+    if (error instanceof RobotsRedirectBlockedError) return emptyCrawl4aiFetchResult(input.url);
+    if (isHttpFirstFatalError(error)) throw error;
+    return emptyCrawl4aiFetchResult(input.url, true);
+  }
+}
 
 function httpFirstCrawlResult(input: Crawl4aiFetchInput, page: HttpFirstPage, cache: boolean): ToolResult<Crawl4aiFetchOutput> {
   const maxChars = boundedCrawl4aiFetchChars(input.maxChars);
@@ -541,6 +597,7 @@ export function createCrawl4aiFetchTool(
       manufacturerProfileCaptureKey(input);
       const empty = { data: { url: input.url, text: "", contentHash: "" }, costCents: 0, degraded: true };
       if (!ctx.checkDiscoveryV3Robots) throw new Error("DISCOVERY_V3_ROBOTS_FENCE_UNAVAILABLE");
+      if (isPdfDocumentUrl(input.url)) return empty;
       if (!await isAllowedByDiscoveryV3Robots(input.url, ctx.checkDiscoveryV3Robots)) return empty;
       const page = await fetchPageHttpFirst(input.url, {
         captureNavigation: captureCompanyContactNavigation,
@@ -565,10 +622,10 @@ export function createCrawl4aiFetchTool(
         }))
       ) {
         // robots 禁抓 → 合规放弃（不换 UA）。返回空文本，不计失败。
-        return {
-          data: { url: input.url, text: "", contentHash: "" },
-          costCents: 0,
-        };
+        return emptyCrawl4aiFetchResult(input.url);
+      }
+      if (isPdfDocumentUrl(input.url)) {
+        return executePdfDocumentFetch(input, ctx, dependencies);
       }
       // HTTP-first（主计划 §3.5b PR-A）：先走受治理的普通 HTTP + readability 抽取；
       // 薄页/失败/关闭开关时回落浏览器渲染（fail-safe 方向 = 渲染）。
@@ -589,9 +646,16 @@ export function createCrawl4aiFetchTool(
           }
         };
         let robotsRedirectBlocked = false;
+        let pdfNotRenderable = false;
         const page = await httpFirst(input.url, {
           captureNavigation: captureCompanyContactNavigation,
           ...(exact ? { exactUrl: true } : {}),
+          ...(!exact && !input.profileTextRevision
+            ? {
+                extractPdf: dependencies.extractPdf ?? extractPdfMarkdownWithDocling,
+                workspaceId: ctx.workspaceId,
+              }
+            : {}),
           // The tool composition owns this producer; input/context only select the literal mode.
           ...(input.profileTextRevision ? {
             profileTextRevision: input.profileTextRevision,
@@ -616,16 +680,16 @@ export function createCrawl4aiFetchTool(
             robotsRedirectBlocked = true;
             return null;
           }
+          if (error instanceof PdfNotRenderableError) {
+            pdfNotRenderable = true;
+            return null;
+          }
           if (isHttpFirstFatalError(error)) throw error;
           return null;
         });
         if (gateFailure) throw gateFailure.error;
-        if (robotsRedirectBlocked) {
-          return {
-            data: { url: input.url, text: "", contentHash: "" },
-            costCents: 0,
-          };
-        }
+        if (robotsRedirectBlocked) return emptyCrawl4aiFetchResult(input.url);
+        if (pdfNotRenderable) return emptyCrawl4aiFetchResult(input.url, true);
         if (page) return httpFirstCrawlResult(input, page, Boolean(cache));
       }
       // Exact provenance must never fall back to the renderer (or a cached redirect).

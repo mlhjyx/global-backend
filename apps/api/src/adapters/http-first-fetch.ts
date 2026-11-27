@@ -1,8 +1,16 @@
 import { COMPANY_NAVIGATION_RECIPE, type CompanyNavigationCapture, type CompanyNavigationRecipe } from './company-navigation';
 import {
+  buildPdfMarkdownPage,
+  DOCLING_PDF_PARSER_VERSION,
+  isPdfHttpResponse,
+  PdfNotRenderableError,
+  type PdfMarkdownExtractor,
+} from './docling-pdf-fetch';
+import {
   extractFooterContactsFromDocument,
   formatFooterContactsMarkdown,
 } from './footer-contact-capture';
+import { pdfFilenameFromUrl } from './pdf-url-guard';
 /**
  * HTTP-first 抓取（主计划 §3.5b PR-A）：先用受治理的普通 HTTP 拿 HTML，在进程内用
  * readability 抽正文并转 Markdown，只有可疑页面（薄页/非 HTML/失败）才回落到
@@ -38,6 +46,9 @@ export const HTTP_FIRST_UA =
 export const DEFAULT_HTTP_FIRST_MIN_CHARS = 200;
 const NAVIGATION_PARSER_VERSION = 'http-first/2';
 export function httpFirstParserVersion(page: HttpFirstPage, exact: boolean): string {
+  if (!exact && page.parserVersion === DOCLING_PDF_PARSER_VERSION) {
+    return DOCLING_PDF_PARSER_VERSION;
+  }
   return !exact && page.parserVersion === NAVIGATION_PARSER_VERSION ? NAVIGATION_PARSER_VERSION : 'http-first/1';
 }
 /**
@@ -78,8 +89,8 @@ export interface HttpFirstPage {
   contentHash: string;
   /** 304 命中缓存时标记来源；普通抓取不带此字段。 */
   fromCache?: "conditional-304";
-  /** Only the fixed navigation recipe is tagged; legacy pages keep their original shape. */
-  parserVersion?: typeof NAVIGATION_PARSER_VERSION;
+  /** Only fixed non-default recipes (navigation / Docling PDF) are tagged; legacy pages keep their original shape. */
+  parserVersion?: typeof NAVIGATION_PARSER_VERSION | typeof DOCLING_PDF_PARSER_VERSION;
 }
 
 /** 缓存端口（PR-B）：未过期行为唯一可复用来源；实现负责 TTL 与过期过滤。 */
@@ -125,6 +136,7 @@ export function isHttpFirstFatalError(error: unknown): boolean {
     error instanceof EgressBlockedError ||
     error instanceof ExternalHttpActionDeniedError ||
     error instanceof RobotsRedirectBlockedError ||
+    error instanceof PdfNotRenderableError ||
     isExternalHttpPhysicalWireDeniedError(error)
   );
 }
@@ -148,6 +160,10 @@ export interface HttpFirstOptions {
   captureProfileText?: (html: string, minChars: number) => string | undefined;
   /** Fixed server Tool producer only, never selected by Tool input/context. */
   captureNavigation?: CompanyNavigationCapture;
+  /** Optional Docling PDF extractor when a non-exact HTTP response serves `application/pdf`. */
+  extractPdf?: PdfMarkdownExtractor;
+  /** Optional workspace scope passed to Docling concurrency/audit headers. */
+  workspaceId?: string;
   fetchHtml?: HttpFirstHtmlFetcher;
   minChars?: number;
   cache?: HttpFirstCacheOptions;
@@ -365,6 +381,38 @@ async function fetchHtmlSafely(
   }
 }
 
+async function extractFetchedResponse(
+  url: string,
+  fetched: HttpFirstHtmlResponse,
+  options: HttpFirstOptions,
+  minChars: number,
+): Promise<HttpFirstPage | null> {
+  if (
+    !options.exactUrl &&
+    !options.profileTextRevision &&
+    options.extractPdf &&
+    isPdfHttpResponse(fetched.finalUrl ?? url, fetched.contentType, fetched.body)
+  ) {
+    const targetUrl = fetched.finalUrl ?? url;
+    const filename = pdfFilenameFromUrl(targetUrl);
+    const markdown = await options.extractPdf({
+      url: targetUrl,
+      filename,
+      bytes: fetched.body,
+      workspaceId: options.workspaceId,
+    });
+    if (markdown) return buildPdfMarkdownPage(markdown, filename);
+    throw new PdfNotRenderableError(targetUrl);
+  }
+  if (!acceptsHtml(fetched.contentType, options.exactUrl)) return null;
+  try {
+    const html = decodeHtml(fetched.body, fetched.contentType);
+    return extractResponsePage(html, options, minChars, responseContext(url, fetched));
+  } catch {
+    return null;
+  }
+}
+
 /**
  * 抓一页并抽成 Markdown。返回 null 表示「应回落浏览器渲染」：
  * 非 HTML、非 2xx、抓取失败、或可读正文低于阈值。安全拦截与 robots 重定向拒绝向上抛。
@@ -400,34 +448,28 @@ export async function fetchPageHttpFirst(
     return cachedPage(cached, cacheRecipe);
   }
   await enforceRedirectRobots(url, fetched, options);
-  if (!acceptsHtml(fetched.contentType, options.exactUrl)) return null;
-  try {
-    const html = decodeHtml(fetched.body, fetched.contentType);
-    const page = extractResponsePage(html, options, minChars, responseContext(url, fetched));
-    if (!page) return null;
-    if (cache) {
-      try {
-        const cacheMaxChars =
-          options.cacheMaxChars ?? DEFAULT_HTTP_FIRST_CACHE_MAX_CHARS;
-        const cachedMarkdown = page.markdown.slice(0, cacheMaxChars);
-        await writeCache(cache, url, {
-          markdown: cachedMarkdown,
-          contentHash:
-            cachedMarkdown === page.markdown
-              ? page.contentHash
-              : createHash("sha256")
-                  .update(cachedMarkdown, "utf8")
-                  .digest("hex"),
-          etag: fetched.etag ?? null,
-          lastModified: fetched.lastModified ?? null,
-        }, cacheRecipe);
-      } catch {
-        // 缓存写失败不影响本次抓取结果。
-      }
-      logPageCacheState(url, "miss");
+  const page = await extractFetchedResponse(url, fetched, options, minChars);
+  if (!page) return null;
+  if (cache) {
+    try {
+      const cacheMaxChars =
+        options.cacheMaxChars ?? DEFAULT_HTTP_FIRST_CACHE_MAX_CHARS;
+      const cachedMarkdown = page.markdown.slice(0, cacheMaxChars);
+      await writeCache(cache, url, {
+        markdown: cachedMarkdown,
+        contentHash:
+          cachedMarkdown === page.markdown
+            ? page.contentHash
+            : createHash("sha256")
+                .update(cachedMarkdown, "utf8")
+                .digest("hex"),
+        etag: fetched.etag ?? null,
+        lastModified: fetched.lastModified ?? null,
+      }, cacheRecipe);
+    } catch {
+      // 缓存写失败不影响本次抓取结果。
     }
-    return page;
-  } catch {
-    return null;
+    logPageCacheState(url, "miss");
   }
+  return page;
 }

@@ -227,16 +227,16 @@ describe("Mainline A channels, shared facts and design examples", () => {
       }
     });
 
-    it("T1-F11-03: verified adapter admits ProPak and leaves unverified flagship fairs disabled", async () => {
+    it("T1-F11-03: compliance gate enables ProPak and compliant generic fairs while keeping WAF-blocked KEY Energy disabled", async () => {
       type BuildManifest = (fair: (typeof TRADE_FAIR_CATALOG)[number]) =>
-        { targetStatus: string; disabledReason: string | null; verifiedAdapter: boolean };
+        { targetStatus: string; disabledReason: string | null; verifiedAdapter: boolean; extractionMode: string };
       const buildManifest = await loadProductExport<BuildManifest>(
         "F11", "src/channels/trade-fair-manifests.ts", "buildTradeFairManifestEntry",
       );
       const assess = (slug: string) => buildManifest(TRADE_FAIR_CATALOG.find((fair) => fair.slug === slug)!);
-      expect(assess("propak-asia-2026")).toMatchObject({ targetStatus: "ENABLED", verifiedAdapter: true });
-      expect(assess("key-energy-rimini")).toMatchObject({ targetStatus: "DISABLED", verifiedAdapter: false });
-      expect(assess("intersolar-europe")).toMatchObject({ targetStatus: "DISABLED", verifiedAdapter: false });
+      expect(assess("propak-asia-2026")).toMatchObject({ targetStatus: "ENABLED", verifiedAdapter: true, extractionMode: "selector" });
+      expect(assess("intersolar-europe")).toMatchObject({ targetStatus: "ENABLED", verifiedAdapter: true, extractionMode: "generic_llm" });
+      expect(assess("key-energy-rimini")).toMatchObject({ targetStatus: "DISABLED", disabledReason: "GOVERNANCE", verifiedAdapter: false });
     });
 
     it("T1-F11-04: local catalog filters by country and keywords and prefers reviewed evidence", async () => {
