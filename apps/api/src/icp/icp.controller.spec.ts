@@ -1,4 +1,4 @@
-import { ConflictException, HttpException } from '@nestjs/common';
+import { ConflictException, HttpException, ValidationPipe } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import type { RequestContext } from '../auth/request-context';
 import { ExecutionBudgetGrantError } from '../execution-budget/execution-budget-authority.types';
@@ -62,6 +62,15 @@ async function rejectionOf(operation: Promise<unknown>): Promise<unknown> {
 }
 
 describe('POST /companies/:companyId/icps confirmed markets', () => {
+  it('accepts all six buyer roles from the form through the HTTP validation pipe', async () => {
+    const buyerRoles = ['distributor', 'wholesaler', 'epc', 'installer', 'developer', 'factory_direct'];
+    const [, , bodyType] = Reflect.getMetadata('design:paramtypes', IcpController.prototype, 'generate');
+    const validationPipe = new ValidationPipe({ transform: true, whitelist: true });
+
+    await expect(validationPipe.transform({ buyerRoles }, { type: 'body', metatype: bodyType }))
+      .resolves.toMatchObject({ buyerRoles });
+  });
+
   it('forwards explicitly confirmed markets to the service', async () => {
     const generate = vi.fn().mockResolvedValue(ICP_ROW);
     const controller = controllerWith({ generateFromCompany: generate });

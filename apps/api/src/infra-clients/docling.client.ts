@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { KbIngestError } from './kb-errors';
 import {
   positiveIntEnv,
@@ -16,6 +17,9 @@ export function resolveDoclingBackendMode(
 }
 
 const CONVERT_TIMEOUT_MS = 300_000; // 首次调用会下载布局模型，放宽
+const ASYNC_CONVERT_WAIT_MS = 180_000;
+const ASYNC_POLL_INTERVAL_MS = 2_000;
+const TASK_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const MAX_EXTRACTED_PAGE_IMAGES = 8;
 const MAX_RAW_PAGE_IMAGE_BYTES = 8 * 1024 * 1024;
 const PNG_DATA_URI_PREFIX = 'data:image/png;base64,';
@@ -35,6 +39,13 @@ export interface DoclingConvertOptions {
   readonly returnPageCount?: boolean;
   /** 允许空 Markdown 返回（调用方决定是否走 OCR/视觉兜底，而不直接判失败）。 */
   readonly allowEmptyMarkdown?: boolean;
+  /** 本机 Docling 任务检查点，调用方必须在第一次轮询前持久化任务号。 */
+  readonly localAsync?: DoclingAsyncOptions;
+}
+
+export interface DoclingAsyncOptions {
+  readonly taskId?: string;
+  readonly saveTaskId: (taskId: string | null) => Promise<void>;
 }
 
 export interface DoclingPageImage {
@@ -116,14 +127,50 @@ function isDocumentInputFailure(value: unknown): boolean {
 
 function hasDocumentInputFailure(value: unknown): boolean {
   if (!isRecord(value)) return false;
-  const candidates: unknown[] = [value, value.error, value.detail];
+  const candidates: unknown[] = [value, value.error, value.detail, value.failure];
   if (Array.isArray(value.errors)) candidates.push(...value.errors);
   return candidates.some(isDocumentInputFailure);
 }
 
-function requestSignal(external?: AbortSignal): AbortSignal {
-  const timeout = AbortSignal.timeout(CONVERT_TIMEOUT_MS);
+function requestSignal(external?: AbortSignal, timeoutMs = CONVERT_TIMEOUT_MS): AbortSignal {
+  const timeout = AbortSignal.timeout(timeoutMs);
   return external ? AbortSignal.any([external, timeout]) : timeout;
+}
+
+function doclingParseError(message: string, detail?: unknown): KbIngestError {
+  const invalidInput = hasDocumentInputFailure(detail);
+  return new KbIngestError(
+    invalidInput ? 'KB_DOCUMENT_INVALID' : 'KB_DOCLING_UNAVAILABLE',
+    invalidInput ? 'terminal' : 'retryable',
+    'parse',
+    message,
+  );
+}
+
+function isMissingTaskResponse(detail: unknown): boolean {
+  return isRecord(detail) && (
+    detail.detail === 'Task not found.' ||
+    detail.detail === 'Task result not found. Please wait for a completion status.'
+  );
+}
+
+async function readResponseObject(res: Response): Promise<Record<string, unknown>> {
+  let parsed: unknown;
+  try {
+    parsed = await res.json();
+  } catch (err) {
+    throw new KbIngestError(
+      'KB_DOCLING_UNAVAILABLE',
+      'retryable',
+      'parse',
+      'docling returned malformed JSON',
+      err instanceof Error ? { cause: err } : undefined,
+    );
+  }
+  if (!isRecord(parsed)) {
+    throw doclingParseError('docling returned a non-object response');
+  }
+  return parsed;
 }
 
 /**
@@ -148,6 +195,74 @@ export class DoclingClient {
     globalLimit: positiveIntEnv(process.env, 'DOCLING_MAX_CONCURRENT_GLOBAL', 6, 64),
     acquireTimeoutMs: CONVERT_TIMEOUT_MS,
   });
+
+  private async convertLocallyAsync(
+    job: DoclingAsyncOptions,
+    headers: Record<string, string>,
+    makeBody: () => string,
+    signal?: AbortSignal,
+  ): Promise<Record<string, unknown>> {
+    let taskId = job.taskId;
+    if (taskId !== undefined && !TASK_ID_PATTERN.test(taskId)) {
+      await job.saveTaskId(null);
+      throw doclingParseError('docling task reference is invalid');
+    }
+
+    const waitSignal = requestSignal(signal, ASYNC_CONVERT_WAIT_MS);
+    const request = async (path: string, body?: string) => {
+      waitSignal.throwIfAborted();
+      const res = await fetch(`${this.baseUrl}${path}`, {
+        method: body === undefined ? 'GET' : 'POST',
+        headers,
+        ...(body === undefined ? {} : { body }),
+        redirect: 'error',
+        signal: waitSignal,
+      });
+      if (!res.ok) {
+        const detail: unknown = await res.json().catch(() => undefined);
+        if (taskId && res.status === 404 && isMissingTaskResponse(detail)) await job.saveTaskId(null);
+        throw doclingParseError(`docling async request returned HTTP ${res.status}`, detail);
+      }
+      return readResponseObject(res);
+    };
+
+    if (!taskId) {
+      waitSignal.throwIfAborted();
+      const submitted = await request('/v1/convert/source/async', makeBody());
+      if (typeof submitted.task_id !== 'string' || !TASK_ID_PATTERN.test(submitted.task_id)) {
+        throw doclingParseError('docling did not return a valid task reference');
+      }
+      taskId = submitted.task_id;
+      await job.saveTaskId(taskId);
+    }
+
+    const poll = async () => {
+      const status = await request(`/v1/status/poll/${taskId}`);
+      if (status.task_id !== taskId) throw doclingParseError('docling task reference does not match');
+      return status;
+    };
+    let status = await poll();
+    while (status.task_status === 'pending' || status.task_status === 'started') {
+      await sleep(ASYNC_POLL_INTERVAL_MS, undefined, { signal: waitSignal });
+      status = await poll();
+    }
+    if (status.task_status === 'failure') {
+      await job.saveTaskId(null);
+      throw doclingParseError('docling conversion task failed', status);
+    }
+    if (status.task_status !== 'success') throw doclingParseError('docling returned an unknown task status');
+
+    const parsed = await request(`/v1/result/${taskId}`);
+    if (
+      (parsed.status !== 'success' && parsed.status !== 'partial_success') ||
+      !isRecord(parsed.document) ||
+      typeof parsed.document.md_content !== 'string'
+    ) {
+      await job.saveTaskId(null);
+      throw doclingParseError('docling task returned no converted document', parsed);
+    }
+    return parsed;
+  }
 
   async convertToMarkdown(
     filename: string,
@@ -191,66 +306,33 @@ export class DoclingClient {
         ...(this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {}),
         ...(workspaceId?.trim() ? { 'X-Workspace-Id': workspaceId.trim() } : {}),
       };
-      let res: Response;
-      try {
-        if (signal?.aborted) {
-          throw signal.reason instanceof Error ? signal.reason : new Error('Aborted');
-        }
-        res = await fetch(`${this.baseUrl}/v1/convert/source`, {
+      const makeBody = () => JSON.stringify({
+        options,
+        sources: [{ kind: 'file', base64_string: data.toString('base64'), filename }],
+      });
+      let parsed: Record<string, unknown>;
+      if (this.backendMode === 'local' && opts?.localAsync) {
+        parsed = await this.convertLocallyAsync(opts.localAsync, headers, makeBody, signal);
+      } else {
+        signal?.throwIfAborted();
+        const res = await fetch(`${this.baseUrl}/v1/convert/source`, {
           method: 'POST',
           headers,
-          body: JSON.stringify({
-            options,
-            sources: [{ kind: 'file', base64_string: data.toString('base64'), filename }],
-          }),
+          body: makeBody(),
           signal: requestSignal(signal),
         });
-      } catch (err) {
-        throw new KbIngestError(
-          'KB_DOCLING_UNAVAILABLE',
-          'retryable',
-          'parse',
-          `docling unavailable: ${err instanceof Error ? err.message : String(err)}`,
-          err instanceof Error ? { cause: err } : undefined,
-        );
-      }
-      if (!res.ok) {
-        const body = await res.text().catch(() => '');
-        let structured: unknown;
-        try {
-          structured = JSON.parse(body);
-        } catch {
-          structured = undefined;
+        if (!res.ok) {
+          const body = await res.text().catch(() => '');
+          let detail: unknown;
+          try {
+            detail = JSON.parse(body);
+          } catch {
+            detail = undefined;
+          }
+          // 415/422 也可能是网关或 FastAPI schema 错误，只认明确绑定用户输入的损坏证据。
+          throw doclingParseError(`docling convert ${res.status}: ${body.slice(0, 300)}`, detail);
         }
-        // 415/422 也可能是网关或 FastAPI 请求 schema/部署契约错误，状态码本身
-        // 不能给用户文档定罪；只认明确绑定 user_input/document 的格式损坏证据。
-        const invalidInput = hasDocumentInputFailure(structured);
-        throw new KbIngestError(
-          invalidInput ? 'KB_DOCUMENT_INVALID' : 'KB_DOCLING_UNAVAILABLE',
-          invalidInput ? 'terminal' : 'retryable',
-          'parse',
-          `docling convert ${res.status}: ${body.slice(0, 300)}`,
-        );
-      }
-      let parsed: unknown;
-      try {
-        parsed = await res.json();
-      } catch (err) {
-        throw new KbIngestError(
-          'KB_DOCLING_UNAVAILABLE',
-          'retryable',
-          'parse',
-          'docling returned malformed JSON',
-          err instanceof Error ? { cause: err } : undefined,
-        );
-      }
-      if (!isRecord(parsed)) {
-        throw new KbIngestError(
-          'KB_DOCLING_UNAVAILABLE',
-          'retryable',
-          'parse',
-          'docling returned a non-object response',
-        );
+        parsed = await readResponseObject(res);
       }
       const json = parsed as DoclingResponse;
       const rawMarkdown = json.document?.md_content;

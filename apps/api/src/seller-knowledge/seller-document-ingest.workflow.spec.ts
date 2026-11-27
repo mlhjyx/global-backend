@@ -39,6 +39,41 @@ describe('sellerDocumentIngestWorkflow（Phase 2b）', () => {
     expect(out).toEqual({ documentId: INPUT.documentId, outcome: 'ready' });
   });
 
+  it('第四次暂时失败后等待完整退避时间，继续直到活动返回终态', async () => {
+    const queued = (retryAfterSeconds: number) => ({
+      documentId: INPUT.documentId,
+      outcome: 'queued',
+      retryAfterSeconds,
+    });
+    acts.processSellerDocument
+      .mockResolvedValueOnce(queued(60))
+      .mockResolvedValueOnce(queued(120))
+      .mockResolvedValueOnce(queued(240))
+      .mockResolvedValueOnce(queued(480))
+      .mockResolvedValueOnce({ documentId: INPUT.documentId, outcome: 'ready' });
+
+    expect(await sellerDocumentIngestWorkflow(INPUT)).toEqual({
+      documentId: INPUT.documentId,
+      outcome: 'ready',
+    });
+    expect(sleep).toHaveBeenNthCalledWith(4, 482_000);
+    expect(acts.processSellerDocument).toHaveBeenCalledTimes(5);
+  });
+
+  it('已记录第一次重试补丁的旧历史沿用旧重试上限', async () => {
+    setPatched((id) => id === 'seller-document-queued-retry-v1');
+    acts.processSellerDocument.mockResolvedValue({
+      documentId: INPUT.documentId,
+      outcome: 'queued',
+      retryAfterSeconds: 480,
+    });
+
+    expect((await sellerDocumentIngestWorkflow(INPUT)).outcome).toBe('queued');
+    expect(sleep).toHaveBeenCalledTimes(3);
+    expect(sleep).toHaveBeenCalledWith(302_000);
+    expect(acts.processSellerDocument).toHaveBeenCalledTimes(4);
+  });
+
   it('旧历史 replay（patched=false）保持单次调用不触发 sleep', async () => {
     setPatched(() => false);
     acts.processSellerDocument.mockResolvedValue({ documentId: INPUT.documentId, outcome: 'queued', retryAfterSeconds: 60 });

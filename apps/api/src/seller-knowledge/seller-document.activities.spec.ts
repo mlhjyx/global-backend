@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
+import { DoclingClient, type DoclingConvertOptions } from '../infra-clients/docling.client';
 import type { PrismaService } from '../prisma/prisma.service';
 import { KbIngestError } from '../site-builder/kb-errors';
+import { SellerDocumentDto } from './dto/seller-document.dto';
 import {
   createSellerDocumentActivities,
   resolveDoclingFilename,
@@ -15,16 +17,18 @@ const INPUT: SellerDocumentIngestInput = {
 };
 
 function fixture(options: {
-  claimRows?: Array<{ filename?: string | null; object_key: string; mime: string; processing_attempt: number; uploaded_by?: string | null }>;
-  currentStatus?: { status: string; deletedAt: Date | null } | null;
+  claimRows?: Array<{ filename?: string | null; object_key: string; mime: string; processing_attempt: number; uploaded_by?: string | null; docling_tasks?: unknown }>;
+  currentStatus?: { status: string; deletedAt: Date | null; retryAt?: Date | null; leaseUntil?: Date | null } | null;
   content?: Buffer | Error;
   markdown?: string;
   doclingError?: Error;
+  doclingClient?: DoclingClient;
+  convertToMarkdown?: DoclingClient['convertToMarkdown'];
   embedError?: Error;
   publishRows?: unknown[];
   claims?: { createAssistedDrafts: ReturnType<typeof vi.fn> };
 } = {}) {
-  const executeRaw = vi.fn(async () => 1);
+  const executeRaw = vi.fn(async (_sql: unknown) => 1);
   const deleteMany = vi.fn(async () => ({ count: 0 }));
   const tx = {
     $queryRaw: vi.fn(async (argument: unknown) => {
@@ -57,10 +61,10 @@ function fixture(options: {
     }),
   };
   const docling = {
-    convertToMarkdown: vi.fn(async () => {
+    convertToMarkdown: vi.fn(options.convertToMarkdown ?? (async () => {
       if (options.doclingError) throw options.doclingError;
       return { markdown: options.markdown ?? '# parsed' };
-    }),
+    })),
   };
   const embeddings = {
     model: 'bge-m3',
@@ -73,7 +77,7 @@ function fixture(options: {
   const activities = createSellerDocumentActivities({
     prisma: prisma as unknown as PrismaService,
     storage: storage as unknown as SellerDocumentsStorage,
-    docling: docling as never,
+    docling: options.doclingClient ?? (docling as never),
     embeddings: embeddings as never,
     ...(options.claims ? { claims: options.claims as never } : {}),
   });
@@ -118,6 +122,162 @@ describe('createSellerDocumentActivities（Phase 2b ingest）', () => {
       INPUT.workspaceId,
       expect.objectContaining({ allowEmptyMarkdown: true }),
     );
+  });
+
+  it('PDF 解析暂时未返回时以租约保存任务号，下次认领继续查询同一任务', async () => {
+    const taskId = '9a240308-003e-479a-81b8-9efd1767399a';
+    const row = { object_key: 'ws/k.pdf', mime: 'application/pdf', processing_attempt: 1 };
+    const waiting = fixture({
+      claimRows: [row],
+      convertToMarkdown: async (_name, _data, _signal, _workspace, opts) => {
+        await opts?.localAsync?.saveTaskId(taskId);
+        throw new KbIngestError('KB_DOCLING_UNAVAILABLE', 'retryable', 'parse', 'poll interrupted');
+      },
+    });
+
+    expect(await waiting.activities.processSellerDocument(INPUT)).toMatchObject({ outcome: 'queued' });
+    const taskWrite = waiting.executeRaw.mock.calls
+      .map(([sql]) => sql as { sql: string; values: unknown[] })
+      .find((sql) => sql.values.some((value) => value === JSON.stringify({ _doclingTasks: { primary: taskId } })));
+    expect(taskWrite?.sql).toContain('"lease_token" =');
+    expect(taskWrite?.values).toContain(INPUT.documentId);
+
+    const resumed = fixture({
+      claimRows: [{ ...row, processing_attempt: 2, docling_tasks: { primary: taskId } }],
+      convertToMarkdown: async (_name, _data, _signal, _workspace, opts: DoclingConvertOptions | undefined) => {
+        expect(opts?.localAsync?.taskId).toBe(taskId);
+        return { markdown: '# PDF catalogue\n\n' + 'Technical product details. '.repeat(30) };
+      },
+    });
+    expect(await resumed.activities.processSellerDocument(INPUT)).toMatchObject({ outcome: 'ready' });
+  });
+
+  it('扫描 PDF 的旧 OCR 任务 404 后清除任务号，下一次重新提交 OCR 并发布文字', async () => {
+    const primary = '9a240308-003e-479a-81b8-9efd1767399a';
+    const expiredOcr = 'dd290261-ce12-4634-91c8-4342e9b63963';
+    const replacementOcr = '6df37644-0605-4308-9607-98260ff92905';
+    const pending = (task_id: string) => Response.json({ task_id, task_status: 'pending' });
+    const succeeded = (task_id: string) => Response.json({ task_id, task_status: 'success' });
+    const result = (md_content: string) => Response.json({ status: 'success', document: { md_content } });
+    const recoveredText = 'OCR restored the scanned technical specifications.';
+    const baseUrl = 'http://docling.fixture:5001';
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(succeeded(primary))
+      .mockResolvedValueOnce(result(''))
+      .mockResolvedValueOnce(Response.json({ detail: 'Task not found.' }, { status: 404 }))
+      .mockResolvedValueOnce(succeeded(primary))
+      .mockResolvedValueOnce(result(''))
+      .mockResolvedValueOnce(pending(replacementOcr))
+      .mockResolvedValueOnce(succeeded(replacementOcr))
+      .mockResolvedValueOnce(result(recoveredText));
+    vi.stubEnv('DOCLING_BACKEND', 'local');
+    vi.stubEnv('DOCLING_URL', baseUrl);
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const row = {
+        object_key: 'ws/scan.pdf', mime: 'application/pdf', processing_attempt: 2,
+        docling_tasks: { primary, ocr: expiredOcr } as { primary: string; ocr?: string },
+      };
+      const { activities, executeRaw, embeddings } = fixture({
+        claimRows: [row], doclingClient: new DoclingClient(),
+        content: Buffer.from('%PDF-1.7\n1 0 obj << /Type /Pages /Count 1 >> endobj\n', 'latin1'),
+      });
+      executeRaw.mockImplementation(async (statement) => {
+        const { values } = statement as { values: unknown[] };
+        const checkpoint = values.find((value): value is string =>
+          typeof value === 'string' && value.startsWith('{"_doclingTasks":'),
+        );
+        if (checkpoint) row.docling_tasks = JSON.parse(checkpoint)._doclingTasks;
+        return 1;
+      });
+
+      const first = await activities.processSellerDocument(INPUT);
+      expect(first).toMatchObject({ outcome: 'queued', retryAfterSeconds: 120 });
+      expect(row.docling_tasks).toEqual({ primary });
+      expect(embeddings.embed).not.toHaveBeenCalled();
+      expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+        `${baseUrl}/v1/status/poll/${primary}`,
+        `${baseUrl}/v1/result/${primary}`,
+        `${baseUrl}/v1/status/poll/${expiredOcr}`,
+      ]);
+
+      row.processing_attempt = 3;
+      expect(await activities.processSellerDocument(INPUT)).toMatchObject({ outcome: 'ready' });
+      const submissions = fetchMock.mock.calls.filter(([, request]) => request?.method === 'POST');
+      expect(submissions).toHaveLength(1);
+      expect(submissions[0]?.[0]).toBe(`${baseUrl}/v1/convert/source/async`);
+      expect(JSON.parse(String(submissions[0]?.[1]?.body))).toMatchObject({ options: { force_ocr: true } });
+      expect(embeddings.embed.mock.calls[0]?.[0]).toEqual([recoveredText]);
+    } finally {
+      vi.unstubAllEnvs();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it.each([
+    { mode: 'local', primaryText: '额定功率 10 千瓦。', expected: 'ready' },
+    { mode: 'managed_api', primaryText: '', expected: 'failed_terminal' },
+  ])('OCR 不可用时保留 $mode 已有的 $expected 行为', async ({ mode, primaryText, expected }) => {
+    const primary = '9a240308-003e-479a-81b8-9efd1767399a';
+    const ocr = 'dd290261-ce12-4634-91c8-4342e9b63963';
+    const fetchMock = vi.fn<typeof fetch>();
+    const result = () => Response.json({ status: 'success', document: { md_content: primaryText } });
+    if (mode === 'local') {
+      fetchMock.mockResolvedValueOnce(Response.json({ task_id: primary, task_status: 'success' }))
+        .mockResolvedValueOnce(result())
+        .mockResolvedValueOnce(Response.json({ detail: 'Task not found.' }, { status: 404 }));
+    } else {
+      fetchMock.mockResolvedValueOnce(result()).mockResolvedValueOnce(Response.json({}, { status: 503 }));
+    }
+    vi.stubEnv('DOCLING_BACKEND', mode);
+    vi.stubEnv('DOCLING_URL', 'http://docling.fixture:5001');
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const { activities } = fixture({
+        claimRows: [{ object_key: 'ws/scan.pdf', mime: 'application/pdf', processing_attempt: 2, docling_tasks: { primary, ocr } }],
+        doclingClient: new DoclingClient(),
+      });
+      expect(await activities.processSellerDocument(INPUT)).toMatchObject({ outcome: expected });
+    } finally {
+      vi.unstubAllEnvs();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('正在等待有效解析租约过期时交回剩余等待时间', async () => {
+    vi.useFakeTimers();
+    try {
+      const { activities, storage } = fixture({
+        claimRows: [],
+        currentStatus: { status: 'processing', deletedAt: null, leaseUntil: new Date(Date.now() + 125_000) },
+      });
+      expect(await activities.processSellerDocument(INPUT)).toEqual({
+        documentId: INPUT.documentId,
+        outcome: 'queued',
+        retryAfterSeconds: 125,
+      });
+      expect(storage.getBufferBounded).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('DTO 保留公共解析摘要，隐藏内部解析任务号', () => {
+    const doc = SellerDocumentDto.from({
+      id: INPUT.documentId,
+      companyId: INPUT.companyId,
+      filename: 'catalog.pdf',
+      mime: 'application/pdf',
+      sizeBytes: 4096n,
+      kind: 'pdf',
+      status: 'queued',
+      processingErrorCode: 'DOCUMENT_PARSE_UNAVAILABLE',
+      chunkCount: 0,
+      parsedMeta: { mode: 'priority_pages', _doclingTasks: { primary: '9a240308-003e-479a-81b8-9efd1767399a' } },
+      factsExtractedAt: null,
+      createdAt: new Date(0),
+    });
+    expect(doc.parsedMeta).toEqual({ mode: 'priority_pages' });
   });
 
   it('大页数 PDF（>15 页）：首阶段只解析前 15 页立即置 ready，并标记 tailPagesPending 供后台补全', async () => {

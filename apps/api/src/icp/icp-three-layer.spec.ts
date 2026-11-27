@@ -7,6 +7,29 @@ import {
 } from './icp-three-layer';
 
 describe('ICP three-layer decoupling (seller_profile / buyer_spec / peer_exclusions)', () => {
+  it('keeps every explicitly selected buyer role in the saved buyer specification', () => {
+    const buyerRoles = ['distributor', 'wholesaler', 'epc', 'installer', 'developer', 'factory_direct', 'public_sector'];
+    const attrs = buildThreeLayerIcpAttributes({
+      company: { name: 'Fixture Seller' },
+      offerings: [],
+      companyAttributes: {},
+      exclusions: [],
+      targetMarkets: ['IT'],
+      overrides: { buyerRoles: [...buyerRoles, '  distributor  '] },
+    });
+
+    expect(attrs.buyer_spec).toMatchObject({ target_roles: buyerRoles });
+  });
+
+  it('bounds buyer role text sent to the model without an item limit for normal role labels', () => {
+    const roles = Array.from({ length: 40 }, (_, index) => `role_${index}`);
+    const focus = buildMultiIcpPromptFocus({ buyerRoles: [...roles, 'x'.repeat(2_049), 'epc_integrator'] });
+
+    expect(focus).toContain(roles.join('、'));
+    expect(focus).toContain('epc_integrator');
+    expect(focus).not.toContain('x'.repeat(20));
+  });
+
   it('separates seller technical specs from buyer_spec product categories and builds peer_exclusions', () => {
     const attrs = buildThreeLayerIcpAttributes({
       company: {

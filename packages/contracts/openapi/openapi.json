@@ -32595,7 +32595,6 @@
             }
           },
           "buyerRoles": {
-            "maxItems": 5,
             "description": "可选：本 ICP 聚焦的下游买家角色（如 distributor / epc_integrator）",
             "type": "array",
             "items": {

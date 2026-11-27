@@ -149,6 +149,143 @@ describe('understanding.activities — unified runtime telemetry', () => {
   });
 });
 
+describe('understanding.activities — website claim evidence', () => {
+  it('keeps source-backed business facts and drops high-confidence page copy or missing quotes', async () => {
+    const foundingRecord = 'Acme GmbH wurde 2026 in Stuttgart gegründet.';
+    const supported = [
+      {
+        type: 'company_fact',
+        statement: '页面列示公司有3项发明专利授权。',
+        evidence: '公司已获授权发明专利3项。',
+        confidence: 0.94,
+      },
+      {
+        type: 'capability',
+        statement: '公司提供现场调试和 5 年备件支持。',
+        evidence: '我们为工商业客户提供现场调试和 5 年备件支持。',
+        confidence: 0.92,
+      },
+      {
+        type: 'company_fact',
+        statement: foundingRecord,
+        evidence: foundingRecord,
+        confidence: 0.93,
+      },
+      {
+        type: 'value_prop',
+        statement: 'La pompe fonctionne à sec pendant 30 minutes.',
+        evidence: 'Mode de marche à sec pendant 30 minutes.',
+        confidence: 0.91,
+      },
+      {
+        type: 'forbidden_expression_candidate',
+        statement: '我们是全球第一、100% 零缺陷的行业领导者。',
+        evidence: '我们是全球第一、100% 零缺陷的行业领导者。',
+        confidence: 0.9,
+      },
+    ];
+    const rejected = [
+      {
+        type: 'value_prop',
+        statement: '页面以“绿电专家 照亮世界 智慧地球”作为宣传语。',
+        evidence: '绿电专家 照亮世界 智慧地球',
+        confidence: 0.98,
+      },
+      {
+        type: 'capability',
+        statement: '网站提供售后问题反馈服务，并宣称可提供技术支持、定位和解决问题。',
+        evidence: '提交售后问题反馈，获取技术支持、定位和解决问题。',
+        confidence: 0.97,
+      },
+      {
+        type: 'company_fact',
+        statement: '页面列示“2026 控股云岭新能源有限公司”。',
+        evidence: '2026 控股云岭新能源有限公司',
+        confidence: 0.99,
+      },
+      {
+        type: 'company_fact',
+        statement: 'Acme Holdings operates as an incorporated manufacturer.',
+        evidence: '2026 Acme Holdings Ltd.',
+        confidence: 0.99,
+      },
+      {
+        type: 'capability',
+        statement: 'Acme provides remote fault diagnosis.',
+        evidence: 'Technical Support',
+        confidence: 0.99,
+      },
+      {
+        type: 'certification',
+        statement: '公司通过 ISO 9001 认证。',
+        evidence: '本公司通过 ISO 9001 认证。',
+        confidence: 0.96,
+      },
+      { type: 'company_fact', statement: '公司有海外办公室。', evidence: '  ', confidence: 0.96 },
+    ];
+    const pageText = [
+      ...supported.map(({ evidence }) => evidence === foundingRecord
+        ? `${evidence} © 2026 Acme GmbH. All rights reserved.`
+        : evidence),
+      rejected[0]!.evidence,
+      rejected[1]!.evidence,
+      rejected[2]!.evidence,
+      '**© 2026 Acme Holdings Ltd. All rights reserved.**',
+      '# Technical Support',
+    ].join('\n');
+    const generateStructured = vi.fn(async () => ({
+      data: { claims: [...rejected, ...supported] },
+      provider: 'gateway', model: 'model', durableReceipt: MODEL_RECEIPT,
+    }));
+    const acts = createUnderstandingActivities({
+      prisma: {} as PrismaService,
+      gateway: { generateStructured } as unknown as ModelGateway,
+      budgetStore: budgetStoreSpies().store,
+    });
+
+    await expect(acts.extractClaims({ ...AUTHORITY_ARGS, text: pageText }))
+      .resolves.toEqual({ claims: supported, durableReceipt: MODEL_RECEIPT });
+  });
+
+  it.each([
+    '© 2024',
+    'Copyright 2024',
+    '© Copyright 2024',
+  ])('checks the quote position when %s follows body text', async (notice) => {
+    const companyName = {
+      type: 'company_fact',
+      statement: "The company's registered name is Example Holdings.",
+      evidence: 'Example Holdings',
+      confidence: 0.86,
+    };
+    const manufacturing = {
+      type: 'capability',
+      statement: 'The factory makes pumps.',
+      evidence: 'We make pumps.',
+      confidence: 0.95,
+    };
+    const mixedLine = `${manufacturing.evidence} ${notice} Example Holdings. All rights reserved.`;
+    const generateStructured = vi.fn(async () => ({
+      data: { claims: [companyName, manufacturing] },
+      provider: 'gateway', model: 'model',
+    }));
+    const acts = createUnderstandingActivities({
+      prisma: {} as PrismaService,
+      gateway: { generateStructured } as unknown as ModelGateway,
+      budgetStore: budgetStoreSpies().store,
+    });
+
+    await expect(acts.extractClaims({
+      ...AUTHORITY_ARGS,
+      text: mixedLine,
+    })).resolves.toEqual({ claims: [manufacturing] });
+    await expect(acts.extractClaims({
+      ...AUTHORITY_ARGS,
+      text: `${mixedLine}\nRegistered name: Example Holdings.`,
+    })).resolves.toEqual({ claims: [companyName, manufacturing] });
+  });
+});
+
 describe('understanding.activities — durable workflow budget lifecycle', () => {
   it('runs claims and offerings domain writes through the same unreceipted transaction before Task 6', async () => {
     const current = vi.spyOn(Context, 'current').mockReturnValue({
@@ -187,7 +324,9 @@ describe('understanding.activities — durable workflow budget lifecycle', () =>
       website: 'https://acme.example',
       pages: [{
         url: 'https://acme.example/about',
-        claims: [{ type: 'product', statement: 'Makes pumps', confidence: 0.9 }],
+        claims: [{
+          type: 'capability', statement: 'Makes pumps', evidence: 'We make pumps.', confidence: 0.9,
+        }],
       }],
     })).resolves.toEqual({ claimCount: 1 });
     await expect(acts.persistOfferings({

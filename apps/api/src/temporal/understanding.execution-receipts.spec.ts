@@ -134,7 +134,7 @@ describe('understanding receipt consumers', () => {
     });
   });
 
-  it('ACKs crawl plus Model receipts on the exact claims transaction', async () => {
+  it('ACKs crawl plus Model receipts while screening pending claims from earlier extraction histories', async () => {
     acknowledgementMocks.plural.mockClear();
     const current = vi.spyOn(Context, 'current').mockReturnValue({
       info: {
@@ -144,7 +144,7 @@ describe('understanding receipt consumers', () => {
     } as never);
     const tx = {
       claim: {
-        findMany: vi.fn(async () => []),
+        findMany: vi.fn(async () => [{ id: 'old-claim', type: 'company_fact', statement: 'Approved fact' }]),
         create: vi.fn(async () => ({ id: 'claim-1' })),
         count: vi.fn(async () => 1),
       },
@@ -174,7 +174,16 @@ describe('understanding receipt consumers', () => {
       website: 'https://acme.example/',
       pages: [{
         url: 'https://acme.example/about',
-        claims: [{ type: 'product', statement: 'Makes pumps', confidence: 0.9 }],
+        claims: [
+          { type: 'capability', statement: 'Makes pumps', evidence: 'We make pumps.', confidence: 0.9 },
+          {
+            type: 'company_fact',
+            statement: '页面列示“2026 控股云岭新能源有限公司”。',
+            evidence: '2026 控股云岭新能源有限公司',
+            confidence: 0.99,
+          },
+          { type: 'company_fact', statement: 'Employs 120 people', confidence: 0.99 },
+        ],
         durableReceipt: CLAIM_RECEIPT,
         crawlDurableReceipt: CRAWL_RECEIPT,
       }],
@@ -195,6 +204,12 @@ describe('understanding receipt consumers', () => {
       }),
     );
     expect(tx.claim.create).toHaveBeenCalledOnce();
+    expect(tx.claim.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ statement: 'Makes pumps', status: 'NEEDS_REVIEW' }),
+    }));
+    expect(tx.evidence.create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      data: expect.objectContaining({ sourceUrl: 'https://acme.example/about', snippet: 'We make pumps.' }),
+    }));
 
     acknowledgementMocks.plural.mockImplementationOnce(async (input: {
       transaction: unknown;

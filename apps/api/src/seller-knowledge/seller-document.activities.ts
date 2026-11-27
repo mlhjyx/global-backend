@@ -6,9 +6,15 @@ import type { PrismaService } from '../prisma/prisma.service';
 import type { ModelGateway } from '../model-gateway/model-gateway';
 import type { RuntimeTelemetry } from '../model-runtime/types';
 import { chunkMarkdown } from '../common/chunker';
-import type { DoclingClient, DoclingPageImage } from '../infra-clients/docling.client';
+import type { DoclingAsyncOptions, DoclingClient, DoclingPageImage } from '../infra-clients/docling.client';
 import type { EmbeddingsClient } from '../infra-clients/embeddings.client';
+import { KbIngestError } from '../infra-clients/kb-errors';
 import type { SellerDocumentsStorage } from './seller-documents.storage';
+import {
+  MAX_SELLER_DOCUMENT_INGEST_ATTEMPTS,
+  MAX_SELLER_DOCUMENT_RETRY_SECONDS,
+  SELLER_DOCUMENT_DOCLING_TASKS_KEY,
+} from './seller-document-ingest-policy';
 import { createSellerDocumentPendingCleanupActivities } from './seller-document-pending-cleanup.activities';
 import type { SellerDocumentClaimsService } from './seller-document-claims.service';
 import { computePdfPageBatches, countPdfPages } from './pdf-page-utils';
@@ -26,7 +32,6 @@ import {
  * 事务写 chunk 并置 ready → L2 轻量 AI 抽取产品/要点 + S2 确定性原句字节核验落 NEEDS_REVIEW →
  * 若存在尾页则由工作流自动后台分批补全。
  */
-const MAX_INGEST_ATTEMPTS = 8;
 const MAX_DOCUMENT_BYTES = 50 * 1024 * 1024 + 1024 * 1024;
 const MAX_CHUNKS = 512;
 const DEFAULT_EMBED_BATCH = 8;
@@ -93,7 +98,10 @@ type ClaimedRow = {
   mime: string;
   processing_attempt: number;
   uploaded_by?: string | null;
+  docling_tasks?: unknown;
 };
+
+type DoclingTasks = { primary?: string; ocr?: string };
 
 type ParsedMetaState = {
   chunks: number;
@@ -108,7 +116,16 @@ type ParsedMetaState = {
 };
 
 function backoffSeconds(attempt: number): number {
-  return Math.min(60 * 2 ** Math.max(attempt - 1, 0), 3600);
+  return Math.min(60 * 2 ** Math.max(attempt - 1, 0), MAX_SELLER_DOCUMENT_RETRY_SECONDS);
+}
+
+function readDoclingTasks(value: unknown): DoclingTasks {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return {};
+  const { primary, ocr } = value as Record<string, unknown>;
+  return {
+    ...(typeof primary === 'string' ? { primary } : {}),
+    ...(typeof ocr === 'string' ? { ocr } : {}),
+  };
 }
 
 function stripControlChars(input: string): string {
@@ -174,7 +191,11 @@ export function createSellerDocumentActivities(deps: SellerDocumentActivityDeps)
 
   async function claim(
     input: SellerDocumentIngestInput,
-  ): Promise<{ claim: ClaimedRow; leaseToken: string } | { outcome: 'not_due' | 'gone' }> {
+  ): Promise<
+    | { claim: ClaimedRow; leaseToken: string }
+    | { outcome: 'not_due' | 'gone' }
+    | { outcome: 'queued'; retryAfterSeconds: number }
+  > {
     const leaseToken = randomUUID();
     return deps.prisma.withWorkspace(input.workspaceId, async (tx) => {
       const rows = await tx.$queryRaw<ClaimedRow[]>(Prisma.sql`
@@ -194,14 +215,26 @@ export function createSellerDocumentActivities(deps: SellerDocumentActivityDeps)
             ("status" = 'queued' AND ("retry_at" IS NULL OR "retry_at" <= now()))
             OR ("status" = 'processing' AND ("lease_until" IS NULL OR "lease_until" <= now()))
           )
-        RETURNING "filename", "object_key", "mime", "processing_attempt", "uploaded_by"
+        RETURNING "filename", "object_key", "mime", "processing_attempt", "uploaded_by",
+                  "parsed_meta" -> ${SELLER_DOCUMENT_DOCLING_TASKS_KEY}::text AS "docling_tasks"
       `);
       if (rows.length > 0) return { claim: rows[0], leaseToken };
       const current = await tx.sellerDocument.findFirst({
-        where: { id: input.documentId },
-        select: { status: true, deletedAt: true },
+        where: { id: input.documentId, companyId: input.companyId },
+        select: { status: true, deletedAt: true, retryAt: true, leaseUntil: true },
       });
       if (!current || current.deletedAt) return { outcome: 'gone' as const };
+      const due = current.status === 'queued'
+        ? current.retryAt
+        : current.status === 'processing'
+          ? current.leaseUntil
+          : null;
+      if (due) {
+        return {
+          outcome: 'queued' as const,
+          retryAfterSeconds: Math.max(0, Math.ceil((due.getTime() - Date.now()) / 1000)),
+        };
+      }
       return { outcome: 'not_due' as const };
     });
   }
@@ -213,7 +246,7 @@ export function createSellerDocumentActivities(deps: SellerDocumentActivityDeps)
     code: string,
     options: { terminal?: boolean; immediateRetry?: boolean } = {},
   ): Promise<{ outcome: 'queued' | 'failed_terminal'; retryAfterSeconds?: number }> {
-    const terminal = options.terminal === true || attempt >= MAX_INGEST_ATTEMPTS;
+    const terminal = options.terminal === true || attempt >= MAX_SELLER_DOCUMENT_INGEST_ATTEMPTS;
     const nextStatus = terminal ? 'failed_terminal' : 'queued';
     const retryAfterSeconds = terminal
       ? undefined
@@ -234,6 +267,11 @@ export function createSellerDocumentActivities(deps: SellerDocumentActivityDeps)
             "lease_token" = NULL,
             "lease_until" = NULL,
             "retry_at" = ${retryAt},
+            "parsed_meta" = CASE
+              WHEN ${terminal} AND jsonb_typeof("parsed_meta") = 'object'
+                THEN "parsed_meta" - ${SELLER_DOCUMENT_DOCLING_TASKS_KEY}::text
+              ELSE "parsed_meta"
+            END,
             "updated_at" = now()
         WHERE "id" = ${input.documentId}::uuid
           AND "workspace_id" = ${input.workspaceId}::uuid
@@ -244,6 +282,31 @@ export function createSellerDocumentActivities(deps: SellerDocumentActivityDeps)
     return retryAfterSeconds === undefined
       ? { outcome: nextStatus }
       : { outcome: nextStatus, retryAfterSeconds };
+  }
+
+  async function saveDoclingTasks(
+    input: SellerDocumentIngestInput,
+    leaseToken: string,
+    tasks: DoclingTasks,
+  ): Promise<void> {
+    const existingMeta = Prisma.sql`CASE WHEN jsonb_typeof("parsed_meta") = 'object'
+      THEN "parsed_meta" ELSE '{}'::jsonb END`;
+    const updateMeta = Object.keys(tasks).length > 0
+      ? Prisma.sql`(${existingMeta}) || ${JSON.stringify({ [SELLER_DOCUMENT_DOCLING_TASKS_KEY]: tasks })}::jsonb`
+      : Prisma.sql`(${existingMeta}) - ${SELLER_DOCUMENT_DOCLING_TASKS_KEY}::text`;
+    const changed = await deps.prisma.withWorkspace(input.workspaceId, (tx) => tx.$executeRaw(Prisma.sql`
+      UPDATE "seller_document"
+      SET "parsed_meta" = ${updateMeta}
+      WHERE "id" = ${input.documentId}::uuid
+        AND "workspace_id" = ${input.workspaceId}::uuid
+        AND "company_id" = ${input.companyId}::uuid
+        AND "lease_token" = ${leaseToken}
+        AND "status" = 'processing'
+        AND "deleted_at" IS NULL
+    `));
+    if (changed !== 1) {
+      throw new KbIngestError('KB_LEASE_SUPERSEDED', 'superseded', 'parse', 'seller PDF parser lost lease');
+    }
   }
 
   async function recordStage(
@@ -289,6 +352,7 @@ export function createSellerDocumentActivities(deps: SellerDocumentActivityDeps)
     input: SellerDocumentIngestInput,
     row: ClaimedRow,
     content: Buffer,
+    leaseToken: string,
     pulse: (stage: string) => void,
     signal?: AbortSignal,
   ): Promise<
@@ -317,6 +381,17 @@ export function createSellerDocumentActivities(deps: SellerDocumentActivityDeps)
 
     const filename = resolveDoclingFilename(input.documentId, row.filename, row.mime);
     const isPdf = row.mime === 'application/pdf';
+    let doclingTasks = readDoclingTasks(row.docling_tasks);
+    const localAsync = (phase: keyof DoclingTasks): DoclingAsyncOptions => ({
+      taskId: doclingTasks[phase],
+      saveTaskId: async (taskId) => {
+        const next = { ...doclingTasks };
+        if (taskId) next[phase] = taskId;
+        else delete next[phase];
+        await saveDoclingTasks(input, leaseToken, next);
+        doclingTasks = next;
+      },
+    });
     const detectedPages = isPdf ? countPdfPages(content) : null;
     const usePriorityWindow =
       isPdf &&
@@ -335,10 +410,11 @@ export function createSellerDocumentActivities(deps: SellerDocumentActivityDeps)
           ? {
               pageRange: [1, PRIORITY_PDF_PAGES],
               returnPageCount: true,
-              allowEmptyMarkdown: isPdf,
+              allowEmptyMarkdown: true,
+              localAsync: localAsync('primary'),
             }
           : isPdf
-            ? { allowEmptyMarkdown: true }
+            ? { allowEmptyMarkdown: true, localAsync: localAsync('primary') }
             : undefined,
       );
       markdown = converted.markdown;
@@ -383,6 +459,7 @@ export function createSellerDocumentActivities(deps: SellerDocumentActivityDeps)
             includePageImages: Boolean(deps.gateway),
             imagesScale: 1.0,
             allowEmptyMarkdown: true,
+            localAsync: localAsync('ocr'),
           },
         );
         if (ocrResult.markdown.replace(/\s+/g, '').length > markdown.replace(/\s+/g, '').length) {
@@ -391,11 +468,12 @@ export function createSellerDocumentActivities(deps: SellerDocumentActivityDeps)
         pageImages = ocrResult.pageImages ?? [];
       } catch (ocrError) {
         if (signal?.aborted) throw ocrError;
-        log.warn(
-          `seller document force_ocr fallback skipped (${input.documentId}): ${
-            ocrError instanceof Error ? ocrError.message : String(ocrError)
-          }`,
-        );
+        const retryable = ocrError instanceof KbIngestError && ocrError.disposition === 'retryable';
+        // Docling clears confirmed missing tasks before throwing. Empty scans still need OCR on retry.
+        if (deps.docling.backendMode === 'local' && (doclingTasks.ocr || (!markdown.trim() && retryable))) {
+          return { ok: false, code: 'DOCUMENT_PARSE_UNAVAILABLE', terminal: false };
+        }
+        log.warn(`seller document force_ocr fallback skipped (${input.documentId})`);
       }
 
       if (deps.gateway && pageImages.length > 0 && isSparsePdfText(markdown, fallbackEndPage)) {
@@ -596,7 +674,7 @@ export function createSellerDocumentActivities(deps: SellerDocumentActivityDeps)
       try {
         const claimed = await claim(input);
         if ('outcome' in claimed) {
-          return { documentId: input.documentId, outcome: claimed.outcome };
+          return { documentId: input.documentId, ...claimed };
         }
         const row = claimed.claim;
         leaseToken = claimed.leaseToken;
@@ -615,7 +693,7 @@ export function createSellerDocumentActivities(deps: SellerDocumentActivityDeps)
         pulse('parse');
         await recordStage(input, leaseToken, 'parse');
         signal?.throwIfAborted();
-        const parsed = await parsePrimaryDocument(input, row, content, pulse, signal);
+        const parsed = await parsePrimaryDocument(input, row, content, leaseToken, pulse, signal);
         if (!parsed.ok) {
           const failed = await fail(input, leaseToken, attempt, parsed.code, {
             terminal: parsed.terminal,
