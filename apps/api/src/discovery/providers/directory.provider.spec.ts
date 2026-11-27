@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildDirectorySearches, isDirectoryListingShaped, mapDirectoryCompanyToRecord } from './directory.provider';
+import {
+  buildDirectorySearches,
+  isDirectoryListingShaped,
+  mapDirectoryCompanyToRecord,
+  selectApprovedAssociationDirectoryUrls,
+} from './directory.provider';
 import { CompanyDiscoveryQuery } from '../provider-contract';
 
 function q(filters: Record<string, unknown>, keywords: string[] = []): CompanyDiscoveryQuery {
@@ -169,5 +174,42 @@ describe('名录发现检索串构造', () => {
     expect(searches.length).toBeLessThanOrEqual(4);
     expect(searches.some((s) => /elenco aziende|espositori/i.test(s))).toBe(true);
     expect(searches.some((s) => /KEY - The Energy Transition Expo|Intersolar/i.test(s))).toBe(true);
+  });
+
+  it('按目标国与光伏关键词优先匹配已批准协会名录入口，且中文国内市场不注入外文光伏协会', () => {
+    const deUrls = selectApprovedAssociationDirectoryUrls(
+      q({ industry: 'photovoltaic', country: 'DE' }, ['solar module']),
+    );
+    expect(deUrls).toContain('https://www.solarwirtschaft.de/unsere-mitglieder/mitgliedersuche/');
+    expect(deUrls).toContain('https://www.bves.de/der-bves/mitglieder/');
+    expect(deUrls).toContain('https://www.solarpowereurope.org/membership/meet-our-members');
+
+    const trUrls = selectApprovedAssociationDirectoryUrls(
+      q({ industry: 'solar', country: 'Turkey' }, ['EPC']),
+    );
+    expect(trUrls).toContain('https://gensed.org/uyelerimiz/');
+    expect(trUrls).toContain('https://www.gunder.org.tr/uyelik/kurumsal-uyeler/');
+
+    expect(
+      selectApprovedAssociationDirectoryUrls(q({ industry: '光伏', country: '中国' }, ['组件'])),
+    ).toEqual([]);
+  });
+
+  it('名录映射自动清洗追踪参数并按单国名录回填缺失国别（通过完整 Raw 载荷契约）', async () => {
+    const { validateRawSourceProviderPayload } = await import('../raw-source-provider-schema');
+    const rec = mapDirectoryCompanyToRecord({
+      company: {
+        name: '1. Axitec Energy GmbH (Gold Member)',
+        website: 'https://www.axitecsolar.com/en/?utm_source=bsw&fbclid=123#top',
+        location: 'Böblingen',
+      },
+      pageUrl: 'https://www.solarwirtschaft.de/unsere-mitglieder/mitgliedersuche/',
+      sourceClass: 'industry_data',
+    });
+    expect(rec.name).toBe('Axitec Energy GmbH');
+    expect(rec.domain).toBe('axitecsolar.com');
+    expect(rec.country).toBe('DE');
+    expect(rec.externalId).toBe('directory:axitecsolar.com');
+    expect(validateRawSourceProviderPayload('directory', rec).ok).toBe(true);
   });
 });

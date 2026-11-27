@@ -38,6 +38,11 @@ const ISO3_TO_ISO2: Readonly<Record<string, string>> = Object.freeze({
   NLD: 'NL',
   POL: 'PL',
   ESP: 'ES',
+  MYS: 'MY',
+  CAN: 'CA',
+  BRA: 'BR',
+  TUR: 'TR',
+  AUS: 'AU',
 });
 
 /**

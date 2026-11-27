@@ -152,4 +152,64 @@ describe('directory preflight runs before crawl and model extraction', () => {
     expect(mocks.model).not.toHaveBeenCalled();
     expect(result.outcome?.reasonCode).toBe('SOURCE_POLICY_MISSING');
   });
+
+  it('routes approved PV association seed directories through policy admission, strips noise, backfills country, and deduplicates across directories', async () => {
+    const pvQuery: CompanyDiscoveryQuery = {
+      sourceClass: 'industry_data',
+      filters: { country: 'DE', industry: 'photovoltaic' },
+      keywords: ['solar'],
+      limit: 20,
+    };
+    const invoke = vi.fn(async (tool: string, input: { url?: string }) => {
+      if (tool === 'searxng.search') return { data: { results: [] }, costCents: 0 };
+      return { data: { url: input.url, text: 'Solar association member directory listing '.repeat(20) }, costCents: 0 };
+    });
+    const provider = new DirectoryDiscoveryProvider({ gateway: {} as never, broker: { invoke } as never });
+    mocks.model
+      .mockResolvedValueOnce({
+        data: {
+          is_directory: true,
+          companies: [
+            { name: 'BSW-Solar', website: 'https://www.solarwirtschaft.de/' },
+            { name: 'Gold Sponsor', website: 'https://example-sponsor.de' },
+            { name: '1. BayWa r.e. AG (Gold Member)' },
+            { name: 'Axitec Energy GmbH', website: 'https://www.axitecsolar.com/?utm_source=bsw' },
+          ],
+          has_next_page: false,
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          is_directory: true,
+          companies: [
+            { name: 'BayWa r.e.', website: 'https://baywa-re.com/?ref=bne' },
+            { name: 'Impressum' },
+          ],
+          has_next_page: false,
+        },
+      });
+
+    // Only admit BSW-Solar & bne; keep BVES explicitly SUSPENDED so it is never crawled.
+    const result = await provider.discoverCompanies(
+      pvQuery,
+      ctx,
+      options([
+        policy('solarwirtschaft.de'),
+        policy('bne-online.de'),
+        policy('bves.de', { reviewStatus: 'SUSPENDED' }),
+      ]),
+    );
+
+    const crawledUrls = invoke.mock.calls
+      .filter(([tool]) => tool === 'crawl4ai.fetch')
+      .map(([, input]) => input.url);
+    expect(crawledUrls).toEqual([
+      'https://www.solarwirtschaft.de/unsere-mitglieder/mitgliedersuche/',
+      'https://www.bne-online.de/verband/unsere-mitglieder/',
+    ]);
+    expect(result.records.map((r) => ({ name: r.name, domain: r.domain, country: r.country }))).toEqual([
+      { name: 'BayWa r.e.', domain: 'baywa-re.com', country: 'DE' },
+      { name: 'Axitec Energy GmbH', domain: 'axitecsolar.com', country: 'DE' },
+    ]);
+  });
 });

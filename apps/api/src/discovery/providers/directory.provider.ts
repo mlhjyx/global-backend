@@ -1,4 +1,12 @@
 import { normalizeCompanyNameTypography } from '../company-name-format';
+import { selectAssociationDirectories } from '../association-directory-catalog';
+import {
+  cleanDirectoryCompanyName,
+  dedupeDirectoryRecords,
+  isDirectoryNoiseEntry,
+  normalizeDirectoryWebsiteDomain,
+  resolveDirectoryCompanyCountry,
+} from '../directory-record-cleaner';
 import { isStableSafeHttpsUrl } from '../raw-source-provider-normalizer';
 import { createHash } from 'node:crypto';
 import {
@@ -89,7 +97,7 @@ const ROOT_OR_LOCALE_HOME_RE = /^\/(?:[a-z]{2}(?:-[a-z]{2})?\/?)?$/iu;
 
 /** 列表页 URL/标题的正向信号（词边界精确匹配，剔除 `soci`/`asociaci`/`list`/`member` 泛子串误匹配）。 */
 const LISTING_HINT =
-  /(?:^|[^a-z\p{L}])(?:members?[-_/\s]+(?:directory|list|companies|catalogue?|index)|member[-_/\s]+companies|directory|directories|exhibitors?|aussteller(?:verzeichnis|liste)?|mitglieder(?:verzeichnis|liste)?|verzeichnis|branchenbuch|katalog|catalog(?:ue|o)?|elenco(?:[-_/\s]+(?:aziende|soci|associati|imprese))?|espositori?|associati|i[-_/\s]+nostri[-_/\s]+(?:soci|associati)|(?:lista|albo)[-_/\s]+(?:soci|associati|aziende)|directorio|expositores?|listado[-_/\s]+(?:empresas|socios)|annuaire|exposants?|liste[-_/\s]+(?:des[-_/\s]+)?(?:membres|exposants|entreprises)|bedrijvengids|ledenlijst|deelnemers(?:lijst)?|wystawc[a-z\p{L}]*|lista[-_/\s]+(?:cz[łl]onk[óo]w|wystawc[óo]w)|firma[-_/\s]+rehberi|kat[ıi]l[ıi]mc[ıi]|üye[-_/\s]+listesi|(?:exhibitor|company|supplier|buyer|vendor|manufacturer|distributor)[-_/\s]+list)(?:$|[^a-z\p{L}])|名录|黄页|企业库|企业大全|参展商|会员企业|供应商目录/iu;
+  /(?:^|[^a-z\p{L}])(?:members?[-_/\s]+(?:directory|list|companies|catalogue?|index)|member[-_/\s]+companies|(?:our|meet[-_/\s]+our|current|esmc)[-_/\s]+members|list[-_/\s]+of[-_/\s]+(?:members|corporate[-_/\s]+partners)|directory|directories|exhibitors?|aussteller(?:verzeichnis|liste)?|mitglieder(?:verzeichnis|liste|suche)?|verzeichnis|branchenbuch|katalog|catalog(?:ue|o)?|elenco(?:[-_/\s]+(?:aziende|soci|associati|imprese))?|espositori?|associati|associad[oa]s|i[-_/\s]+nostri[-_/\s]+(?:soci|associati)|(?:lista|albo)[-_/\s]+(?:soci|associati|aziende)|directorio|expositores?|listado[-_/\s]+(?:empresas|socios)|annuaire|exposants?|liste[-_/\s]+(?:des[-_/\s]+)?(?:membres|exposants|entreprises)|bedrijvengids|leden(?:lijst)?|deelnemers(?:lijst)?|wystawc[a-z\p{L}]*|lista[-_/\s]+(?:cz[łl]onk[óo]w|wystawc[óo]w)|firma[-_/\s]+rehberi|kat[ıi]l[ıi]mc[ıi]|(?:kurumsal[-_/\s]+)?[uü]yeler(?:imiz)?|k[uü]me[-_/\s]+[uü]yelerimiz|üye[-_/\s]+listesi|spqp\/listing|(?:exhibitor|company|supplier|buyer|vendor|manufacturer|distributor)[-_/\s]+list)(?:$|[^a-z\p{L}])|\/(?:about(?:-us)?\/)?(?:members|membership)\/?$|名录|黄页|企业库|企业大全|参展商|会员企业|供应商目录/iu;
 
 const HOME_TITLE_DIRECTORY_HINT =
   /(?:^|[^a-z\p{L}])(?:members?[-_\s]+directory|exhibitor[-_\s]+list|industry[-_\s]+directory|yellow[-_\s]+pages|branchenbuch|bedrijvengids|annuaire|directorio|elenco[-_\s]+aziende)(?:$|[^a-z\p{L}])|企业名录|企业黄页|企业大全|参展商名单|供应商目录/iu;
@@ -210,11 +218,10 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
       return this.emptyResult(denied);
     }
 
-    // 2) 抓每个名录页 + 列表抽取（有限并发），记录按 name+domain 去重
-    const dedup = new Map<string, ProviderCompanyRecord>();
+    // 2) 抓每个名录页 + 列表抽取（有限并发），跨名录按规范域名与公司名去重
+    const minedItems: MinedDirectoryRecord[] = [];
     const collectors: DiscoveryCompanyReceiptCollector[] = [];
     const extractionCalls: Array<Readonly<{ failureReason?: string }>> = [];
-    const collectorIndexes = new Map<DiscoveryCompanyReceiptCollector, readonly number[]>();
     let allListingsPolicyBlocked = true;
     for (let i = 0; i < urls.length; i += CRAWL_CONCURRENCY) {
       const batch = urls.slice(i, i + CRAWL_CONCURRENCY);
@@ -230,28 +237,22 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
         if (!s.value.policyBlocked) allListingsPolicyBlocked = false;
         collectors.push(...s.value.collectors);
         extractionCalls.push(...s.value.extractionCalls);
-        for (const item of s.value.records) {
-          const key = item.record.domain ?? `n:${item.record.name.toLowerCase()}`;
-          if (!dedup.has(key)) {
-            const recordIndex = dedup.size;
-            dedup.set(key, item.record);
-            collectorIndexes.set(
-              item.collector,
-              Object.freeze([
-                ...(collectorIndexes.get(item.collector) ?? []),
-                recordIndex,
-              ]),
-            );
-          }
-        }
+        minedItems.push(...s.value.records);
       }
     }
-    const records = [...dedup.values()];
+    const deduped = dedupeDirectoryRecords(minedItems);
+    const records = deduped.map((item) => item.record);
+    const collectorIndexes = new Map<DiscoveryCompanyReceiptCollector, number[]>();
+    deduped.forEach((item, recordIndex) => {
+      const existing = collectorIndexes.get(item.collector);
+      if (existing) existing.push(recordIndex);
+      else collectorIndexes.set(item.collector, [recordIndex]);
+    });
     const lineage = buildDiscoveryCompanyResultLineage({
       providerKey: 'directory',
       recordCount: records.length,
       observations: collectors.map((collector) =>
-        collector.finish(collectorIndexes.get(collector) ?? []),
+        collector.finish(Object.freeze(collectorIndexes.get(collector) ?? [])),
       ),
     });
     return {
@@ -278,6 +279,17 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
   ): Promise<string[]> {
     const listingUrls = new Set<string>();
     const seen = new Set<string>();
+    // 1) 优先直注已批准的行业协会名录入口（严格经 blockedDomains + source_policy 准入闸门）
+    for (const seedUrl of selectApprovedAssociationDirectoryUrls(query)) {
+      const domain = normalizeDomain(seedUrl);
+      if (!domain || blocked.has(domain) || seen.has(seedUrl)) continue;
+      seen.add(seedUrl);
+      if (admitsSource(seedUrl, policyCheck, denied)) listingUrls.add(seedUrl);
+      if (listingUrls.size >= MAX_DIRECTORY_LISTING_PAGES) {
+        return [...listingUrls].slice(0, MAX_DIRECTORY_LISTING_PAGES);
+      }
+    }
+    // 2) 搜索引擎补齐剩余名录页配额
     for (const q of buildDirectorySearches(query)) {
       const hits = await this.search(q, ctx, searchLanguageFor(query));
       for (const h of hits) {
@@ -420,25 +432,33 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
         if (page === 0) this.log(`${pageUrl}: not a directory (llm)`);
         break; // 首页就不是名录 → 放弃；翻页中途变样 → 停
       }
+      const sourceDomain = normalizeDomain(sourceUrl) ?? '';
       for (const c of extracted.companies) {
-        if (!c.name?.trim()) continue;
+        const cleanedName = cleanDirectoryCompanyName(c.name);
+        if (!cleanedName) continue;
+        const cleanedDomain = normalizeDirectoryWebsiteDomain(c.website, sourceDomain);
+        if (
+          isDirectoryNoiseEntry({
+            name: cleanedName,
+            domain: cleanedDomain,
+            sourceDirectoryDomain: sourceDomain,
+          })
+        ) {
+          continue;
+        }
         const mapped = mapDirectoryCompanyToRecord({
-          company: c,
+          company: {
+            ...c,
+            name: cleanedName,
+            website: cleanedDomain ?? undefined,
+          },
           listKind: extracted.list_kind,
           pageUrl: sourceUrl,
           sourceClass: query.sourceClass,
         });
-        if (
-          mapped.domain &&
-          NOISE_DOMAINS.some(
-            (noise) =>
-              mapped.domain === noise || mapped.domain?.endsWith(`.${noise}`),
-          )
-        )
-          continue;
         out.push(Object.freeze({ record: mapped, collector: extraction.collector }));
       }
-      this.log(`✓ ${pageUrl}: +${extracted.companies.length} companies (page ${page + 1})`);
+      this.log(`✓ ${pageUrl}: +${out.length} cleaned companies (raw ${extracted.companies.length}, page ${page + 1})`);
       pageUrl = extracted.has_next_page ? nextPageLink(text, sourceUrl) : null;
     }
     return Object.freeze({
@@ -545,16 +565,23 @@ export function mapDirectoryCompanyToRecord(args: {
   sourceClass: SourceClass;
 }): ProviderCompanyRecord {
   const sourceDomain = normalizeDomain(args.pageUrl) ?? '';
-  const domain = args.company.website
-    ? normalizeDomain(args.company.website)
-    : undefined;
+  const name =
+    cleanDirectoryCompanyName(args.company.name) ??
+    normalizeCompanyNameTypography(args.company.name);
+  const domain = normalizeDirectoryWebsiteDomain(args.company.website, sourceDomain) ?? undefined;
+  const country = resolveDirectoryCompanyCountry({
+    location: args.company.location,
+    pageUrl: args.pageUrl,
+    sourceDirectoryDomain: sourceDomain,
+  });
   return {
     externalId: domain
       ? `directory:${domain}`
-      : `directory:${sourceDomain}:${slug(args.company.name)}`,
+      : `directory:${sourceDomain}:${slug(name)}`,
     // Match public-web typography rules before unchanged Raw validation (strips ™/®/quotes, collapses dashes).
-    name: normalizeCompanyNameTypography(args.company.name),
-    domain: domain || undefined,
+    name,
+    domain,
+    ...(country ? { country } : {}),
     attributes: {
       source_kind: args.listKind ?? 'directory',
       source_directory: sourceDomain,
@@ -566,11 +593,26 @@ export function mapDirectoryCompanyToRecord(args: {
       sourceUrl: args.pageUrl,
       fetchedAt: new Date().toISOString(),
       contentHash: createHash('sha256')
-        .update(`${args.pageUrl}:${args.company.name}`)
+        .update(`${args.pageUrl}:${name}`)
         .digest('hex'),
       parserVersion: PARSER_VERSION,
     },
   };
+}
+
+/** 按目标市场与行业词挑选已批准的行业协会会员名录入口 URL（供 findListings 优先直通准入）。 */
+export function selectApprovedAssociationDirectoryUrls(query: CompanyDiscoveryQuery): string[] {
+  if (searchLanguageFor(query) === 'zh') return [];
+  const f = query.filters ?? {};
+  const arr = (v: unknown): string[] =>
+    Array.isArray(v) ? v.map(String) : v == null ? [] : [String(v)];
+  const matched = selectAssociationDirectories({
+    industryTerms: [...arr(f.industry), ...arr(f.sub_industry)],
+    keywords: query.keywords ?? [],
+    countries: targetCountryCodes(query).map((code) => code.toUpperCase()),
+    regions: arr(f.region),
+  });
+  return matched.map((entry) => entry.directoryUrl);
 }
 
 /**

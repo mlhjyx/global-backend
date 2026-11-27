@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { ApplicationFailure } from '@temporalio/activity';
 import { companyIdentity } from './identity';
+import { resolveDirectoryCompanyCountry } from './directory-record-cleaner';
 import { isProductDiscoveryRawRecord, resolveEvidenceLicense } from './evidence-license';
 import { loadMaterializableCompanyState } from './company-suppression-gate';
 import { lockWorkspaceSuppressionPolicy } from './suppression-policy-lock';
@@ -80,10 +81,22 @@ export async function materializeRawCompanies(
       license?: string; // §8.5 记录声明许可（绿事实源署名义务，如 TED CC BY 4.0）
     };
     if (!rec.name) continue;
+    const sourceDirectory =
+      typeof rec.attributes?.source_directory === 'string'
+        ? rec.attributes.source_directory
+        : undefined;
+    const resolvedCountry =
+      rec.country ??
+      (raw.providerKey === 'directory'
+        ? resolveDirectoryCompanyCountry({
+            sourceDirectoryDomain: sourceDirectory,
+            pageUrl: raw.sourceUrl,
+          })
+        : undefined);
     const identity = companyIdentity({
       name: rec.name,
       domain: rec.domain,
-      country: rec.country,
+      country: resolvedCountry,
       identifier: rec.identifier, // §8.4：无域名时按税号消歧，防同名同国不同实体误并
     });
     await lockCompanyRawIdentity(tx, args.workspaceId, raw.id);
@@ -137,7 +150,12 @@ export async function materializeRawCompanies(
         typeof rec.region === 'string' &&
         rec.region !== prior.region,
     );
-    const canonicalChanged = !prior || attributesChanged || regionChanged;
+    // 后到的源只补缺，不覆盖已有国别
+    const countryBackfilled = Boolean(
+      prior && !prior.country && typeof resolvedCountry === 'string',
+    );
+    const canonicalChanged =
+      !prior || attributesChanged || regionChanged || countryBackfilled;
     const canonical = canonicalChanged
       ? await tx.canonicalCompany.upsert({
           where: {
@@ -148,6 +166,7 @@ export async function materializeRawCompanies(
           },
           update: {
             // 后到的源只补缺，不覆盖已有值（冲突留在 field_evidence 里可见）
+            ...(countryBackfilled ? { country: { set: resolvedCountry } } : {}),
             ...(regionChanged ? { region: { set: rec.region } } : {}),
             ...(attributesChanged
               ? {
@@ -161,7 +180,7 @@ export async function materializeRawCompanies(
             workspaceId: args.workspaceId,
             name: rec.name,
             domain: rec.domain ?? null,
-            country: rec.country ?? null,
+            country: resolvedCountry ?? null,
             region: rec.region ?? null,
             industry: rec.industry ?? null,
             employeeCount: rec.employeeCount ?? null,
@@ -199,7 +218,7 @@ export async function materializeRawCompanies(
     const fields: [string, unknown][] = [
       ['name', rec.name],
       ['domain', rec.domain],
-      ['country', rec.country],
+      ['country', resolvedCountry],
       ['region', rec.region],
       ['industry', rec.industry],
       ['employee_count', rec.employeeCount],
