@@ -98,6 +98,17 @@ export class SettlementDerivationKeyring {
       input.physicalWireAttempt,
     );
   }
+
+  fingerprintDiscoveryV3GatewayCredential(scope: string, credential: string): string {
+    const entry = this.entries.get(this.activeKeyId);
+    if (!entry || entry.material.byteLength !== 32) return invalidKeyring();
+    return createHmac("sha256", entry.material)
+      .update("discovery-v3-gateway-credential/v1\0")
+      .update(scope)
+      .update("\0")
+      .update(credential)
+      .digest("hex");
+  }
 }
 
 export function parseSettlementDerivationKeyring(

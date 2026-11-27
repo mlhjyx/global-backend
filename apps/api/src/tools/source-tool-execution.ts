@@ -71,6 +71,9 @@ export function httpGetResult(res: PublicHttpResponse, method?: 'GET' | 'HEAD'):
       text: method === 'HEAD' ? '' : decodeHttpGetArtifactText(body, res.headers['content-type']),
       finalUrl: res.finalUrl,
     },
+    ...(res.ok ? {
+      provenance: { sourceUrl: res.finalUrl, fetchedAt: new Date().toISOString(), parserVersion: 'http-get/v1' },
+    } : {}),
     costCents: 0,
   };
 }

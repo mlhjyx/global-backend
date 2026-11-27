@@ -61,10 +61,10 @@ describe.runIf(Boolean(adminUrl && appUrl))('discovery gateway terminal reconcil
           requestSha256: 'a'.repeat(64), provider: 'gateway', action: 'discovery.qualify_fit', method: 'generateStructured', maxDurationMs: 30_000 };
         const claim = await store.claim(command, operation);
         if (claim.status !== 'CLAIMED') throw new Error('fixture claim missing');
-        const wire = prepareDiscoveryV3GatewayWire(runtime, { command, operation, operationId: claim.operationId }, {
+        const wire = prepareDiscoveryV3GatewayWire(runtime, { command, operation, operationId: claim.operationId }, (fingerprintCredential) => ({
           gatewayOrigin: runtime.gatewayOrigin, alias: 'fixture', protocol: 'openai-chat-completions',
-          maxOutputTokens: 150, credentialSha256: 'c'.repeat(64),
-        });
+          maxOutputTokens: 150, credentialSha256: fingerprintCredential('synthetic-fixture-credential'),
+        }));
         await store.authorizeSend(command, operation, claim, 1, wire.binding);
         const probeId = await store.claimModelReadbackProbe(command, operation, claim.operationId, wire.binding, 1);
         if (!probeId) throw new Error('fixture probe missing');

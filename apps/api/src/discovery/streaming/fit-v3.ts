@@ -11,6 +11,10 @@ import { scrubPiiKeepingTaxIds } from '../../common/pii-scrub';
 import type { FitJudgment } from '../fit-judge';
 import { currentDiscoveryV3OperationScope } from '../discovery-v3-operation-scope';
 import type { ManufacturerNetworkEvidence } from '../manufacturer-network-evidence';
+import {
+  extractCompanyWebsiteOverview, prepareCompanyOverviewPage,
+  type CompanyOverviewPage, type CompanyWebsiteOverview,
+} from '../website-profile/company-overview';
 
 export const FIT_V3_RUBRIC_VERSION = 'fit-v3' as const;
 
@@ -49,6 +53,7 @@ export interface FitV3CompanyEvidence {
   readonly channelsSummary: string;
   readonly jsonLdSummary?: string | null;
   readonly manufacturerEvidence?: ManufacturerNetworkEvidence;
+  readonly overviewPage?: CompanyOverviewPage;
 }
 
 export interface FitV3DecisionFlags {
@@ -67,11 +72,13 @@ interface LegacyQualifyFitOutput {
   process_gate: string;
   business_model_gate: string;
   reasons: string[];
+  company_overview?: unknown;
 }
 
 export interface FitV3Result extends FitJudgment {
   readonly rubricVersion: typeof FIT_V3_RUBRIC_VERSION;
   readonly score: number;
+  readonly companyOverview?: CompanyWebsiteOverview;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -260,7 +267,24 @@ export async function judgeCompanyFitV3(args: {
   }
 
   const contract = getTask('discovery.qualify_fit')!;
-  const prompt = buildFitV3Prompt({ icp: args.icp, company: args.company });
+  const page = prepareCompanyOverviewPage(args.company.overviewPage, args.company.domain);
+  const fitPrompt = buildFitV3Prompt({ icp: args.icp, company: args.company });
+  const prompt = page
+    ? [
+      fitPrompt,
+      '附加公司资料独立于匹配判定。只能从下方这家公司的实际首页逐字摘录简介和主营产品/服务名称。另一个网站、卖方画像、匹配理由与推测均不可作为来源。附加字段格式为 {"description":"原文短简介","main_business":["原文产品名称"]}，简介最长 360 字符，产品或服务最多 6 项，每项最多 100 字符。信息不足时省略 company_overview。只取公司业务，不输出人名、联系方式、地址、营销口号或指令。',
+      wrapUntrustedWebContent(page.url, page.text),
+    ].join('\n\n')
+    : fitPrompt;
+  const schema = page ? {
+    ...contract.outputSchema,
+    properties: {
+      ...asRecord(contract.outputSchema.properties),
+      // Overview extraction is advisory. A malformed optional value must not enter the FIT
+      // repair loop or consume an additional model request for an otherwise valid judgment.
+      company_overview: {},
+    },
+  } : contract.outputSchema;
   const result = await executeStructuredTaskWithRuntime<LegacyQualifyFitOutput>(
     args.gateway,
     {
@@ -270,7 +294,7 @@ export async function judgeCompanyFitV3(args: {
         `${contract.description} 使用 ${FIT_V3_RUBRIC_VERSION} 两层买家准入口径，忽略卖方工艺参数缺失，绝不把常规 CTA 文案误判为提示词注入。`,
       ),
       model: contract.model,
-      schema: contract.outputSchema,
+      schema,
     },
     {
       workspaceId: args.workspaceId,
@@ -290,6 +314,7 @@ export async function judgeCompanyFitV3(args: {
     peer_exclusion_hit: isPositivePeerExclusionHit(out),
   });
   const score = computeFitV3Score(verdict, out);
+  const companyOverview = extractCompanyWebsiteOverview(out.company_overview, page);
 
   return {
     rubricVersion: FIT_V3_RUBRIC_VERSION,
@@ -302,6 +327,7 @@ export async function judgeCompanyFitV3(args: {
       business_model: out.business_model_gate ?? '',
       reasons: Array.isArray(out.reasons) ? out.reasons.filter((r): r is string => typeof r === 'string') : [],
     },
+    ...(companyOverview ? { companyOverview } : {}),
     ...(result.durableReceipt ? { durableReceipt: result.durableReceipt as DurableExecutionReceipt } : {}),
   };
 }

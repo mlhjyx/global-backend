@@ -179,7 +179,11 @@ export class GenericOperationArtifactExecution implements ArtifactExecutionPort 
       );
       throw error;
     }
-    if (schema === "crawl4ai-fetch/v1") {
+    const verifiedHttpHomepage =
+      schema === "http-get/v1" &&
+      record(payload.data).ok === true &&
+      new URL(stringField(record(input.input).url)).pathname === "/";
+    if (schema === "crawl4ai-fetch/v1" || verifiedHttpHomepage) {
       return this.verifiedResult<O>(
         input.reservation,
         schema,
@@ -222,6 +226,7 @@ export class GenericOperationArtifactExecution implements ArtifactExecutionPort 
       verified.expectedFacts,
     );
     const page = schema === "crawl4ai-fetch/v1" ? record(data) : undefined;
+    const http = schema === "http-get/v1" ? record(data) : undefined;
     return {
       data,
       costCents,
@@ -240,7 +245,16 @@ export class GenericOperationArtifactExecution implements ArtifactExecutionPort 
               parserVersion: "artifact/crawl4ai-fetch/v1",
             },
           }
-        : {}),
+        : http?.ok === true && typeof http.finalUrl === "string"
+          ? {
+              provenance: {
+                sourceUrl: http.finalUrl,
+                fetchedAt: verified.manifest.createdAt,
+                artifactExpiresAt: verified.manifest.expiresAt,
+                parserVersion: "artifact/http-get/v1",
+              },
+            }
+          : {}),
     };
   }
 

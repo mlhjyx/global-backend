@@ -314,3 +314,79 @@ describe('fit-v3 unified rubric & R0 Ordina ora false-positive fix', () => {
     expect(gateway.generateStructured).not.toHaveBeenCalled();
   });
 });
+
+describe('company overview extracted during streaming qualification', () => {
+  const description = 'Acme distributes industrial pumps and pressure valves to factories.';
+  const company = {
+    name: 'Acme GmbH',
+    domain: 'acme-pumps.de',
+    country: 'DE',
+    industry: null,
+    title: null,
+    metaDescription: null,
+    visibleText: description,
+    channelsSummary: '',
+    overviewPage: {
+      url: 'https://www.acme-pumps.de/',
+      text: description,
+      fetchedAt: '2026-11-27T08:30:00.000Z',
+    },
+  };
+  function judge(websiteOverview: unknown, source = company) {
+    const generateStructured = vi.fn(async (input: { schema: { properties?: Record<string, unknown> } }) => ({
+      provider: 'test',
+      model: 'test-model',
+      data: {
+        verdict: 'match',
+        material_gate: 'pass',
+        role_gate: 'pass',
+        process_gate: 'not_applicable',
+        business_model_gate: 'pass',
+        reasons: ['Evidence of pump distribution'],
+        ...(input.schema.properties?.company_overview ? { company_overview: websiteOverview } : {}),
+      },
+    }));
+    const result = judgeCompanyFitV3({
+      gateway: { generateStructured } as unknown as ModelGateway,
+      workspaceId: '10000000-0000-4000-8000-000000000001',
+      runId: '30000000-0000-4000-8000-000000000003',
+      icp: { name: 'Pumps', targetMarkets: ['DE'], exclusions: [], companyAttributes: {} },
+      company: source,
+    });
+    return { result, generateStructured };
+  }
+
+  it('extracts company facts with the existing single fit call and validates each against the fetched homepage', async () => {
+    const outcome = judge({ description, main_business: ['industrial pumps', 'pressure valves', 'wind turbines', 'industrial pumps'] });
+    await expect(outcome.result).resolves.toMatchObject({
+      verdict: 'match',
+      companyOverview: {
+        description,
+        main_business: ['industrial pumps', 'pressure valves'],
+        source_url: 'https://www.acme-pumps.de/',
+        fetched_at: '2026-11-27T08:30:00.000Z',
+      },
+    });
+    expect(outcome.generateStructured).toHaveBeenCalledTimes(1);
+    expect(outcome.generateStructured.mock.calls[0]?.[0].schema).toMatchObject({
+      properties: { company_overview: expect.any(Object) },
+    });
+  });
+
+  it('keeps a valid fit without repair when optional company facts are malformed', async () => {
+    for (const value of [null, { description: 'x'.repeat(500), main_business: { invalid: true } }]) {
+      const outcome = judge(value);
+      await expect(outcome.result).resolves.toMatchObject({ verdict: 'match' });
+      await expect(outcome.result).resolves.not.toHaveProperty('companyOverview');
+      expect(outcome.generateStructured).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it('publishes no overview when source attribution or source text is invalid', async () => {
+    const crossDomain = { ...company, overviewPage: { ...company.overviewPage, url: 'https://other-company.de/' } };
+    await expect(judge({ description, main_business: ['industrial pumps'] }, crossDomain).result)
+      .resolves.not.toHaveProperty('companyOverview');
+    await expect(judge({ description: 'Acme is the largest distributor in Europe.', main_business: ['wind turbines'] }).result)
+      .resolves.not.toHaveProperty('companyOverview');
+  });
+});

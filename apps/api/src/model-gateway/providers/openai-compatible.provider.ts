@@ -34,7 +34,7 @@ import {
 } from "../model-identity";
 import { isReviewedModelSubstitution } from "../model-identity-substitutes";
 import { buildTenantGatewayHeaders, resolveTenantGatewayApiKey } from "../tenant-gateway-routing";
-import type { DiscoveryV3GatewayRoute } from "../discovery-v3-gateway-contract";
+import type { DiscoveryV3GatewayCredentialFingerprint, DiscoveryV3GatewayRoute } from "../discovery-v3-gateway-contract";
 import { discoveryV3GatewayRequestHeaders } from "../discovery-v3-gateway-readback";
 import { boundedModelTokenCount, boundedModelUsage } from "../model-usage-boundary";
 import {
@@ -338,12 +338,15 @@ export class OpenAICompatibleProvider implements ModelProvider {
     return { healthy: true, detail: this.cfg.model };
   }
 
-  discoveryV3GatewayRoute(context: AiContext, requestedModel: string | undefined, maxOutputTokens: number): DiscoveryV3GatewayRoute {
+  discoveryV3GatewayRoute(
+    context: AiContext, requestedModel: string | undefined, maxOutputTokens: number,
+    fingerprintCredential: DiscoveryV3GatewayCredentialFingerprint,
+  ): DiscoveryV3GatewayRoute {
     const alias = requestedModel ?? this.cfg.model;
     const credential = resolveTenantGatewayApiKey(this.cfg.apiKey, this.cfg.tenantApiKeys, context.workspaceId);
     return {
       alias, protocol: this.transportFor(alias), maxOutputTokens, gatewayOrigin: new URL(this.cfg.baseUrl).origin,
-      credentialSha256: createHash("sha256").update(credential).digest("hex"),
+      credentialSha256: fingerprintCredential(credential),
     };
   }
 

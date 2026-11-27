@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client';
+import type { Prisma } from '@prisma/client';
 import type { ArtifactSubjectRef } from '../../tools/artifact-execution-port';
 import {
   parseDiscoveryV3ArtifactProjection,
@@ -35,26 +35,34 @@ interface ArtifactReadRow extends ArtifactExpectedFactsColumns {
   readonly createdAt: Date;
 }
 
-function promotionArgs({ identity, subjectRef, projection }: ArtifactBinding) {
-  return Prisma.sql`
-    ${identity.workspaceId}::uuid, ${identity.operationId}::uuid,
-    ${identity.requestSha256}::text, ${subjectRef.subjectType}::text,
-    ${subjectRef.subjectId}::uuid, ${JSON.stringify(projection)}::jsonb
-  `;
-}
-
 export class DiscoveryV3ArtifactRepository {
-  async registerPromotion(tx: Prisma.TransactionClient, input: ArtifactBinding): Promise<void> {
-    await tx.$executeRaw`SELECT public.register_discovery_v3_artifact_promotion_v1(${promotionArgs(input)})`;
-  }
-
-  async authorizePromotion(tx: Prisma.TransactionClient, input: ArtifactBinding): Promise<void> {
-    await tx.$executeRaw`SELECT public.authorize_discovery_v3_artifact_promotion_v1(${promotionArgs(input)})`;
-  }
-
-  async confirmPromotion(tx: Prisma.TransactionClient, input: ArtifactBinding, objectVersionId: string): Promise<void> {
+  async registerPromotion(tx: Prisma.TransactionClient, { identity, subjectRef, projection }: ArtifactBinding): Promise<void> {
     await tx.$executeRaw`
-      SELECT public.confirm_discovery_v3_artifact_promotion_v1(${promotionArgs(input)}, ${objectVersionId}::text)
+      SELECT public.register_discovery_v3_artifact_promotion_v1(
+        ${identity.workspaceId}::uuid, ${identity.operationId}::uuid,
+        ${identity.requestSha256}::text, ${subjectRef.subjectType}::text,
+        ${subjectRef.subjectId}::uuid, ${JSON.stringify(projection)}::jsonb
+      )
+    `;
+  }
+
+  async authorizePromotion(tx: Prisma.TransactionClient, { identity, subjectRef, projection }: ArtifactBinding): Promise<void> {
+    await tx.$executeRaw`
+      SELECT public.authorize_discovery_v3_artifact_promotion_v1(
+        ${identity.workspaceId}::uuid, ${identity.operationId}::uuid,
+        ${identity.requestSha256}::text, ${subjectRef.subjectType}::text,
+        ${subjectRef.subjectId}::uuid, ${JSON.stringify(projection)}::jsonb
+      )
+    `;
+  }
+
+  async confirmPromotion(tx: Prisma.TransactionClient, { identity, subjectRef, projection }: ArtifactBinding, objectVersionId: string): Promise<void> {
+    await tx.$executeRaw`
+      SELECT public.confirm_discovery_v3_artifact_promotion_v1(
+        ${identity.workspaceId}::uuid, ${identity.operationId}::uuid,
+        ${identity.requestSha256}::text, ${subjectRef.subjectType}::text,
+        ${subjectRef.subjectId}::uuid, ${JSON.stringify(projection)}::jsonb, ${objectVersionId}::text
+      )
     `;
   }
 

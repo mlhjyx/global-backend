@@ -1,8 +1,8 @@
-import { createHash } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { resolveModelGatewayBaseUrl, validateModelGatewayEndpoint } from '../adapters/model-gateway-endpoint';
 import { DiscoveryV3OperationError, type DiscoveryV3OperationInput, type DiscoveryV3WireStore, type DiscoveryV3WireUsage } from '../durable-results/discovery-v3-operation-contract';
 import type { DiscoveryV3Dispatch } from '../runtime/discovery-v3-dispatch-contract';
-import type { DiscoveryV3GatewayEvidence, DiscoveryV3GatewayReadbackBinding, DiscoveryV3GatewayRoute } from './discovery-v3-gateway-contract';
+import type { DiscoveryV3GatewayCredentialFingerprint, DiscoveryV3GatewayEvidence, DiscoveryV3GatewayReadbackBinding, DiscoveryV3GatewayRoute } from './discovery-v3-gateway-contract';
 import { canonicalGatewayCredential, gatewayCredentialsAreDistinct } from './gateway-credential-boundary';
 import { boundedModelTokenCount } from './model-usage-boundary';
 import {
@@ -23,6 +23,7 @@ import type { AiContext } from './types';
 
 const READER_CREDENTIAL = /^srb1\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{43}$/u;
 const MODEL_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}$/u;
+const CREDENTIAL_TAG = /^[0-9a-f]{64}$/u;
 const ENDPOINT = {
   'openai-chat-completions': '/chat/completions',
   'openai-responses': '/responses',
@@ -41,11 +42,17 @@ interface ReadbackTarget {
   readonly operationId: string;
 }
 
-function operationKey({ command, operation, operationId }: ReadbackTarget, route: DiscoveryV3GatewayRoute): string {
-  return createHash('sha256').update(JSON.stringify([
-    'discovery-v3-gateway-wire/v1', command.workspaceId, command.runId, command.planId, command.icpId,
+function operationBindingFields({ command, operation, operationId }: ReadbackTarget) {
+  return [
+    command.workspaceId, command.runId, command.planId, command.icpId,
     command.attemptId, command.requestSha256, operationId, operation.kind, operation.step, operation.ordinal,
     operation.requestSha256, operation.provider, operation.action, operation.method, operation.maxDurationMs,
+  ];
+}
+
+function operationKey(target: ReadbackTarget, route: DiscoveryV3GatewayRoute): string {
+  return createHash('sha256').update(JSON.stringify([
+    'discovery-v3-gateway-wire/v1', ...operationBindingFields(target),
     route.gatewayOrigin, route.alias, route.protocol, route.maxOutputTokens, route.credentialSha256,
   ])).digest('hex');
 }
@@ -53,19 +60,28 @@ function operationKey({ command, operation, operationId }: ReadbackTarget, route
 interface DiscoveryV3GatewayWire {
   readonly binding: DiscoveryV3GatewayReadbackBinding;
   readonly identity: SettlementWireIdentity;
+  readonly fingerprintCredential: DiscoveryV3GatewayCredentialFingerprint;
   dispatched: boolean;
 }
 
 const activeWires = new WeakMap<AiContext, DiscoveryV3GatewayWire>();
 
 export function prepareDiscoveryV3GatewayWire(
-  runtime: DiscoveryV3GatewayReadbackRuntime, target: ReadbackTarget, route: DiscoveryV3GatewayRoute,
+  runtime: DiscoveryV3GatewayReadbackRuntime, target: ReadbackTarget,
+  resolveRoute: (fingerprintCredential: DiscoveryV3GatewayCredentialFingerprint) => DiscoveryV3GatewayRoute,
 ): DiscoveryV3GatewayWire {
-  if (route.gatewayOrigin !== runtime.gatewayOrigin || !MODEL_IDENTIFIER.test(route.alias)) {
+  const { gatewayOrigin, keyring } = runtime;
+  const scope = JSON.stringify([gatewayOrigin, ...operationBindingFields(target)]);
+  const fingerprintCredential: DiscoveryV3GatewayCredentialFingerprint =
+    (credential) => keyring.fingerprintDiscoveryV3GatewayCredential(scope, credential);
+  const route = resolveRoute(fingerprintCredential);
+  if (route.gatewayOrigin !== gatewayOrigin || !MODEL_IDENTIFIER.test(route.alias) ||
+    !CREDENTIAL_TAG.test(route.credentialSha256)) {
     throw new DiscoveryV3OperationError('DISCOVERY_V3_OPERATION_BINDING_MISMATCH');
   }
-  const [identity] = settlementWireIdentities(runtime.keyring, operationKey(target, route), 1);
-  return { binding: { ...route, identity: toDurableSettlementWireIdentity(identity!) }, identity: identity!, dispatched: false };
+  const [identity] = settlementWireIdentities(keyring, operationKey(target, route), 1);
+  const binding = Object.freeze({ ...route, identity: toDurableSettlementWireIdentity(identity!) });
+  return { binding, identity: identity!, fingerprintCredential, dispatched: false };
 }
 
 export async function withDiscoveryV3GatewayWire<T>(
@@ -92,7 +108,7 @@ export function discoveryV3GatewayRequestHeaders(context: AiContext, url: string
     : headers.get('Authorization')?.match(/^Bearer (.+)$/u)?.[1];
   if (init.method !== 'POST' || alias !== binding.alias || requestUrl.origin !== binding.gatewayOrigin ||
     !requestUrl.pathname.endsWith(ENDPOINT[binding.protocol]) || headers.get('x-workspace-id') !== context.workspaceId ||
-    !credential || createHash('sha256').update(credential).digest('hex') !== binding.credentialSha256) {
+    !credential || !timingSafeEqual(Buffer.from(wire.fingerprintCredential(credential), 'hex'), Buffer.from(binding.credentialSha256, 'hex'))) {
     throw new DiscoveryV3OperationError('DISCOVERY_V3_OPERATION_BINDING_MISMATCH');
   }
   if (wire.dispatched) throw new DiscoveryV3OperationError('DISCOVERY_V3_OPERATION_UNRESOLVED');

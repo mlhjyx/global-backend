@@ -145,8 +145,8 @@ export function discoveryV3ModelProvider(input: {
     try {
       await input.authorize();
       if (readbackRuntime && provider instanceof OpenAICompatibleProvider) {
-        readbackWire = prepareDiscoveryV3GatewayWire(readbackRuntime, target,
-          provider.discoveryV3GatewayRoute(callContext, outbound.model, maxTokens));
+        readbackWire = prepareDiscoveryV3GatewayWire(readbackRuntime, target, (fingerprintCredential) =>
+          provider.discoveryV3GatewayRoute(callContext, outbound.model, maxTokens, fingerprintCredential));
       }
       const authorizationStarted = performance.now();
       const remaining = await scope.store.authorizeSend(scope.command, operation, claim, workerAttempt, readbackWire?.binding);

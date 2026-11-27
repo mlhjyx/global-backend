@@ -4,13 +4,16 @@ import { withDiscoveryV3OperationScope } from '../discovery/discovery-v3-operati
 import type { DiscoveryV3OperationClaim, DiscoveryV3OperationStore, DiscoveryV3WireUsage } from '../discovery/discovery-v3-operations';
 import { projectModelResultForReplay } from '../durable-results/model-result-replay';
 import type { DiscoveryV3Dispatch } from '../runtime/discovery-v3-dispatch-contract';
-import { createDiscoveryV3GatewayReadbackRuntimeFromEnv, readDiscoveryV3GatewayEvidence } from './discovery-v3-gateway-readback';
+import {
+  createDiscoveryV3GatewayReadbackRuntimeFromEnv, discoveryV3GatewayRequestHeaders, prepareDiscoveryV3GatewayWire,
+  readDiscoveryV3GatewayEvidence, withDiscoveryV3GatewayWire,
+} from './discovery-v3-gateway-readback';
 import { ModelProviderRegistry } from './model-provider.registry';
 import { ModelRouter } from './model-router';
 import { NewApiRequestBoundSettlementResolver, NEW_API_SETTLEMENT_READBACK_CONTRACT } from './new-api-request-bound-settlement';
 import { OpenAICompatibleProvider } from './providers/openai-compatible.provider';
 import { RouterModelGateway } from './router-model-gateway';
-import { SettlementDerivationKeyring } from './settlement-wire-identity';
+import { SettlementDerivationKeyring, settlementWireIdentities, toDurableSettlementWireIdentity } from './settlement-wire-identity';
 import { TenantDailyCostBreaker } from './tenant-daily-cost-breaker';
 
 const ORIGIN = 'http://127.0.0.1:18462';
@@ -30,6 +33,12 @@ const command: DiscoveryV3Dispatch = {
   taskQueue: 'batch-discovery',
   dispatchExpiresAt: '2031-01-01T00:00:00.000Z',
 };
+
+const persistedOperation = {
+  kind: 'MODEL', step: 'fit/company/model/1', ordinal: 1, requestSha256: 'a'.repeat(64),
+  provider: 'gateway', action: 'discovery.qualify_fit', method: 'generateText', maxDurationMs: 10_000,
+} as const;
+const persistedRoute = { gatewayOrigin: ORIGIN, alias: ALIAS, protocol: 'openai-chat-completions', maxOutputTokens: 150 } as const;
 
 function fixture(input: {
   gatewayLog?: (requestId: string) => object[];
@@ -149,12 +158,14 @@ describe('Discovery v3 request-bound model spend', () => {
     expect(store.authorizeSend).toHaveBeenCalledWith(command, expect.objectContaining({ kind: 'MODEL' }),
       expect.objectContaining({ operationId: OPERATION_ID }), 1, {
         gatewayOrigin: ORIGIN, alias: ALIAS, protocol: 'openai-chat-completions', maxOutputTokens: 150,
-        credentialSha256: createHash('sha256').update(TENANT_FIXTURE_CREDENTIAL).digest('hex'),
+        credentialSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
         identity: {
           schemaVersion: 'site-build-settlement-wire-identity/v1', physicalWireAttempt: 1,
           derivationKeyId: 'discovery-fixture', requestId, nonceSha256: createHash('sha256').update(nonce).digest('hex'),
         },
       });
+    expect(store.authorizeSend.mock.calls[0]![4]?.credentialSha256)
+      .not.toBe(createHash('sha256').update(TENANT_FIXTURE_CREDENTIAL).digest('hex'));
     expect(store.recordModelReadbackProbe).toHaveBeenCalledWith(command, expect.objectContaining({ kind: 'MODEL' }),
       OPERATION_ID, expect.objectContaining({ alias: ALIAS }), expect.objectContaining({
         evidence: expect.objectContaining({ requestId, channelId: 91, quotaPoints: 1250, receiptSha256: expect.stringMatching(/^[0-9a-f]{64}$/) }),
@@ -177,6 +188,49 @@ describe('Discovery v3 request-bound model spend', () => {
       outcome: 'FAILED', usage: { inputTokens: 120, outputTokens: 30 },
       cost: expect.objectContaining({ amountMicros: 3871, currency: 'CNY', basis: 'PROVIDER_REPORTED' }),
     });
+  });
+
+  it('binds the credential tag to one operation and denies a changed credential before sending', async () => {
+    const { context, runtime } = fixture();
+    const target = { command, operation: persistedOperation, operationId: OPERATION_ID };
+    const resolveRoute: Parameters<typeof prepareDiscoveryV3GatewayWire>[2] = (fingerprint) => ({
+      ...persistedRoute, credentialSha256: fingerprint(TENANT_FIXTURE_CREDENTIAL),
+    });
+    const wire = prepareDiscoveryV3GatewayWire(runtime, target, resolveRoute);
+    const another = prepareDiscoveryV3GatewayWire(runtime, {
+      ...target, operation: { ...persistedOperation, ordinal: 2 },
+    }, resolveRoute);
+    expect(wire.binding.credentialSha256).not.toBe(another.binding.credentialSha256);
+    await withDiscoveryV3GatewayWire(context, wire, async (boundContext) => {
+      const url = `${ORIGIN}/v1/chat/completions`;
+      const headers = new Headers({ authorization: 'Bearer fixture-other-tenant', 'x-workspace-id': command.workspaceId });
+      expect(() => discoveryV3GatewayRequestHeaders(boundContext, url, { method: 'POST', headers }, ALIAS))
+        .toThrow('DISCOVERY_V3_OPERATION_BINDING_MISMATCH');
+      expect(wire.dispatched).toBe(false);
+      headers.set('authorization', `Bearer ${TENANT_FIXTURE_CREDENTIAL}`);
+      expect(discoveryV3GatewayRequestHeaders(boundContext, url, { method: 'POST', headers }, ALIAS)
+        ?.get('x-new-api-settlement-request-id')).toBe(wire.binding.identity.requestId);
+    });
+  });
+
+  it('reads an original durable binding made before keyed credential tags without a generation POST', async () => {
+    const { runtime, store, generateRequests, readbackRequests } = fixture();
+    const operation = persistedOperation;
+    const route = { ...persistedRoute, credentialSha256: createHash('sha256').update(TENANT_FIXTURE_CREDENTIAL).digest('hex') };
+    const oldOperationKey = createHash('sha256').update(JSON.stringify([
+      'discovery-v3-gateway-wire/v1', command.workspaceId, command.runId, command.planId, command.icpId,
+      command.attemptId, command.requestSha256, OPERATION_ID, operation.kind, operation.step, operation.ordinal,
+      operation.requestSha256, operation.provider, operation.action, operation.method, operation.maxDurationMs,
+      route.gatewayOrigin, route.alias, route.protocol, route.maxOutputTokens, route.credentialSha256,
+    ])).digest('hex');
+    const [identity] = settlementWireIdentities(runtime.keyring, oldOperationKey, 1);
+    const binding = { ...route, identity: toDurableSettlementWireIdentity(identity!) };
+    await expect(readDiscoveryV3GatewayEvidence({
+      command, operation, operationId: OPERATION_ID, binding, runtime, store, probeSequence: 2,
+    })).resolves.toMatchObject({ requestId: identity!.requestId, actualCharge: { amountMicros: 3871, currency: 'CNY' } });
+    expect(generateRequests).toHaveLength(0);
+    expect(readbackRequests).toHaveLength(1);
+    expect(readbackRequests[0]!.headers.get('x-new-api-settlement-nonce')).toBe(identity!.nonce);
   });
 
   it('keeps lost result acknowledgement unknown while retaining the authenticated charge and route', async () => {

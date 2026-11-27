@@ -3,8 +3,11 @@ import type { PaidModelProtocol } from './paid-model-settlement';
 import type { NewApiReportedMonetaryCharge } from './settlement-readback-contract';
 import type { DurableSettlementWireIdentity } from './settlement-wire-identity';
 
+export type DiscoveryV3GatewayCredentialFingerprint = (credential: string) => string;
+
 export interface DiscoveryV3GatewayRoute {
   readonly gatewayOrigin: string;
+  /** Credential tag for a new wire. The durable field name stays compatible with existing readbacks. */
   readonly credentialSha256: string;
   readonly alias: string;
   readonly protocol: PaidModelProtocol;
