@@ -152,23 +152,47 @@ export interface CircuitBreakerStore {
   save(providerKey: string, state: CircuitState): Promise<void>;
 }
 
-/** data_provider.config.circuit 持久化（平台表，无 RLS）。 */
+function circuitStateFreshnessMs(state: CircuitState): number {
+  const opened = state.openedAt ? Date.parse(state.openedAt) : Number.NaN;
+  const started = state.windowStartedAt ? Date.parse(state.windowStartedAt) : Number.NaN;
+  return Math.max(
+    Number.isFinite(opened) ? opened : 0,
+    Number.isFinite(started) ? started : 0,
+  );
+}
+
+function preferFresherCircuitState(dbState: CircuitState, memState: CircuitState | undefined): CircuitState {
+  if (!memState) return dbState;
+  const dbTs = circuitStateFreshnessMs(dbState);
+  const memTs = circuitStateFreshnessMs(memState);
+  if (memTs > dbTs) return memState;
+  if (dbTs > memTs) return dbState;
+  const memSamples = memState.windowSuccesses + memState.windowFailures + memState.consecutiveFailures;
+  const dbSamples = dbState.windowSuccesses + dbState.windowFailures + dbState.consecutiveFailures;
+  return memSamples >= dbSamples ? memState : dbState;
+}
+
+/** data_provider.config.circuit 持久化（平台表，无 RLS；app_user 只读时自动回退进程内内存镜像）。 */
 export class PrismaCircuitBreakerStore implements CircuitBreakerStore {
+  private readonly memory = new Map<string, CircuitState>();
+
   constructor(private readonly prisma: PrismaClient) {}
 
   async load(providerKey: string): Promise<CircuitState> {
+    const memState = this.memory.get(providerKey);
     try {
       const row = await this.prisma.dataProvider.findUnique({
         where: { key: providerKey },
         select: { config: true },
       });
-      return parseCircuitState(row?.config);
+      return preferFresherCircuitState(parseCircuitState(row?.config), memState);
     } catch {
-      return emptyCircuitState();
+      return memState ?? emptyCircuitState();
     }
   }
 
   async save(providerKey: string, state: CircuitState): Promise<void> {
+    this.memory.set(providerKey, state);
     try {
       const row = await this.prisma.dataProvider.findUnique({
         where: { key: providerKey },
@@ -183,7 +207,7 @@ export class PrismaCircuitBreakerStore implements CircuitBreakerStore {
         data: { config: { ...config, circuit: state } as unknown as Prisma.InputJsonValue },
       });
     } catch {
-      // 熔断状态是运维优化，存储故障不阻断主链（本轮按无状态处理）。
+      // 熔断状态是运维优化，app_user 无写平台表权限或存储故障时不阻断主链，进程内内存镜像持续生效。
     }
   }
 }

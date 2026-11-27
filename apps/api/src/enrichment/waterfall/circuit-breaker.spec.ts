@@ -1,10 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   applyCircuitOutcome,
   CIRCUIT_OPEN_MS,
   circuitAllowsCall,
   emptyCircuitState,
   parseCircuitState,
+  PrismaCircuitBreakerStore,
   type CircuitState,
 } from './circuit-breaker';
 
@@ -130,5 +131,27 @@ describe('parseCircuitState', () => {
       probeInFlight: false,
     };
     expect(parseCircuitState({ circuit: state })).toEqual(state);
+  });
+});
+
+describe('PrismaCircuitBreakerStore：app_user 只读平台表时进程内内存镜像兜底', () => {
+  it('data_provider.update 权限拒绝时仍能记住 OPEN 状态防止 429 轰炸', async () => {
+    const fakePrisma = {
+      dataProvider: {
+        findUnique: vi.fn(async () => ({ config: null })),
+        update: vi.fn(async () => {
+          throw new Error('permission denied for table data_provider');
+        }),
+      },
+    };
+    const store = new PrismaCircuitBreakerStore(fakePrisma as never);
+    let state = await store.load('hunter');
+    for (let i = 0; i < 5; i += 1) {
+      state = applyCircuitOutcome(state, 'failure', at(i * 1000));
+      await store.save('hunter', state);
+    }
+    const reloaded = await store.load('hunter');
+    expect(reloaded.status).toBe('OPEN');
+    expect(circuitAllowsCall(reloaded, at(10_000))).toBe(false);
   });
 });

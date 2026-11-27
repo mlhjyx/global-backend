@@ -182,7 +182,11 @@ export async function enrichCompanyContacts(
             input.companyId,
             targets.contacts.map((c) => c.id),
           )
-        : { country: null, titleByContactId: new Map<string, string | null>() };
+        : {
+            country: null,
+            titleByContactId: new Map<string, string | null>(),
+            linkedinUrlByContactId: new Map<string, string>(),
+          };
     return { ...targets, knownSamples, meta };
   });
   const domain = loaded.company?.domain ?? null;
@@ -250,6 +254,9 @@ export async function enrichCompanyContacts(
         country: companyCountry,
         ...(knownSamples.length > 0 ? { knownCompanyEmailSamples: knownSamples } : {}),
         companyName,
+        ...(loaded.meta.linkedinUrlByContactId.get(contact.id)
+          ? { linkedinUrl: loaded.meta.linkedinUrlByContactId.get(contact.id) }
+          : {}),
         ...(input.runId ? { runId: input.runId } : {}),
         accountKey: input.accountKey,
         ...(input.lawfulBasis ? { lawfulBasis: input.lawfulBasis.basis } : {}),

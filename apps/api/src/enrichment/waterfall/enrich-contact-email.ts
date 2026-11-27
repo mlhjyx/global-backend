@@ -24,9 +24,9 @@ import {
 } from '../../discovery/compliance/email-verification-gate';
 import type { LawfulBasis, LawfulBasisKind } from '../../discovery/provider-contract';
 import { canonicalizeSuppressionValue } from '../../discovery/suppression-value';
-import type { EmailEnrichmentAdapter, FindEmailInput } from '../finders/email-enrichment-provider';
+import type { EmailEnrichmentAdapter, FindEmailInput, FindEmailOutcome } from '../finders/email-enrichment-provider';
 import type { EmailVerificationProvider } from '../verification/email-verification-provider';
-import { scoreEmailPoint } from '../verification/verification-policy';
+import { scoreEmailPoint, type VerificationVote } from '../verification/verification-policy';
 import {
   eventVerdictFromProviderResult,
   runVerificationWaterfall,
@@ -149,6 +149,45 @@ function storedBasisOf(raw: string | undefined): LawfulBasis | undefined {
   if (!raw) return undefined;
   const basis = { basis: raw as LawfulBasisKind } satisfies LawfulBasis;
   return isValidLawfulBasis(basis) ? basis : undefined;
+}
+
+function verifiedFinderPriorVotes(
+  finderKey: string,
+  hit: Extract<FindEmailOutcome, { status: 'hit' }>['hit'],
+): VerificationVote[] {
+  if (hit.acceptAll === true) return [];
+  const raw = hit.raw && typeof hit.raw === 'object' ? hit.raw : null;
+  if (!raw) return [];
+  if (
+    finderKey === 'prospeo' &&
+    typeof raw.email_status === 'string' &&
+    raw.email_status.trim().toUpperCase() === 'VERIFIED'
+  ) {
+    return [
+      {
+        providerKey: finderKey,
+        state: 'VALID',
+        catchAllClass: 'not_catch_all',
+        acceptAll: false,
+      },
+    ];
+  }
+  if (
+    finderKey === 'hunter' &&
+    hit.acceptAll === false &&
+    typeof raw.verification_status === 'string' &&
+    raw.verification_status.trim().toLowerCase() === 'valid'
+  ) {
+    return [
+      {
+        providerKey: finderKey,
+        state: 'VALID',
+        catchAllClass: 'not_catch_all',
+        acceptAll: false,
+      },
+    ];
+  }
+  return [];
 }
 
 function buildFindEmailInput(input: EnrichContactInput): FindEmailInput {
@@ -376,6 +415,7 @@ export async function enrichContactEmail(
     const verification = verificationGate.allowed
       ? await runVerificationWaterfall({
           email,
+          priorVotes: verifiedFinderPriorVotes(finder.key, outcome.hit),
           providers: deps.verifiers,
           // 工具型验证器（SMTP 兜底票）的 broker 归账/合规上下文。
           workspaceId: input.workspaceId,

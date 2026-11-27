@@ -143,7 +143,14 @@ export function createBypassContactEnrichmentSafetyExecutor(deps: {
   readonly runWaterfall?: typeof enrichCompanyContacts;
 }): SafetyResultsPort {
   const env = deps.env ?? process.env;
+  const effectiveEnv: NodeJS.ProcessEnv =
+    env.PROSPEO_MIN_INTERVAL_MS === undefined
+      ? { ...env, PROSPEO_MIN_INTERVAL_MS: "600" }
+      : env;
   const runWaterfall = deps.runWaterfall ?? enrichCompanyContacts;
+  const sharedPrimaryFinders = resolveConfiguredFinderProviders(effectiveEnv);
+  const sharedTailFinders = resolveConfiguredTailFinderProviders(effectiveEnv);
+  const sharedCircuits = new PrismaCircuitBreakerStore(deps.prisma);
   const query = new EnrichmentExecutionQueryRepository(deps.prisma);
   const resultsAdapters: ContactEnrichmentResultsAdapterDeps = {
     database: deps.prisma,
@@ -178,8 +185,8 @@ export function createBypassContactEnrichmentSafetyExecutor(deps: {
     maxProviders?: number;
     maxProbe?: number;
   }): Promise<ContactEnrichmentSafetyResult> => {
-    const primary = resolveConfiguredFinderProviders(env);
-    const tail = resolveConfiguredTailFinderProviders(env);
+    const primary = sharedPrimaryFinders;
+    const tail = sharedTailFinders;
     const tier = await loadCompanyContactEnrichmentTier(
       deps.prisma,
       { workspaceId: params.workspaceId, companyId: params.companyId },
@@ -198,7 +205,7 @@ export function createBypassContactEnrichmentSafetyExecutor(deps: {
     }
     const verifiers = await gateConfiguredVerificationProviders(
       deps.prisma,
-      env,
+      effectiveEnv,
       deps.broker,
     );
     const result = await runWaterfall(
@@ -209,7 +216,7 @@ export function createBypassContactEnrichmentSafetyExecutor(deps: {
         ...(tail.length > 0 ? { tailFinders: tail } : {}),
         verifiers,
         verificationBroker: deps.broker,
-        circuits: new PrismaCircuitBreakerStore(deps.prisma),
+        circuits: sharedCircuits,
         actorId: params.actorId,
       },
       {

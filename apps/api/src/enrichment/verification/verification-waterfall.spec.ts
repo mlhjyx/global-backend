@@ -98,6 +98,34 @@ describe('runVerificationWaterfall：停止规则', () => {
     expect(outcome.resolved.reason).toBe('accept_all_flag');
     expect(outcome.providerCalls).toBe(2);
   });
+
+  it('priorVotes 已有独立 finder VERIFIED 票 + 主验 Emailable VALID → 1 次验证即达双正 VALID，不调故障第二家', async () => {
+    const emailable = valid('emailable', 7_600);
+    const brokenZb = errored('zerobounce');
+    const outcome = await runVerificationWaterfall({
+      email: 'ceo@acme.example',
+      priorVotes: [{ providerKey: 'prospeo', state: 'VALID', catchAllClass: 'not_catch_all', acceptAll: false }],
+      providers: [emailable, brokenZb],
+    });
+    expect(outcome.resolved.state).toBe('VALID');
+    expect(outcome.resolved.reason).toBe('two_positive_votes');
+    expect(outcome.providerCalls).toBe(1);
+    expect(outcome.stopReason).toBe('settled');
+    expect(emailable.verify).toHaveBeenCalledOnce();
+    expect(brokenZb.verify).not.toHaveBeenCalled();
+  });
+
+  it('priorVotes 已有 finder 票但主验返回 accept_all 或 INVALID → 绝不误判 VALID', async () => {
+    const prior = [{ providerKey: 'prospeo', state: 'VALID' as const, catchAllClass: 'not_catch_all' as const, acceptAll: false }];
+    const catchAll = provider('emailable', result({ state: 'CATCH_ALL_RISKY', catchAll: 'catch_all', catchAllClass: 'true_catch_all', acceptAll: true }));
+    const r1 = await runVerificationWaterfall({ email: 'ceo@acme.example', priorVotes: prior, providers: [catchAll, valid('zerobounce')] });
+    expect(r1.resolved.state).toBe('CATCH_ALL_RISKY');
+    expect(r1.providerCalls).toBe(1);
+
+    const r2 = await runVerificationWaterfall({ email: 'ceo@acme.example', priorVotes: prior, providers: [invalid('emailable'), valid('zerobounce')] });
+    expect(r2.resolved.state).toBe('UNKNOWN');
+    expect(r2.providerCalls).toBe(1);
+  });
 });
 
 describe('runVerificationWaterfall：未收敛与仲裁', () => {

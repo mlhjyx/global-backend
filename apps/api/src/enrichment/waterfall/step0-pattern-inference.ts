@@ -175,13 +175,18 @@ export async function runStep0IfEligible(
   return step0;
 }
 
-/** 读取公司国别与候选联系人职位（独立于冻结的 loadContactEnrichmentTargets 合同）。 */
+/** 读取公司国别、候选联系人职位与既有领英 URL（独立于冻结的 loadContactEnrichmentTargets 合同）。 */
 export async function loadCompanyEnrichmentMeta(
   tx: Prisma.TransactionClient,
   companyId: string,
   contactIds: readonly string[],
-): Promise<{ country: string | null; titleByContactId: Map<string, string | null> }> {
+): Promise<{
+  country: string | null;
+  titleByContactId: Map<string, string | null>;
+  linkedinUrlByContactId: Map<string, string>;
+}> {
   const titleByContactId = new Map<string, string | null>();
+  const linkedinUrlByContactId = new Map<string, string>();
   let country: string | null = null;
   const companyModel = (tx as { canonicalCompany?: { findFirst?: unknown } }).canonicalCompany;
   if (companyModel && typeof companyModel.findFirst === 'function') {
@@ -210,7 +215,24 @@ export async function loadCompanyEnrichmentMeta(
       }
     }
   }
-  return { country, titleByContactId };
+  const contactPointModel = (tx as { contactPoint?: { findMany?: unknown } }).contactPoint;
+  if (contactIds.length > 0 && contactPointModel && typeof contactPointModel.findMany === 'function') {
+    const rows = await tx.contactPoint.findMany({
+      where: { contactId: { in: [...contactIds] }, type: 'linkedin' },
+      select: { contactId: true, value: true },
+    });
+    for (const row of rows) {
+      const url = typeof row.value === 'string' ? row.value.trim() : '';
+      if (
+        typeof row.contactId === 'string' &&
+        /^https:\/\/(?:[a-z0-9-]+\.)?linkedin\.com\/in\/[^\s?#]+/iu.test(url) &&
+        !linkedinUrlByContactId.has(row.contactId)
+      ) {
+        linkedinUrlByContactId.set(row.contactId, url);
+      }
+    }
+  }
+  return { country, titleByContactId, linkedinUrlByContactId };
 }
 
 /** 读取同公司已有 VALID 个人邮箱样本（经 Prisma PII 扩展自动解密）；轻量 mock tx 缺 findMany 时返回空。 */
