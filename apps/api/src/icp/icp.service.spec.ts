@@ -960,7 +960,7 @@ describe("ICP generation authority and controlled enrichment", () => {
     expect(queries).toHaveLength(1);
     expect(queries[0]).toMatchObject({
       source_class: "public_intelligence",
-      filters: { industry: "Pumpen", country: "Germany", source_hint: "public_web" },
+      filters: { industry: "Pumpen", country: "DE", source_hint: "public_web" },
     });
     expect(queries[0]!.rationale).toContain(
       "[source_filter] 已移出 4 条规划查询：SOURCE_DISABLED 2 条、SOURCE_UNKNOWN 1 条、SOURCE_SYSTEM_PLANNED 1 条",

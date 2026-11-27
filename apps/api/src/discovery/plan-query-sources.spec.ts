@@ -21,6 +21,7 @@ import {
   plannerSourcePrompt,
   plannerVisibleSources,
   loadRegistryFrameCountries,
+  normalizePlanQueryCountries,
   routePlannerQueries,
   scaleEstimatedVolume,
   sourceQueryBudgetConfig,
@@ -525,6 +526,67 @@ describe('cheap-first source priority (Q33②, PR-1)', () => {
     expect(config.trialMaxCompanies).toBe(
       MAX_DISCOVERY_PLAN_QUERIES * MAX_DISCOVERY_PROVIDER_RECORDS,
     );
+  });
+
+  it('去帽模式下显式旧公司帽（400/50）按 25 家/查询换算并按目标国家数保底，零成本本地源不受试跑帽缩水', () => {
+    const budgets = sourceQueryBudgets(
+      new Set(['registry_frame', 'channel_catalog', 'wikidata', 'directory', 'google_places']),
+      { structuredRunCap: 400, trialMaxCompanies: 50, trialMaxRuns: 1_000_000 },
+      ['registry_frame', 'channel_catalog', 'wikidata', 'directory', 'google_places', 'public_web'],
+      { uncapped: true, targetCountryCount: 10 },
+    );
+
+    // 零成本本地源直接用结构化帽：floor(400 / 25) = 16
+    expect(budgets.registry_frame).toBe(16);
+    expect(budgets.channel_catalog).toBe(16);
+    // 试跑源原值 floor(50 / 25) = 2，在去帽多国场景下按 10 个目标国保底到 10（不再错算成 1）
+    expect(budgets.wikidata).toBe(10);
+    expect(budgets.directory).toBe(10);
+    expect(budgets.google_places).toBe(10);
+    expect(budgets.public_web).toBeUndefined();
+  });
+
+  it('多国查询触及单源预算时按国家轮询保底，不让单个国家占满全部配额', () => {
+    vi.stubEnv('DISCOVERY_CHEAP_FIRST', 'enforce');
+    const planned = [
+      query('industry_data', { country: 'Germany', source_hint: 'directory' }, 1),
+      query('industry_data', { country: 'DE', source_hint: 'directory' }, 2),
+      query('industry_data', { country: 'Germany', source_hint: 'directory' }, 3),
+      query('industry_data', { country: 'United Kingdom', source_hint: 'directory' }, 4),
+      query('industry_data', { country: 'Netherlands', source_hint: 'directory' }, 5),
+      query('industry_data', { country: 'Brazil', source_hint: 'directory' }, 6),
+    ];
+
+    const routed = routePlannerQueries(planned, {
+      enabled: only('directory'),
+      registered: REGISTERED,
+      sourceBudgets: { directory: 4 },
+    });
+
+    expect(routed.queries.map((q) => q.filters.country)).toEqual([
+      'Germany',
+      'United Kingdom',
+      'Netherlands',
+      'Brazil',
+    ]);
+    expect(routed.dropped).toEqual({ SOURCE_QUERY_BUDGET: 2 });
+    vi.unstubAllEnvs();
+  });
+
+  it('normalizePlanQueryCountries 将英文/中文单国名统一为两位 ISO 码并保留地区词', () => {
+    const normalized = normalizePlanQueryCountries([
+      query('company_registry', { country: 'Germany', source_hint: 'registry_frame' }, 1),
+      query('company_registry', { country: 'United Kingdom', source_hint: 'companies_house_registry' }, 2),
+      query('industry_data', { country: ['Germany', '德国', 'Netherlands'], source_hint: 'directory' }, 3),
+      query('industry_data', { country: 'DACH', source_hint: 'directory' }, 4),
+    ]);
+
+    expect(normalized.map((q) => q.filters.country)).toEqual([
+      'DE',
+      'GB',
+      ['DE', 'NL'],
+      'DACH',
+    ]);
   });
 
   it('writes the shadow replacement count onto the plan review note', () => {
