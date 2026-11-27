@@ -51,7 +51,7 @@ const LIST_ITEM_PREFIX_RE = /^(?:(?:#?\d{1,4}\s*[.)\-–—:]\s+)|(?:[•·▪�
 
 /** 括号或分隔符包裹的会员等级/赞助商/按钮尾注（仅剥离明确标签，不误伤正常公司名）。 */
 const MEMBER_BADGE_SUFFIX_RE =
-  /(?:\s*[\[(]\s*(?:(?:gold|silver|bronze|platinum|diamond|executive|premium|standard|essential|small business|corporate|founding|associate|full|ordinary|honorary|startup|start-up)\s+)?(?:member|partner|sponsor|supporter|exhibitor|verified|certified)\s*[\])]|\s*[-–—|]\s*(?:visit\s+website|view\s+profile|read\s+more|learn\s+more|more\s+info|website|(?:gold|silver|bronze|platinum|diamond|principal|media|event)\s+(?:sponsor|partner|supporter)|(?:executive|premium|standard|essential|small business|corporate|founding)\s+member))\s*$/iu;
+  /(?:\s*[[(]\s*(?:(?:gold|silver|bronze|platinum|diamond|executive|premium|standard|essential|small business|corporate|founding|associate|full|ordinary|honorary|startup|start-up)\s+)?(?:member|partner|sponsor|supporter|exhibitor|verified|certified)\s*[\])]|\s*[-–—|]\s*(?:visit\s+website|view\s+profile|read\s+more|learn\s+more|more\s+info|website|(?:gold|silver|bronze|platinum|diamond|principal|media|event)\s+(?:sponsor|partner|supporter)|(?:executive|premium|standard|essential|small business|corporate|founding)\s+member))\s*$/iu;
 
 /** 导航栏/页脚/赞助商/CTA 精确短语（规范化为小写单空格后匹配）。 */
 const NOISE_EXACT_NAMES: ReadonlySet<string> = new Set([
