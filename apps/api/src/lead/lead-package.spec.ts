@@ -385,3 +385,60 @@ describe('buildLeadPackage', () => {
     expect(suppressedPkg.icebreakerSuggestions).toEqual([]);
   });
 });
+
+describe('lead company overview projection', () => {
+  const website = {
+    description: 'Vertrieb und Wartung von Pumpen für Industriebetriebe.',
+    main_business: ['Pumpen', 'Wartung'],
+    source_url: 'https://beispiel-pumpen.de/leistungen',
+    fetched_at: '2026-11-27T08:30:00.000Z',
+  };
+  function projection(value: unknown, allowedActions = ['display'], sourcePolicyCurrent = true) {
+    const input = base();
+    return buildLeadPackage({
+      ...input,
+      company: {
+        ...input.company,
+        attributes: { ...(input.company.attributes as object), company_website_overview: value },
+      },
+      companyOverviewAllowed: sourcePolicyCurrent,
+      evidence: [
+        ...input.evidence,
+        { field: 'company_website_overview', sourceUrl: website.source_url, fetchedAt: website.fetched_at, allowedActions },
+        { field: 'gleif.registered_city', sourceUrl: 'https://api.gleif.org/lei/1', fetchedAt: '2026-10-18T00:00:00.000Z', allowedActions: ['display'] },
+        { field: 'country', sourceUrl: 'https://internal-example.net/registry', fetchedAt: '2026-10-18T00:00:00.000Z', allowedActions: ['match'] },
+      ],
+    });
+  }
+
+  it('serves the approved company facts and displayable citations in a typed optional field', () => {
+    const result = projection(website);
+    expect(result.company).toMatchObject({ country: 'DE', city: 'München' });
+    expect(result).toHaveProperty('company_overview', {
+      description: website.description,
+      main_business: website.main_business,
+      official_website: 'https://beispiel-pumpen.de/',
+      sources: [
+        { field: 'description', source_url: website.source_url, fetched_at: website.fetched_at },
+        { field: 'main_business', source_url: website.source_url, fetched_at: website.fetched_at },
+        { field: 'website', source_url: website.source_url, fetched_at: website.fetched_at },
+        { field: 'location', source_url: 'https://api.gleif.org/lei/1', fetched_at: '2026-10-18T00:00:00.000Z' },
+      ],
+    });
+  });
+
+  it('withholds copies when the provenance is match-only or the current display permission was removed', () => {
+    for (const result of [projection(website, ['match']), projection(website, ['display'], false)]) {
+      expect(result).toHaveProperty('company_overview.description', null);
+      expect(result).toHaveProperty('company_overview.main_business', []);
+      expect(result).toHaveProperty('company_overview.official_website', null);
+    }
+  });
+
+  it('withholds stale attribution after a domain mismatch and legacy rows retain their real location', () => {
+    const result = projection({ ...website, source_url: 'https://unrelated-shop.de/' });
+    expect(result).toHaveProperty('company_overview.description', null);
+    expect(result).toHaveProperty('company_overview.main_business', []);
+    expect(result.company).toMatchObject({ domain: 'beispiel-pumpen.de', country: 'DE', city: 'München' });
+  });
+});

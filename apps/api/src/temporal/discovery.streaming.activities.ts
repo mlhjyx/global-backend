@@ -20,6 +20,13 @@ import {
 import { discoverContactsCore } from '../discovery/contact-discovery-core';
 import { stampLawfulBasis } from '../discovery/compliance/email-verification-gate';
 import { upsertLeadFit } from '../discovery/fit-judge';
+import { lockWorkspaceSuppressionPolicy } from '../discovery/suppression-policy-lock';
+import {
+  COMPANY_OVERVIEW_EVIDENCE_FIELD,
+  companyWebsiteDisplayAllowed,
+  readCompanyWebsiteOverview,
+  type CompanyWebsiteOverview,
+} from '../discovery/website-profile/company-overview';
 import { appendRunEvent } from '../discovery/run2/run-events';
 import {
   extractCompanyWebsiteStreaming,
@@ -330,7 +337,15 @@ async function persistExtractionFacts(
   workspaceId: string,
   companyId: string,
   extraction: StreamingCompanyExtraction,
+  companyOverview?: CompanyWebsiteOverview,
 ): Promise<void> {
+  await lockWorkspaceSuppressionPolicy(tx, workspaceId);
+  // Lock before reading attributes. This also serializes with maintenance CAS writers.
+  await tx.$queryRaw`
+    SELECT id FROM public.canonical_company
+    WHERE workspace_id = ${workspaceId}::uuid AND id = ${companyId}::uuid
+    FOR UPDATE
+  `;
   const company = await loadCompanyForSuppressionSafeWrite(tx, workspaceId, companyId);
   if (!company) return;
   const currentAttrs = isPlainRecord(company.attributes) ? { ...company.attributes } : {};
@@ -356,10 +371,37 @@ async function persistExtractionFacts(
       ...(extraction.passiveDns ? { passiveDns: extraction.passiveDns } : {}),
     },
   };
-  await tx.canonicalCompany.updateMany({
+  const previousOverview = readCompanyWebsiteOverview(currentAttrs.company_website_overview, company.domain);
+  const candidateOverview = readCompanyWebsiteOverview(companyOverview, company.domain);
+  const shouldUpdateOverview = candidateOverview && (!previousOverview || (
+    previousOverview.fetched_at < candidateOverview.fetched_at &&
+    (!previousOverview.description || candidateOverview.description) &&
+    (previousOverview.main_business.length === 0 || candidateOverview.main_business.length > 0)
+  ));
+  const nextOverview = shouldUpdateOverview && await companyWebsiteDisplayAllowed(tx, candidateOverview.source_url)
+    ? candidateOverview
+    : undefined;
+  if (nextOverview) nextAttrs.company_website_overview = nextOverview;
+  const updated = await tx.canonicalCompany.updateMany({
     where: { id: companyId, status: { not: 'SUPPRESSED' } },
     data: { attributes: nextAttrs as Prisma.InputJsonValue, version: { increment: 1 } },
   });
+  if (updated.count !== 1) return;
+  if (nextOverview) {
+    await tx.fieldEvidence.create({
+      data: {
+        workspaceId, entityType: 'company', entityId: companyId,
+        field: COMPANY_OVERVIEW_EVIDENCE_FIELD,
+        value: { description: nextOverview.description, main_business: [...nextOverview.main_business] },
+        sourceUrl: nextOverview.source_url,
+        fetchedAt: new Date(nextOverview.fetched_at),
+        providerKey: 'streaming_website',
+        license: 'public',
+        dataClass: 'green',
+        allowedActions: ['display'],
+      },
+    });
+  }
 
   const linkedin = extraction.channels.socialLinks.find(isLinkedinCompanyUrl) ?? null;
   const xAccount = extraction.channels.socialLinks.find(isXAccountUrl) ?? null;
@@ -666,12 +708,21 @@ export function createStreamingDiscoveryActivities(deps: {
         const extraction = resolvedExtraction.extraction;
         const { sharedFactHit, cooldownFlagged, cooldownRetryAfterDays } = resolvedExtraction;
 
+        const candidatePage = extraction?.overviewPage;
+        const overviewPage = candidatePage && await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
+          companyWebsiteDisplayAllowed(tx, candidatePage.url),
+        ) ? candidatePage : undefined;
+
         throwIfActivityCancelled();
         const fit = await judgeCompanyFitV3({
           gateway: deps.gateway,
           runtimeTelemetry: deps.runtimeTelemetry,
           workspaceId: args.workspaceId,
           runId: binding.accountKey,
+          authorizeExternalAction: () =>
+            deps.prisma.withWorkspace(args.workspaceId, (tx) =>
+              companyMayUseExternalProcessing(tx, args.workspaceId, args.companyId),
+            ),
           icp: {
             name: loaded.icp.name,
             targetMarkets: loaded.icp.targetMarkets,
@@ -689,9 +740,16 @@ export function createStreamingDiscoveryActivities(deps: {
             visibleText: extraction?.visibleText ?? '',
             channelsSummary: buildChannelsSummary(extraction),
             jsonLdSummary: extraction?.jsonLd.descriptions.join(' ') || null,
+            overviewPage,
           },
         });
 
+        const overview = fit.companyOverview ?? (overviewPage ? {
+          description: null, main_business: [],
+          source_url: overviewPage.url, fetched_at: overviewPage.fetchedAt,
+        } : undefined);
+
+        throwIfActivityCancelled();
         if (loaded.company.domain && (fit.verdict === 'match' || fit.verdict === 'weak')) {
           await sharedFacts.recordQualifiedTouch({
             domain: loaded.company.domain,
@@ -712,7 +770,7 @@ export function createStreamingDiscoveryActivities(deps: {
 
         await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
           if (extraction && extraction.pagesFetched.length > 0) {
-            await persistExtractionFacts(tx, args.workspaceId, args.companyId, extraction);
+            await persistExtractionFacts(tx, args.workspaceId, args.companyId, extraction, overview);
           }
           await upsertLeadFit(tx, args.workspaceId, args.icpId, args.companyId, fit);
           await tx.discoveryCompanyJob.updateMany({

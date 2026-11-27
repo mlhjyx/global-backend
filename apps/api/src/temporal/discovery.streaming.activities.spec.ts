@@ -384,8 +384,21 @@ describe('streaming discovery activities & rollout switch', () => {
     const signalCreateMany = vi.fn(async () => ({ count: 1 }));
     const leadUpsert = vi.fn(async () => ({ id: 'lead-1' }));
     const runUpdate = vi.fn(async () => ({}));
+    const captured = '2026-11-26T09:15:00.000Z';
+    const fact = vi.fn(async (_args: unknown) => ({}));
+    let receivedCapture = captured;
+    let companyAttributes: Record<string, unknown> = {};
+    const companyUpdate = vi.fn(async (request: { data: { attributes: Record<string, unknown> } }) => {
+      companyAttributes = request.data.attributes;
+      return { count: 1 };
+    });
     const tx = {
       suppressionRecord: { findMany: vi.fn(async () => []) },
+      sourcePolicy: { findMany: vi.fn(async () => [{
+        sourceType: 'official_website', reviewStatus: 'APPROVED', termsStatus: 'REVIEWED_OK',
+        allowedPurpose: ['enrichment'], allowedPaths: null, disallowedPaths: null,
+      }]) },
+      fieldEvidence: { create: fact },
       canonicalCompany: {
         findUnique: vi.fn(async () => ({
           id: COMPANY_ID,
@@ -395,10 +408,10 @@ describe('streaming discovery activities & rollout switch', () => {
           country: 'IT',
           industry: 'Solar',
           status: 'NEW',
-          attributes: {},
+          attributes: companyAttributes,
           version: 1,
         })),
-        updateMany: vi.fn(async () => ({ count: 1 })),
+        updateMany: companyUpdate,
       },
       icpDefinition: {
         findUnique: vi.fn(async () => ({
@@ -448,8 +461,9 @@ describe('streaming discovery activities & rollout switch', () => {
             ok: true,
             mediaType: 'text/plain',
             finalUrl: input.url,
-            text: `<!doctype html><html><head><title>Solare Italia</title></head><body><main><p>Distributore all ingrosso di moduli fotovoltaici e inverter per installatori e aziende EPC in tutta Italia. Ordina ora il listino B2B con spedizione dai magazzini di Milano e Bologna.</p><a href="mailto:sales@solare-italia.it">sales@solare-italia.it</a><a href="/careers">Careers</a></main></body></html>`,
+            text: `<!doctype html><html><head><title>Solare Italia</title><script type="application/ld+json">[{"@type":"Organization","name":"Solare Italia","description":"Distributore all ingrosso di moduli fotovoltaici e inverter per installatori e aziende EPC in tutta Italia."},{"@type":"Person","description":"Unrelated personal biography."}]</script></head><body><main><p>Distributore all ingrosso di moduli fotovoltaici e inverter per installatori e aziende EPC in tutta Italia. Ordina ora il listino B2B con spedizione dai magazzini di Milano e Bologna.</p><a href="mailto:sales@solare-italia.it">sales@solare-italia.it</a><a href="/careers">Careers</a></main></body></html>`,
           },
+          provenance: { fetchedAt: receivedCapture, parserVersion: 'http-get/v1', sourceUrl: input.url },
           costCents: 0,
           durationMs: 25,
           degraded: false,
@@ -465,6 +479,10 @@ describe('streaming discovery activities & rollout switch', () => {
           process_gate: 'not_applicable',
           business_model_gate: 'pass: B2B wholesale',
           reasons: ['意大利正牌光伏分销商'],
+          company_overview: {
+            description: 'Distributore all ingrosso di moduli fotovoltaici e inverter per installatori e aziende EPC in tutta Italia.',
+            main_business: ['moduli fotovoltaici', 'inverter'],
+          },
         },
         usage: { inputTokens: 300, outputTokens: 80, costCents: 0 },
         model: 'test-model',
@@ -493,9 +511,32 @@ describe('streaming discovery activities & rollout switch', () => {
     expect(result.verdict).toBe('match');
     expect(result.fetchMethod).toBe('raw_http');
     expect(result.usedCrawl4aiFallback).toBe(false);
+    expect(companyUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        attributes: expect.objectContaining({
+          company_website_overview: expect.objectContaining({
+            description: expect.stringContaining('Distributore all ingrosso'),
+            main_business: ['moduli fotovoltaici', 'inverter'],
+            source_url: 'https://solare-italia.it/',
+            fetched_at: captured,
+          }),
+        }),
+      }),
+    }));
+    expect(fact).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
+      entityId: COMPANY_ID, workspaceId: WORKSPACE_ID, allowedActions: ['display'],
+      field: 'company_website_overview', fetchedAt: new Date(captured),
+    }) }));
+    expect(gateway.generateStructured).toHaveBeenCalledTimes(1);
+    expect(tx.$queryRaw.mock.calls.length).toBeGreaterThan(0);
     expect(signalCreateMany).toHaveBeenCalledTimes(1);
     expect(leadUpsert).toHaveBeenCalledTimes(1);
     expect(runUpdate).toHaveBeenCalledTimes(1);
+
+    receivedCapture = '2026-11-26T09:14:00.000Z';
+    await activities.processStreamingL1Company({ ...AUTHORITY, runId: RUN_ID, icpId: ICP_ID, companyId: COMPANY_ID });
+    expect(companyAttributes.company_website_overview).toHaveProperty('fetched_at', captured);
+    expect(fact).toHaveBeenCalledTimes(1);
   });
 
   it('reuses ADR-003 shared green facts on L1 hit with zero HTTP calls, flags 30d cooldown, and blocks imported_buyer write-back', async () => {

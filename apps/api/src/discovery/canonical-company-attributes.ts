@@ -11,9 +11,11 @@ import { sanitizeStructuredHarvestSiteSections } from "./structured-harvest-site
 import { readProjectPageEvidence } from "./website-profile/project-page-evidence";
 import { isValidEuVat } from "./website-profile/eu-vat";
 import { isRegisteredAddressText } from "./website-profile/impressum";
+import { readCompanyWebsiteOverview } from "./website-profile/company-overview";
 
 const RETAINED_TOP_LEVEL_KEYS = new Set([
   "manufacturer_network",
+  "company_website_overview",
   "digital_footprint",
   "employee_band",
   "employees",
@@ -565,7 +567,11 @@ export function sanitizeCanonicalCompanyAttributes(
   return Object.fromEntries(
     Object.entries(value as Record<string, unknown>).flatMap(([key, item]) => {
       if (!RETAINED_TOP_LEVEL_KEYS.has(key)) return [];
-      const sanitized = key === 'manufacturer_network' ? sanitizeManufacturerNamespace(item) : sanitizeValue(key, item, state, 0, [key]);
+      const sanitized = key === 'manufacturer_network'
+        ? sanitizeManufacturerNamespace(item)
+        : key === 'company_website_overview'
+          ? readCompanyWebsiteOverview(item)
+          : sanitizeValue(key, item, state, 0, [key]);
       return sanitized === undefined ? [] : [[key, sanitized]];
     }),
   );

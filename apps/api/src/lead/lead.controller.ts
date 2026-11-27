@@ -122,6 +122,30 @@ const LEAD_PACKAGE_SCHEMA = {
         city: { type: 'string', nullable: true },
       },
     },
+    company_overview: {
+      type: 'object',
+      nullable: true,
+      description: '买家公司的公开资料与字段来源。旧线索可能没有分析结果。',
+      required: ['description', 'main_business', 'official_website', 'sources'],
+      properties: {
+        description: { type: 'string', nullable: true, maxLength: 360 },
+        main_business: { type: 'array', maxItems: 6, items: { type: 'string', maxLength: 100 } },
+        official_website: { type: 'string', format: 'uri', nullable: true },
+        sources: {
+          type: 'array',
+          maxItems: 6,
+          items: {
+            type: 'object',
+            required: ['field', 'source_url', 'fetched_at'],
+            properties: {
+              field: { type: 'string', enum: ['description', 'main_business', 'location', 'website'] },
+              source_url: { type: 'string', format: 'uri' },
+              fetched_at: { type: 'string', format: 'date-time', nullable: true },
+            },
+          },
+        },
+      },
+    },
     company_profile: { type: 'object', additionalProperties: true },
     registered_address: { type: 'string', nullable: true },
     identifiers: {

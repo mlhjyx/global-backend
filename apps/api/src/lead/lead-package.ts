@@ -7,6 +7,10 @@
  * 缺失的事实留空（null / []），绝不猜。
  */
 
+import { isStableSafeHttpsUrl } from '../discovery/raw-source-provider-normalizer';
+import {
+  COMPANY_OVERVIEW_EVIDENCE_FIELD, companyWebsiteSource, readCompanyWebsiteOverview,
+} from '../discovery/website-profile/company-overview';
 import { clamp01 } from './scoring';
 import { deriveFitReasonCodes } from './reason-codes';
 import { extractIdentifiers, isoOrNull } from './lead-qualified-snapshot';
@@ -59,6 +63,7 @@ export interface LeadPackageEvidence {
   readonly field: string;
   readonly sourceUrl: string | null;
   readonly fetchedAt: Date | string | null;
+  readonly allowedActions?: unknown;
 }
 
 export type LeadPackageSanctionsStatus =
@@ -90,9 +95,23 @@ export interface LeadPackageInput {
   readonly companySignals?: readonly LeadPackageCompanySignal[];
   /** 禁联或未清制裁命中时为 true：隐藏社媒与渠道链接，避免误导运营触达受限主体。 */
   readonly omitSocials?: boolean;
+  readonly companyOverviewAllowed?: boolean;
   readonly evidence: readonly LeadPackageEvidence[];
   readonly sanctions: { readonly status: LeadPackageSanctionsStatus; readonly screened_at: string | null };
   readonly validUntil: string | null;
+}
+
+type OverviewSource = {
+  readonly field: 'description' | 'main_business' | 'location' | 'website';
+  readonly source_url: string;
+  readonly fetched_at: string | null;
+};
+
+export interface LeadCompanyOverview {
+  readonly description: string | null;
+  readonly main_business: readonly string[];
+  readonly official_website: string | null;
+  readonly sources: readonly OverviewSource[];
 }
 
 export interface LeadPackage {
@@ -105,6 +124,7 @@ export interface LeadPackage {
     readonly country: string | null;
     readonly city: string | null;
   };
+  readonly company_overview: LeadCompanyOverview | null;
   readonly company_profile: {
     readonly trade_role: string | null;
     readonly trade_role_confidence: number | null;
@@ -216,6 +236,58 @@ function companyProfile(attributes: Record<string, unknown>) {
   });
 }
 
+const LOCATION_FIELDS = new Set(['country', 'gleif.registered_city', 'website_profile.registered_address']);
+
+function leadCompanyOverview(
+  input: LeadPackageInput,
+  attributes: Record<string, unknown>,
+): LeadCompanyOverview | null {
+  const domain = input.company.domain;
+  const candidate = readCompanyWebsiteOverview(attributes.company_website_overview, domain);
+  const displayEvidence = input.evidence.filter((row) =>
+    Array.isArray(row.allowedActions) && row.allowedActions.includes('display'),
+  );
+  const overview = input.companyOverviewAllowed && candidate && displayEvidence.some((row) =>
+    row.field === COMPANY_OVERVIEW_EVIDENCE_FIELD && row.sourceUrl === candidate.source_url &&
+    isoInstant(row.fetchedAt) === candidate.fetched_at,
+  ) ? candidate : undefined;
+  const previousProfile = record(attributes.website_profile);
+  const legacyUrl = companyWebsiteSource(previousProfile.source_url, domain);
+  const legacyProof = input.companyOverviewAllowed && legacyUrl ? displayEvidence.find((row) =>
+    row.field === 'website_profile.source_url' && row.sourceUrl === legacyUrl,
+  ) : undefined;
+  const websiteUrl = overview?.source_url ?? (legacyProof ? legacyUrl : null);
+  const sources: OverviewSource[] = [];
+  if (overview?.description) {
+    sources.push({ field: 'description', source_url: overview.source_url, fetched_at: overview.fetched_at });
+  }
+  if (overview && overview.main_business.length > 0) {
+    sources.push({ field: 'main_business', source_url: overview.source_url, fetched_at: overview.fetched_at });
+  }
+  if (websiteUrl) {
+    sources.push({
+      field: 'website',
+      source_url: websiteUrl,
+      fetched_at: overview?.fetched_at ?? isoInstant(legacyProof?.fetchedAt),
+    });
+  }
+  const locationCitations = new Set<string>();
+  for (const evidence of displayEvidence) {
+    if (!LOCATION_FIELDS.has(evidence.field) || !isStableSafeHttpsUrl(evidence.sourceUrl) ||
+        locationCitations.has(evidence.sourceUrl)) continue;
+    locationCitations.add(evidence.sourceUrl);
+    sources.push({ field: 'location', source_url: evidence.sourceUrl, fetched_at: isoInstant(evidence.fetchedAt) });
+    if (locationCitations.size === 3) break;
+  }
+  if (sources.length === 0) return null;
+  return {
+    description: overview?.description ?? null,
+    main_business: overview?.main_business ?? [],
+    official_website: websiteUrl ? new URL('/', websiteUrl).href : null,
+    sources,
+  };
+}
+
 /** The newest intent + company signals behind "why now", at most {@link MAX_SIGNALS}, shared with the weekly report. */
 export function leadSignals(
   attributes: unknown,
@@ -323,6 +395,7 @@ export function buildLeadPackage(input: LeadPackageInput): LeadPackage {
       country: input.company.country,
       city: text(gleif.registered_city),
     }),
+    company_overview: leadCompanyOverview(input, attributes),
     company_profile: companyProfile(attributes),
     registered_address: text(profile.registered_address),
     identifiers: Object.freeze({
@@ -357,7 +430,10 @@ export function buildLeadPackage(input: LeadPackageInput): LeadPackage {
       }),
       reasons: Object.freeze(reasons),
     }),
-    evidence: Object.freeze(evidenceList(input.evidence, profileSourceUrl)),
+    evidence: Object.freeze(evidenceList(
+      input.evidence.filter((row) => row.field !== COMPANY_OVERVIEW_EVIDENCE_FIELD),
+      profileSourceUrl,
+    )),
     sanctions: Object.freeze({
       status: input.sanctions.status,
       screened_at: isoInstant(input.sanctions.screened_at),

@@ -20,6 +20,7 @@ import {
   isThinHtmlPage,
   type JsonLdFacts,
 } from './raw-html-parser';
+import { companyWebsiteSource, type CompanyOverviewPage } from '../website-profile/company-overview';
 
 export {
   extractHtmlChannelsAndLinks,
@@ -59,6 +60,8 @@ export interface StreamingCompanyExtraction {
   readonly title: string | null;
   readonly metaDescription: string | null;
   readonly visibleText: string;
+  /** A first-party HTTP capture for the optional company overview. */
+  readonly overviewPage?: CompanyOverviewPage;
   readonly jsonLd: JsonLdFacts;
   readonly channels: StreamingExtractionChannels;
   readonly pagesFetched: readonly string[];
@@ -82,6 +85,7 @@ export interface ExtractCompanyWebsiteStreamingInput {
 interface PageFetchOutcome {
   readonly html: string;
   readonly finalUrl: string;
+  readonly fetchedAt?: string;
   readonly method: 'raw_http' | 'crawl4ai' | 'skipped';
   readonly usedCrawl4aiFallback: boolean;
   readonly usedWwwRetry: boolean;
@@ -180,11 +184,17 @@ async function isPathAllowedByRobotsViaBroker(
   return !disallow.some((prefix) => prefix === '/' || pathWithQuery.startsWith(prefix));
 }
 
+function rawCaptureTime(result: { data: HttpGetOutput; provenance?: { sourceUrl?: string; fetchedAt: string } }): string | undefined {
+  return result.data.finalUrl && result.provenance?.sourceUrl === result.data.finalUrl
+    ? result.provenance.fetchedAt
+    : undefined;
+}
+
 async function invokeRawHttpWithWwwRetry(
   input: ExtractCompanyWebsiteStreamingInput,
   url: string,
   tag: string,
-): Promise<{ output: HttpGetOutput | null; finalUrl: string; usedWwwRetry: boolean; failureReason: string | null }> {
+): Promise<{ output: HttpGetOutput | null; finalUrl: string; fetchedAt?: string; usedWwwRetry: boolean; failureReason: string | null }> {
   const attempt = async (target: string, suffix: string) =>
     input.broker.invoke<HttpGetInput, HttpGetOutput>(
       'http.get',
@@ -198,7 +208,7 @@ async function invokeRawHttpWithWwwRetry(
 
   try {
     const res = await attempt(url, 'raw');
-    return { output: res.data, finalUrl: res.data.finalUrl || url, usedWwwRetry: false, failureReason: null };
+    return { output: res.data, finalUrl: res.data.finalUrl || url, fetchedAt: rawCaptureTime(res), usedWwwRetry: false, failureReason: null };
   } catch (error) {
     if (shouldRethrowBrokerError(error)) throw error;
     const subjectReason = artifactSubjectSkipReason(error);
@@ -213,6 +223,7 @@ async function invokeRawHttpWithWwwRetry(
           return {
             output: retry.data,
             finalUrl: retry.data.finalUrl || wwwUrl,
+            fetchedAt: rawCaptureTime(retry),
             usedWwwRetry: true,
             failureReason: null,
           };
@@ -314,6 +325,7 @@ async function fetchSinglePageHtml(
     return {
       html: rawText,
       finalUrl: raw.finalUrl,
+      fetchedAt: raw.fetchedAt,
       method: 'raw_http',
       usedCrawl4aiFallback: false,
       usedWwwRetry: raw.usedWwwRetry,
@@ -327,6 +339,7 @@ async function fetchSinglePageHtml(
     return {
       html: rawText,
       finalUrl: raw.finalUrl,
+      fetchedAt: raw.fetchedAt,
       method: rawText ? 'raw_http' : 'skipped',
       usedCrawl4aiFallback: false,
       usedWwwRetry: raw.usedWwwRetry,
@@ -374,6 +387,7 @@ async function fetchSinglePageHtml(
   return {
     html: rawText,
     finalUrl: raw.finalUrl,
+    fetchedAt: raw.fetchedAt,
     method: rawText ? 'raw_http' : 'skipped',
     usedCrawl4aiFallback: true,
     usedWwwRetry: raw.usedWwwRetry,
@@ -578,6 +592,17 @@ export async function extractCompanyWebsiteStreaming(
     title: homeChannels.title,
     metaDescription: homeChannels.metaDescription,
     visibleText: combinedText,
+    ...(home.method === 'raw_http' && home.fetchedAt && companyWebsiteSource(home.finalUrl, input.domain)
+      ? {
+        overviewPage: {
+          url: home.finalUrl,
+          fetchedAt: home.fetchedAt,
+          // Company and product structured fields only. The body can contain biographies
+          // and the contact/disclosure pages can contain personal data.
+          text: [...homeJsonLd.descriptions, ...homeJsonLd.products].join('\n'),
+        },
+      }
+      : {}),
     jsonLd: mergedJsonLd,
     channels: {
       roleEmails,

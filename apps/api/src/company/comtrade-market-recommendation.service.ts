@@ -1,12 +1,20 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import type { RequestContext } from '../auth/request-context';
+import { isIso3166Alpha2 } from '../discovery/iso3166';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   COMTRADE_HS_CATALOG,
-  COMTRADE_REFERENCE_YEAR,
   DEFAULT_FALLBACK_HS_CODE,
   type ComtradeHsCatalogEntry,
 } from './comtrade-market-data';
+import {
+  COMTRADE_MONTHLY_FLOWS,
+  COMTRADE_MONTHLY_PERIOD,
+  COMTRADE_MONTHLY_PREVIOUS_PERIOD,
+} from './comtrade-monthly-2026';
+
+const REGION_NAME_ZH = new Intl.DisplayNames(['zh-CN'], { type: 'region' });
+const REGION_NAME_EN = new Intl.DisplayNames(['en'], { type: 'region' });
 
 export interface MarketRecommendationHsBasis {
   readonly code: string;
@@ -37,13 +45,16 @@ export interface MarketRecommendationsResponse {
     readonly inferredFrom: 'query_hs' | 'offerings_and_industry' | 'fallback_general';
     readonly dataSource: 'un_comtrade_baseline_v1' | 'un_comtrade_live';
     readonly referenceYear: number;
+    readonly referencePeriod?: string;
+    readonly coverage?: number;
+    readonly shareBasis?: 'comparable_reporters';
   };
   readonly recommendations: readonly MarketRecommendationItem[];
   readonly generatedAt: string;
 }
 
 interface MatchedEntry {
-  readonly entry: ComtradeHsCatalogEntry;
+  readonly entry: Pick<ComtradeHsCatalogEntry, 'code' | 'label' | 'labelZh'>;
   readonly matchedFrom: string;
   readonly score: number;
 }
@@ -52,13 +63,6 @@ function normalizeHsCode(raw: string): string | null {
   const digits = raw.replace(/[^0-9]/gu, '');
   if (digits.length < 4 || digits.length > 10) return null;
   return digits.slice(0, 6);
-}
-
-function findEntryByHsCode(hsCode: string): ComtradeHsCatalogEntry | null {
-  const exact = COMTRADE_HS_CATALOG.find((e) => e.code === hsCode);
-  if (exact) return exact;
-  const prefix4 = hsCode.slice(0, 4);
-  return COMTRADE_HS_CATALOG.find((e) => e.code.startsWith(prefix4)) ?? null;
 }
 
 function inferEntriesFromSellerContext(texts: readonly { text: string; source: string }[]): MatchedEntry[] {
@@ -100,15 +104,20 @@ function resolveMatchedEntries(
       .map(normalizeHsCode)
       .filter((code): code is string => code !== null);
     const uniqueCodes = [...new Set(requested)].slice(0, 5);
-    const matched: MatchedEntry[] = [];
-    for (const code of uniqueCodes) {
-      const entry = findEntryByHsCode(code);
-      if (entry) {
-        matched.push({ entry, matchedFrom: `query:${code}`, score: 10 });
-      }
-    }
-    if (matched.length > 0) {
-      return { entries: matched, inferredFrom: 'query_hs' };
+    if (uniqueCodes.length > 0) {
+      // A heading and its child include the same flows. Keep the most specific request.
+      const codes = uniqueCodes.filter((code) =>
+        !uniqueCodes.some((other) => other !== code && other.startsWith(code)),
+      );
+      return {
+        entries: codes.map((code) => ({
+          entry: COMTRADE_HS_CATALOG.find((entry) => entry.code === code) ??
+            { code, label: `HS ${code}`, labelZh: `HS ${code}` },
+          matchedFrom: `query:${code}`,
+          score: 10,
+        })),
+        inferredFrom: 'query_hs',
+      };
     }
   }
 
@@ -129,47 +138,28 @@ function aggregateRecommendations(
   inferredFrom: 'query_hs' | 'offerings_and_industry' | 'fallback_general',
   selectedMarkets: ReadonlySet<string>,
   limit: number,
-): MarketRecommendationItem[] {
-  const byCountry = new Map<
-    string,
-    {
-      code: string;
-      name: string;
-      labelEn: string;
-      hsCodes: Set<string>;
-      totalVolumeUsd: number;
-      weightedGrowthSum: number;
-      weightedShareSum: number;
-      rationale: string;
-      topVolume: number;
-    }
-  >();
+): { coverage: number; recommendations: MarketRecommendationItem[] } {
+  const hsCodes = matched.map(({ entry }) => entry.code);
+  const byReporter = new Map<string, { currentUsd: number; previousUsd: number; matchedCodes: number }>();
 
-  for (const { entry } of matched) {
-    for (const flow of entry.markets) {
-      const existing = byCountry.get(flow.code);
-      if (!existing) {
-        byCountry.set(flow.code, {
-          code: flow.code,
-          name: flow.name,
-          labelEn: flow.labelEn,
-          hsCodes: new Set([entry.code]),
-          totalVolumeUsd: flow.importVolumeUsd,
-          weightedGrowthSum: flow.yoyGrowthPct * flow.importVolumeUsd,
-          weightedShareSum: flow.globalImportSharePct * flow.importVolumeUsd,
-          rationale: flow.rationale,
-          topVolume: flow.importVolumeUsd,
-        });
-      } else {
-        existing.hsCodes.add(entry.code);
-        existing.totalVolumeUsd += flow.importVolumeUsd;
-        existing.weightedGrowthSum += flow.yoyGrowthPct * flow.importVolumeUsd;
-        existing.weightedShareSum += flow.globalImportSharePct * flow.importVolumeUsd;
-        if (flow.importVolumeUsd > existing.topVolume) {
-          existing.topVolume = flow.importVolumeUsd;
-          existing.rationale = flow.rationale;
-        }
-      }
+  for (const hsCode of hsCodes) {
+    const flows = COMTRADE_MONTHLY_FLOWS[hsCode];
+    if (!flows?.length) return { coverage: 0, recommendations: [] };
+
+    const seenReporters = new Set<string>();
+    for (const { code, importValueUsd, previousImportValueUsd } of flows) {
+      const reporter = code.trim().toUpperCase();
+      // The repository's country helper also accepts XK. This series needs assigned ISO codes.
+      if (!isIso3166Alpha2(reporter) || reporter === 'XK' || seenReporters.has(reporter) ||
+          !Number.isFinite(importValueUsd) || importValueUsd <= 0 ||
+          !Number.isFinite(previousImportValueUsd) || previousImportValueUsd <= 0) continue;
+
+      seenReporters.add(reporter);
+      const totals = byReporter.get(reporter) ?? { currentUsd: 0, previousUsd: 0, matchedCodes: 0 };
+      totals.currentUsd += importValueUsd;
+      totals.previousUsd += previousImportValueUsd;
+      totals.matchedCodes += 1;
+      byReporter.set(reporter, totals);
     }
   }
 
@@ -180,24 +170,25 @@ function aggregateRecommendations(
         ? 'medium'
         : 'low';
 
-  return [...byCountry.values()]
-    .sort((a, b) => b.totalVolumeUsd - a.totalVolumeUsd || a.code.localeCompare(b.code))
+  const comparable = [...byReporter].filter(([, totals]) => totals.matchedCodes === hsCodes.length);
+  const comparableImportUsd = comparable.reduce((sum, [, totals]) => sum + totals.currentUsd, 0);
+  const recommendations = comparable
+    .sort(([codeA, a], [codeB, b]) => b.currentUsd - a.currentUsd || codeA.localeCompare(codeB))
     .slice(0, limit)
-    .map((item, idx) => ({
-      code: item.code,
-      name: item.name,
-      labelEn: item.labelEn,
+    .map(([code, totals], idx) => ({
+      code,
+      name: REGION_NAME_ZH.of(code) ?? code,
+      labelEn: REGION_NAME_EN.of(code) ?? code,
       rank: idx + 1,
-      hsCodes: [...item.hsCodes],
-      importVolumeUsd: Math.round(item.totalVolumeUsd),
-      yoyGrowthPct: Number((item.weightedGrowthSum / Math.max(1, item.totalVolumeUsd)).toFixed(1)),
-      globalImportSharePct: Number(
-        (item.weightedShareSum / Math.max(1, item.totalVolumeUsd)).toFixed(1),
-      ),
-      rationale: item.rationale,
+      hsCodes,
+      importVolumeUsd: totals.currentUsd,
+      yoyGrowthPct: Number(((totals.currentUsd / totals.previousUsd - 1) * 100).toFixed(1)),
+      globalImportSharePct: Number((totals.currentUsd / comparableImportUsd * 100).toFixed(1)),
+      rationale: `UN Comtrade ${COMTRADE_MONTHLY_PERIOD} 进口额与 ${COMTRADE_MONTHLY_PREVIOUS_PERIOD} 同月申报对比。`,
       confidence,
-      alreadySelected: selectedMarkets.has(item.code),
+      alreadySelected: selectedMarkets.has(code),
     }));
+  return { coverage: comparable.length, recommendations };
 }
 
 @Injectable()
@@ -246,7 +237,7 @@ export class ComtradeMarketRecommendationService {
     const selectedMarkets = new Set(
       (company.targetMarkets ?? []).map((code) => code.trim().toUpperCase()),
     );
-    const recommendations = aggregateRecommendations(entries, inferredFrom, selectedMarkets, limit);
+    const { coverage, recommendations } = aggregateRecommendations(entries, inferredFrom, selectedMarkets, limit);
 
     return {
       companyId: company.id,
@@ -259,8 +250,11 @@ export class ComtradeMarketRecommendationService {
           matchedFrom,
         })),
         inferredFrom,
-        dataSource: 'un_comtrade_baseline_v1',
-        referenceYear: COMTRADE_REFERENCE_YEAR,
+        dataSource: 'un_comtrade_live',
+        referenceYear: Number(COMTRADE_MONTHLY_PERIOD.slice(0, 4)),
+        referencePeriod: COMTRADE_MONTHLY_PERIOD,
+        coverage,
+        shareBasis: 'comparable_reporters',
       },
       recommendations,
       generatedAt: new Date().toISOString(),
