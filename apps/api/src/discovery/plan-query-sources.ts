@@ -154,25 +154,60 @@ export function sourceQueryBudgetConfig(
 }
 
 /**
- * 每个源的每轮查询预算：结构化源 = floor(公司帽 / 每查询每源记录上限)（off 默认 100/25 = 4 条，
- * 等价于每轮每源 ≤100 条原始公司记录；公司帽 <25 时为 0 条，即一轮不跑该源）；
- * 试跑源按 §11 收紧为 max(1, floor(20/25)) = 1 条（≤25 条）。
- * 去帽模式（DISCOVERY_UNCAPPED=on）下默认换算回 66 条 = 全部计划查询数，
- * 预算不先于余额裁剪任何查询副本。
+ * 换算公司帽 → 查询预算时的单查询名义记录数（产品帽口径）。
+ * 去帽模式下 MAX_DISCOVERY_PROVIDER_RECORDS 会升至防爆界 1000，不能直接拿 1000 去除
+ * 运营者显式配置的公司帽（如 400 / 50），否则会把成熟源算成 0 条、试跑源算成 1 条，
+ * 导致多国目标市场被一刀切剩 1 个国家。
+ */
+const BUDGET_RECORDS_PER_QUERY = 25;
+
+/** 零出网零成本本地库：不受新源试跑帽（trialMaxCompanies）节流，直接按结构化源预算放行。 */
+const LOCAL_ZERO_COST_SOURCES: ReadonlySet<string> = new Set([
+  'registry_frame',
+  'channel_catalog',
+]);
+
+export interface SourceQueryBudgetOptions {
+  /** 是否开启去帽模式（缺省读环境 DISCOVERY_UNCAPPED）。 */
+  readonly uncapped?: boolean;
+  /** ICP 显式选定的目标国家数；去帽模式下每源非零预算至少保底覆盖全部目标国家。 */
+  readonly targetCountryCount?: number;
+}
+
+/**
+ * 每个源的每轮查询预算：结构化源 = min(MAX_DISCOVERY_PLAN_QUERIES, floor(公司帽 / 25))
+ * （off 默认 100/25 = 4 条；公司帽 <25 时为 0 条，即一轮不跑该源）；
+ * 试跑源按 §11 收紧为 min(MAX_DISCOVERY_PLAN_QUERIES, max(1, floor(20/25))) = 1 条（≤25 条）；
+ * 零成本本地库（registry_frame / channel_catalog）不进试跑缩水。
+ * 去帽模式（DISCOVERY_UNCAPPED=on）下默认换算回 66 条 = 全部计划查询数，且当存在旧的显式
+ * 静态公司帽时，对非零预算按目标市场数保底（不超过 66），确保多国寻源不被砍剩单国。
  * public_web 是兜底源，不设查询预算（其总量由下游公司池约束，见设计 §11 更正）。
  */
 export function sourceQueryBudgets(
   trialProviders: ReadonlySet<string>,
   config: SourceQueryBudgetConfig,
   providerKeys: readonly string[],
+  options: SourceQueryBudgetOptions = {},
 ): Record<string, number | undefined> {
+  const uncapped = options.uncapped ?? discoveryUncappedEnabled();
+  const marketFloor =
+    uncapped &&
+    typeof options.targetCountryCount === 'number' &&
+    Number.isFinite(options.targetCountryCount) &&
+    options.targetCountryCount > 1
+      ? Math.min(MAX_DISCOVERY_PLAN_QUERIES, Math.floor(options.targetCountryCount))
+      : 0;
   const budgets: Record<string, number | undefined> = {};
   for (const key of providerKeys) {
     if (key === 'public_web') continue;
-    const trial = trialProviders.has(key);
+    const trial = !LOCAL_ZERO_COST_SOURCES.has(key) && trialProviders.has(key);
     const cap = trial ? config.trialMaxCompanies : config.structuredRunCap;
-    const budget = Math.floor(cap / MAX_DISCOVERY_PROVIDER_RECORDS);
-    budgets[key] = trial ? Math.max(1, budget) : budget;
+    const raw = Math.floor(cap / BUDGET_RECORDS_PER_QUERY);
+    const base = Math.min(MAX_DISCOVERY_PLAN_QUERIES, trial ? Math.max(1, raw) : raw);
+    budgets[key] =
+      base > 0 && marketFloor > 0
+        ? Math.min(MAX_DISCOVERY_PLAN_QUERIES, Math.max(base, marketFloor))
+        : base;
   }
   return budgets;
 }
@@ -507,15 +542,18 @@ export function routePlannerQueries<Q extends PlanQueryShape>(
   let underBudget = copies;
   let budgetApplied = copies;
   if (mode !== 'off' && sources.sourceBudgets) {
-    const bySource = new Map<string, Array<{ index: number; priority: number }>>();
+    const bySource = new Map<string, Array<{ index: number; priority: number; countryKey: string | null }>>();
     copies.forEach((copy, index) => {
-      const hint = filtersRecord(copy.query.filters).source_hint;
+      const filters = filtersRecord(copy.query.filters);
+      const hint = filters.source_hint;
       // public_web 是兜底源：即使调用方误传预算也永不裁剪。
       if (typeof hint !== 'string' || hint === 'public_web') return;
       const budget = sources.sourceBudgets?.[hint];
       if (budget === undefined) return;
+      const isoCodes = targetCountryCodes({ filters: { country: filters.country } });
+      const countryKey = isoCodes.length === 1 ? isoCodes[0]!.toUpperCase() : null;
       const list = bySource.get(hint) ?? [];
-      list.push({ index, priority: planPriority(copy.query.priority) });
+      list.push({ index, priority: planPriority(copy.query.priority), countryKey });
       bySource.set(hint, list);
     });
     if (bySource.size) {
@@ -524,10 +562,31 @@ export function routePlannerQueries<Q extends PlanQueryShape>(
       for (const [hint, list] of bySource) {
         const budget = sources.sourceBudgets[hint] ?? 0;
         for (const entry of list) budgeted.add(entry.index);
-        list
-          .sort((left, right) => left.priority - right.priority || left.index - right.index)
-          .slice(0, budget)
-          .forEach((entry) => keep.add(entry.index));
+        if (budget <= 0) continue;
+        const sorted = [...list].sort(
+          (left, right) => left.priority - right.priority || left.index - right.index,
+        );
+        // 多国目标市场裁剪时按国家轮询保底（每国先取优先级最高 1 条，再按优先级补足剩余配额），
+        // 避免单个国家占满全部预算而丢掉其余目标市场。无国家标签时退化为纯优先级顺序。
+        const selected: typeof sorted = [];
+        const pickedIndices = new Set<number>();
+        const seenCountries = new Set<string>();
+        for (const entry of sorted) {
+          if (selected.length >= budget) break;
+          if (entry.countryKey && !seenCountries.has(entry.countryKey)) {
+            seenCountries.add(entry.countryKey);
+            selected.push(entry);
+            pickedIndices.add(entry.index);
+          }
+        }
+        for (const entry of sorted) {
+          if (selected.length >= budget) break;
+          if (!pickedIndices.has(entry.index)) {
+            selected.push(entry);
+            pickedIndices.add(entry.index);
+          }
+        }
+        selected.forEach((entry) => keep.add(entry.index));
       }
       underBudget = copies.filter(
         (_, index) => !budgeted.has(index) || keep.has(index),
@@ -865,6 +924,47 @@ export function withSourceCoverage(
     if (fill) additions.push(fill);
   }
   return additions.length ? [...queries, ...additions] : (queries as PlanQueryShape[]);
+}
+
+/**
+ * 统一将查询 filters.country 中可无歧义识别的单一国家词规范化为大写两位 ISO 码
+ * （如 "Germany" / "德国" → "DE"、"United Kingdom" → "GB"），避免模型查询写英文全称而
+ * 确定性补齐写 ISO 码导致前端市场栏中英文混排且重复（如 "Germany · 德国"）。
+ * 无法无歧义解析为单一国家的地区词（如 "DACH"）原样保留。
+ */
+export function normalizePlanQueryCountries<Q extends PlanQueryShape>(queries: readonly Q[]): Q[] {
+  const normalizeOne = (raw: unknown): unknown => {
+    if (typeof raw !== 'string') return raw;
+    const trimmed = raw.trim();
+    if (!trimmed) return raw;
+    const stripped = stripMarketQualifier(trimmed);
+    const codes = targetCountryCodes({ filters: { country: [stripped] } });
+    return codes.length === 1 ? codes[0]!.toUpperCase() : raw;
+  };
+  return queries.map((query) => {
+    const filters = filtersRecord(query.filters);
+    const country = filters.country;
+    if (country === undefined || country === null) return query;
+    let nextCountry: unknown;
+    if (Array.isArray(country)) {
+      const seen = new Set<string>();
+      const out: unknown[] = [];
+      for (const item of country) {
+        const mapped = normalizeOne(item);
+        const dedupeKey = typeof mapped === 'string' ? mapped.trim().toUpperCase() : null;
+        if (dedupeKey && seen.has(dedupeKey)) continue;
+        if (dedupeKey) seen.add(dedupeKey);
+        out.push(mapped);
+      }
+      nextCountry = out;
+    } else {
+      nextCountry = normalizeOne(country);
+    }
+    return {
+      ...query,
+      filters: { ...filters, country: nextCountry },
+    };
+  });
 }
 
 /** registry_frame 平台表（无 RLS，app_user 只读）的最小读取面：事务客户端与连接客户端都满足。 */

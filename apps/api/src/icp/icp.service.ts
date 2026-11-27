@@ -45,6 +45,7 @@ import {
   icpMatchesRegisteredFairs,
   isSourceRunnable,
   loadRegistryFrameCountries,
+  normalizePlanQueryCountries,
   plannerSourcePrompt,
   plannerVisibleSources,
   routePlannerQueries,
@@ -607,10 +608,13 @@ export class IcpService {
     );
     // Q33② cheap-first：每源每轮查询预算（结构化源默认 4 条 ≈ ≤100 家；试跑源 1 条 ≈ ≤25 家；
     // public_web 兜底不设预算）。enforce 时才实际裁剪，shadow 由 routePlannerQueries 只统计。
+    // 去帽模式下按 ICP 显式选定的目标国家数保底，避免旧的静态公司帽把多国计划裁剩单国。
+    const targetCountryCount = boundedTargetCountries(icp?.targetMarkets).length;
     const sourceBudgets = sourceQueryBudgets(
       trialProviders,
       sourceQueryBudgetConfig(),
       [...new Set(enabledSources.map((source) => source.providerKey))],
+      { targetCountryCount },
     );
     if (!icp) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'icp not found' } });
     if (icp.status !== 'ACTIVE') {
@@ -655,7 +659,11 @@ export class IcpService {
       ? await this.feedback.plannerNote(ctx, icpId).catch(() => null)
       : null;
     const scenarioNote = buyerScenarioPlannerNote(scenario);
-    const queryPlanPrompt = `ICP 定义：\n${JSON.stringify(icpBrief, null, 2)}\n\n请生成多源查询计划，输出中文 rationale。\n${plannerSourcePrompt(plannerSources)}\n${plannerKeywordLanguage(icp.targetMarkets, icp.companyAttributes)}${feedbackNote ? `\n\n${feedbackNote}` : ''}${scenarioNote}`;
+    const multiMarketNote =
+      targetCountryCount > 1
+        ? `\n多国目标市场要求：ICP 指定了 ${targetCountryCount} 个目标市场，请按目标市场分散规划查询（每个目标市场至少覆盖 1 组以上核心源查询），不要全部集中在第一个国家；filters.country 请统一写两位 ISO 国家码（如 DE、GB、NL）。`
+        : '\nfilters.country 请优先写两位 ISO 国家码（如 DE、GB、NL）。';
+    const queryPlanPrompt = `ICP 定义：\n${JSON.stringify(icpBrief, null, 2)}\n\n请生成多源查询计划，输出中文 rationale。\n${plannerSourcePrompt(plannerSources)}\n${plannerKeywordLanguage(icp.targetMarkets, icp.companyAttributes)}${multiMarketNote}${feedbackNote ? `\n\n${feedbackNote}` : ''}${scenarioNote}`;
     const runPlanner = (prompt: string) => executeIcpBudgetedTask<QueryPlanModelOutput>({
       budgetStore: this.budgetStore ?? new UnavailableBudgetStore('ICP query-plan generation requires an authoritative BudgetStore'),
       binding,
@@ -754,6 +762,7 @@ export class IcpService {
     queries = withIcpSniperAndSeedFilters(queries, icp.companyAttributes);
 
     queries = prepareBuyerScenarioQueries(queries, scenario, icp.targetMarkets);
+    queries = normalizePlanQueryCountries(queries);
 
     const queryPlanId = result.durableReceipt
       ? domainAggregateIdForReceipt(result.durableReceipt, 'discovery.query_plan')
