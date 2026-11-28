@@ -7,6 +7,7 @@
 > 决策基线：Gate 2 推荐组合、`DEC-FE-P4-001..011`、`DEC-FE-P5-001..010`、`DEC-FE-P6-001..012`、`DEC-FE-P7-001..012` 与 `DEC-FE-P8-001..012` 于 2026-07-20 获产品负责人批准；`DEC-AIDEV-001..002` 于 2026-07-24、`DEC-AIDEV-003` 于 2026-07-25 获产品负责人批准；`DEC-FE-POSTGATE-001` 于 2026-08-02 获产品负责人批准；2026-07-23 文档瘦身授权仅取代其中历史工作包处置方式
 > 当前工程核验基线：`origin/main@d2c93dd6bea0348381286558896b395c84945171`；Program A historical delta-audit base=`23d111f7b400403deb7466abf34ab709685b8376`，closing packet=`91cae351795cceced59893bcf552c2b502a4ebaa`，clean、`MERGE_HEAD=NONE`、在 `ed615d1b` 后有 41 commits；`b57af498` 是整合 historical base `23d111f7` 的 two-parent provenance。该 packet 不是已接纳的 Program A source，任何后续 head/dirty/index/merge 变化均须重开 delta audit。
 > 注（2026-11-02）：上一行是 2026-08 那次 G0 审计的 provenance；当前工程门裁决与事实基线以 [status/current.md](../status/current.md) 为准。
+> 注（2026-11-28，D3 事实校准）：现役 SaaS 应用仓已明确为 [gain-saas](https://github.com/mlhjyx/gain-saas)（Vue 3 / Vben 5 / Ant Design Vue 前端、控制面、现役 QGO/SAO/Outcome、钱包源码与 R4 平台权威；2026-10-31 起取代已退役的 GrowthOS）。下表保留既有全部 Decision / Conflict / Blocker ID、原始状态与安全默认，不擅自将未获独立批准的 `OPEN_DECISION` 或 `INPUT_BLOCKED` 改为 `RESOLVED`，仅对「现役仓归属、GrowthOS 退役与现役 QGO 源码」补齐带日期注记。
 
 本表是 Conflict/Decision ID、当前状态、唯一 Owner 和裁决位置的当前唯一登记。方案比较、作者 dry-run 和阶段审批过程保留在 Git/PR；稳定结论、阻塞项和后续替代必须回写本表或相应主题事实源。
 
@@ -76,16 +77,16 @@ ExecutionAuthority
 | Conflict ID | 主题 | 当前状态 | 唯一 Owner | 裁决或下一动作 |
 |---|---|---|---|---|
 | `CON-FE-001` | `/global/frontend` README 称空但实际有源码 | `RESOLVED` | `OWN-SAAS-FE` | 定义为 `LOCAL_UNCONTROLLED` Mock 原型；不再用 README 判断空/非空 |
-| `CON-FE-002` | 本地前端无 Git provenance，却写阶段完成 | `INPUT_BLOCKED` | `OWN-SAAS-FE` | 正式 repo/remote/CI/deploy 未提供；原型不得升级为发布真值 |
+| `CON-FE-002` | 本地前端无 Git provenance，却写阶段完成 | `INPUT_BLOCKED` | `OWN-SAAS-FE` | 正式 repo/remote/CI/deploy 未提供；原型不得升级为发布真值（2026-11-28 注：现役 SaaS 前端已定位于 [gain-saas](https://github.com/mlhjyx/gain-saas) `apps/web`，具备 remote、CI 与本机 SPA 制品；`/global/frontend` 原型仍不得升级，独立站前端施工 Owner 与验收仍按 `BLK-FE-001` 保留） |
 | `CON-FE-003` | 旧 Spring identity 与 JWKS/Workspace 边界冲突 | `RESOLVED_WITH_REMEDIATION` | `OWN-SAAS-PLATFORM` | product scope 已裁决 SaaS identity；旧服务隔离/安全处置另立任务 |
 | `CON-FE-004` | Mock 页面被称为“完成” | `RESOLVED` | `OWN-DOC-GOV` | 统一使用多轴状态，页面数量不再作为交付状态 |
 | `CON-FE-005` | 多套一级导航 | `RESOLVED` | `OWN-PRODUCT` | `DEC-FE-P2-003` 六项 IA |
-| `CON-FE-006` | Word Next.js 与本地 Vite/React 技术栈冲突 | `OPEN_DECISION` | `OWN-SAAS-FE` | 正式 repo、部署、团队与迁移证据出现后再做技术方案 |
+| `CON-FE-006` | Word Next.js 与本地 Vite/React 技术栈冲突 | `OPEN_DECISION` | `OWN-SAAS-FE` | 正式 repo、部署、团队与迁移证据出现后再做技术方案（2026-11-28 注：现役 `gain-saas` 前端为 Vue 3 / Vben 5 / Ant Design Vue；Next.js/React、双端改造与去租户化仍属待定后续输入，维持 `OPEN_DECISION`） |
 | `CON-FE-007` | 主工作区用户删除/未跟踪资料与分支基线不同 | `MITIGATED` | `OWN-DOC-GOV` | 主工作区现场不恢复、不修改；文档分支只登记 provenance |
 | `CON-FE-008` | `CLAUDE.md` 与 `AGENTS.md` 当前真值冲突 | `RESOLVED` | `OWN-SITE-BE` | `AGENTS.md` 是执行入口，CLAUDE 仅兼容历史 |
 | `CON-FE-009` | 独立站管理被原型放在 secondary | `RESOLVED` | `OWN-PRODUCT` | 一级产品区域；公开站是输出 |
 | `CON-FE-010` | 旧 Spring 默认秘密/管理员种子/JWT fallback 风险 | `OPEN_DECISION` 安全处置 | `OWN-SEC-COMMERCIAL` | 不探测、不复制；由有效 Owner 轮换/封存并审计历史 |
-| `CON-FE-011` | 原型只接旧 API，未接本仓 OpenAPI | `RESOLVED` 事实 / `INPUT_BLOCKED` 实施 | `OWN-SAAS-FE` | 机器 OpenAPI 是合同真值；正式前端未定位前不施工 |
+| `CON-FE-011` | 原型只接旧 API，未接本仓 OpenAPI | `RESOLVED` 事实 / `INPUT_BLOCKED` 实施 | `OWN-SAAS-FE` | 机器 OpenAPI 是合同真值；正式前端未定位前不施工（2026-11-28 注：现役 `gain-saas` 已通过 `packages/engine-client` 固定消费本仓 OpenAPI 合同；旧原型不作为基线，Site Builder 前端未接入） |
 | `CON-FE-012` | architecture 曾手写 OpenAPI 总数并与机器合同漂移 | `RESOLVED` | `OWN-SITE-BE` | 权威文档已删除总数；`governance:verify` 拒绝重新手抄，当前只从机器 OpenAPI 即时解析 |
 | `CON-FE-013` | `INTEGRATION.md` 的 R3-B1 范围与当前 R3-B2/M1-d 合同漂移 | `OPEN_DECISION` 文档整改 | `OWN-SITE-BE` | Phase 4/5 按 operationId/生成类型写接入；当前以 OpenAPI+代码为真 |
 | `CON-FE-014` | 原型展示发布/域名/分析/询盘等超范围承诺 | `RESOLVED` | `OWN-PRODUCT` | `DEC-FE-P2-007`；对应 Capability 保持后置状态 |
@@ -120,10 +121,10 @@ ExecutionAuthority
 | `CON-FE-P2-014` | Workspace 权限与数据范围合同缺失 | `CONTRACT_BLOCKED` | `OWN-SAAS-PLATFORM` | [当前权限规范](../frontend/06-permissions-and-data-visibility.md)已定义模型；服务端合同仍缺 |
 | `CON-FE-P2-015` | 管理员是否默认读取个人工作数据 | `RESOLVED_WITH_REMEDIATION` | `OWN-DATA-PRIVACY` | `DEC-FE-P4-004` 已批准“不自动可读”；具体政策、告知和审计合同仍缺 |
 | `CON-FE-P2-016` | Buyer Intelligence 冻结但产品地图需保留 | `RESOLVED`；历史裁决已被 `DEC-FE-POSTGATE-001` 取代，且 M1 条件已满足 | `OWN-PRODUCT` | IA 继续保留；恢复任务按当前审计与明确 owner 选择，日常可见性仍由 capability/entitlement 决定 |
-| `CON-FE-P2-017` | Campaign/Conversation/Opportunity SoR 与旧原型冲突 | `RESOLVED` 边界 / `INPUT_BLOCKED` 实现 | `OWN-SAAS-PLATFORM` | 归 SaaS；正式 repo/Owner 仍缺 |
+| `CON-FE-P2-017` | Campaign/Conversation/Opportunity SoR 与旧原型冲突 | `RESOLVED` 边界 / `INPUT_BLOCKED` 实现 | `OWN-SAAS-PLATFORM` | 归 SaaS；正式 repo/Owner 仍缺（2026-11-28 注：现役 SaaS 仓已明确为 `gain-saas`，Campaign/Outreach/Opportunity·QGO 源码均在该仓；`OWN-SAAS-PLATFORM` 责任人指派与待验收项仍保留） |
 | `CON-FE-P2-018` | Inquiry 原始接收与 SaaS 投影 ownership | `OPEN_DECISION` | `OWN-PRODUCT` | M2 前 ADR/PDR + privacy/retention contract |
 | `CON-FE-P2-019` | 成功定义被 Build success/Mock 数字替代 | `RESOLVED` 方向 / `INPUT_BLOCKED` 数据 | `OWN-PRODUCT` | 指标+反指标获批；baseline/event/privacy Owner 未定 |
-| `CON-FE-P2-020` | 正式前端仓库未知 | `INPUT_BLOCKED` | `OWN-SAAS-FE` | Gate 4/实际施工前必须指定 repo/remote/CI/deploy |
+| `CON-FE-P2-020` | 正式前端仓库未知 | `INPUT_BLOCKED` | `OWN-SAAS-FE` | Gate 4/实际施工前必须指定 repo/remote/CI/deploy（2026-11-28 注：现役 SaaS 前端仓已明确为 `gain-saas` `apps/web`，具备 remote、CI 与本机 SPA 制品；针对 `docs/frontend/` 独立站纵切的正式前端 Owner 指派与施工接纳仍由 `BLK-FE-001` 保留跟踪） |
 | `CON-FE-P2-021` | 设计事实源未知 | `INPUT_BLOCKED` | `OWN-DESIGN` | Gate 4/实际设计前指定设计 Owner、工具、资产版本和权利 |
 | `CON-FE-P2-022` | frozen/deferred/unavailable 的 UI 表达 | `RESOLVED_WITH_REMEDIATION` | `OWN-SAAS-PLATFORM` | Gate 4 已批准三态和服务端 capability/entitlement；实际 manifest/allowed-actions 仍受 `BLK-FE-003` 阻塞 |
 
@@ -131,13 +132,15 @@ ExecutionAuthority
 
 | Blocker ID | 缺失输入/决定 | Accountable Owner | 最迟 Gate | 阻止范围 | 安全默认 |
 |---|---|---|---|---|---|
-| `BLK-FE-001` | 正式 SaaS 前端 repo、remote、CI、deploy 与实际 Owner | `OWN-SAAS-FE` | 实施 W0/任何前端施工前 | as-built 客户端架构、实现和发布 | `/global/frontend` 只读 Mock；蓝图保持 stack-neutral |
+| `BLK-FE-001` | 正式 SaaS 前端 repo、remote、CI、deploy 与实际 Owner（2026-11-28 注：现役获客 SaaS 前端仓已定位于 `gain-saas` `apps/web` 且有 remote/CI/本机 SPA 制品；本项仍保留跟踪实际 Owner 指派与独立站前端施工接纳） | `OWN-SAAS-FE` | 实施 W0/任何前端施工前 | as-built 客户端架构、实现和发布 | `/global/frontend` 只读 Mock；蓝图保持 stack-neutral |
 | `BLK-FE-002` | 设计 Owner、设计事实源、Token/组件/资产版本与权利 | `OWN-DESIGN` | 视觉定稿/实现前 | 设计定稿、视觉回归、组件复用 | 书面低保真可审；不把代码截图/Readdy 当规范 |
 | `BLK-FE-003` | SaaS Workspace/Membership/Role/Entitlement/allowed actions 合同 | `OWN-SAAS-PLATFORM` | 实际施工前 | Shell、权限、入口可见性和发布授权 | 服务端 fail-closed，前端不自建角色表 |
 | `BLK-FE-004` | Claim public review/impact contract 或正式运营兜底 SOP | `OWN-TRUTH-BE` | 当前纵切实现/验收前 | 首个纵切事实 Gate | 自动批准禁止；显式阻塞 |
 | `BLK-FE-005` | 指标事件、基线、隐私/保留和实际 Data Owner | `OWN-DATA-PRIVACY` | 实际 tracking/指标验收前 | KPI 验收、tracking 和发布学习 | 不引入 tracking SDK，不用 Mock 数字 |
 | `BLK-FE-006` | QA、运营、安全/商业实际责任人 | `OWN-PRODUCT` | 实现验收/相应 Release Gate | 独立证据、人工恢复、License/套餐和 Release Gate | 责任帽子保持 `UNASSIGNED`，AI 不代签 |
 | `BLK-FE-007` | Publish/Domain/Rollback/Inquiry 的对象、合同、infra 和合规 | `OWN-PRODUCT` | 各后续 Capability Gate | 公网发布与访客转化 | 不纳入首个用户承诺 |
+
+> 2026-11-28 现役仓注记（D3）：`gain-saas`（Vue 3 / Vben 5 / Ant Design Vue）已成为现役 SaaS 前端与控制面仓库，具备 GitHub remote、CI 与本机部署制品（见 [gain-saas 现役产品说明](https://github.com/mlhjyx/gain-saas/blob/main/apps/web/PRODUCT.md) 与 [gain-saas 当前状态](https://github.com/mlhjyx/gain-saas/blob/main/docs/status/current.md)），不再属于「仓库/CI/部署未知」。上述 `BLK-FE-001..007` 均继续保留不关闭，用于约束独立站前端施工接纳、正式责任人指派、服务端权限合同与公网发布边界。
 
 ## 6. Gate 4 已批准决策
 
@@ -257,8 +260,8 @@ PRD 4.0（L0 产品宪章 §9.4，目前在私有目录，入库待 `PRD4-D10`�
 | `PRD4-D1` | Site Builder 正式冻结（文档、CI、ruleset） | `OPEN_DECISION` | `OWN-PRODUCT` | 2026-09-23 只说「维持现状」；ruleset 仍要求 `renderer visual scope`；ruleset 改动须随本项一并授权 |
 | `PRD4-D2` | R4 平台授权冻结范围 | `RESOLVED` | `OWN-PRODUCT` | 2026-10-10 拍板冻结；**2026-10-31 产品负责人重开，当日完成迁移**：平台权威（机器 token、capability、撤销与恢复通道）已从 GrowthOS 迁到 gain-saas，GrowthOS 九容器退役（卷保留）。撤销投递链 2026-11-01 用真实 committed Grant 实测打通（含自动触发与受审计重开，[live 证据](../evidence/2026-11-01-platform-revocation-autotrigger-live.md)），`BLOCKED_PENDING_BACKEND_4A4` 不再成立。schedule 是否恢复运行仍是单独决定。计划与阶段见 gain-saas `docs/technical/r4-platform-authority-migration.md` |
 | `PRD4-D3` | 客户写入准入与 platform Worker 就绪解耦 | `RESOLVED` | `OWN-PRODUCT` | 2026-10-10 拍板方案 A；#627 于 2026-10-11 上线；方案 C 另立任务 |
-| `PRD4-D4` | QGO 宿主（本仓最小 `opportunity` 模块 vs GrowthOS） | `OPEN_DECISION` | `OWN-PRODUCT` | RL3 前定；PRD 4.0 L0/L1 建议本仓、2026-10-11 精读建议 GrowthOS、ADR-001 现行是 SaaS，三处相反 |
-| `PRD4-D5` | GrowthOS 转普通 git 仓；审阅 UI 放哪 | `OPEN_DECISION` | `OWN-PRODUCT` | 仍是归档 + 补丁栈形态 |
+| `PRD4-D4` | QGO 宿主（本仓最小 `opportunity` 模块 vs GrowthOS） | `OPEN_DECISION` | `OWN-PRODUCT` | RL3 前定；PRD 4.0 L0/L1 建议本仓、2026-10-11 精读建议 GrowthOS、ADR-001 现行是 SaaS，三处相反（2026-11-28 注：GrowthOS 已于 2026-10-31 退役；现役 QGO/SAO/CommercialOutcome 源码与主状态当前在 `gain-saas`，见 `apps/server/src/qgo/qgo.service.ts`；未来宿主归属维持 `OPEN_DECISION`，变更后端边界仍须修订 `ADR-001` 并三方书面确认） |
+| `PRD4-D5` | GrowthOS 转普通 git 仓；审阅 UI 放哪 | `OPEN_DECISION` | `OWN-PRODUCT` | 仍是归档 + 补丁栈形态（2026-11-28 注：GrowthOS 九容器已于 2026-10-31 随 `PRD4-D2` 退役、卷仅作历史回退保留，现役产品控制面由普通 Git 仓库 `gain-saas` 承接；本决策所指的审阅 UI 最终归属仍待确认，保留 `OPEN_DECISION`） |
 | `PRD4-D6` | 开发期允许本地 Grant issuer | `OPEN_DECISION` | `OWN-PRODUCT` | Grant 现由 gain-saas 签发（2026-10-31 起，取代已退役的 GrowthOS）；「开发期是否允许本地 issuer」本身仍未拍板 |
 | `PRD4-D7` | 官方搜索 API（Brave 免费档）注册 | `RESOLVED_WITH_REMEDIATION` | `OWN-PRODUCT` | 2026-10-11「同意，授权」；key 已入运行配置；代码与 provider-registry 尚无消费者，存储权方案未执行 |
 | `PRD4-D8` | design partner 人选与数据使用授权 | `OPEN_DECISION` | `OWN-PRODUCT` | 没有人选、合同或数据授权记录；卡 RL1「商机」「节奏」与客户打分 |

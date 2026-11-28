@@ -3,8 +3,9 @@
 > 文档 ID：`DOC-DOCUMENTATION-RULES-001`
 > 生命周期：`GUIDE`
 > 制定日期：2026-10-25
-> 适用范围：整个产品的人类文档，第一阶段统一维护在本仓库 `docs/`。
-> 依据：产品负责人在本次讨论中采纳的最简文档组织方案与模块分工方式；现有机器约束见[文档校验规则](governance/docs-verification.md)。
+> 最后核验：2026-11-28（按 `docs-verification-policy.json` 与两仓现行 CI 核对角色表与机检覆盖）。
+> 适用范围：整个产品的人类文档放置约定。本仓维护规则正文与引擎/产品总设计文档；现役 SaaS 仓的目录差异与文档校验说明见 [gain-saas 文档维护规则](https://github.com/mlhjyx/gain-saas/blob/main/docs/documentation-rules.md)。
+> 依据：产品负责人在本次讨论中采纳的最简文档组织方案与模块分工方式；现有机器约束见[文档校验规则](governance/docs-verification.md)与[机器政策](governance/docs-verification-policy.json)。
 
 本文件统一规定文档放在哪里、何时拆分、如何引用与归档。各模块负责人依据本规则迁移和维护内容；总设计与跨模块规则由工作群讨论决定，再由指定维护人回写。
 
@@ -121,20 +122,21 @@ docs/
 
 ## 8. 文档角色表
 
-每类文档只承担一个角色，一类事实只有一个家；其他文档只引用、不复制。
+每类文档只承担一个角色，一类事实只有一个家；其他文档只引用、不复制。下表「机器校验」列按[机器政策](governance/docs-verification-policy.json)与 `scripts/verify-docs.mjs` 实际执行范围记录，不代表已新增校验门；两仓关键入口另可用 `scripts/docs-drift-report.mjs` 做跨仓只读漂移检查（`gain-saas` 的 `docs_only` CI 当前不含 Markdown 链接机检）。
 
 | 角色 | 规范位置 | Owner | 机器校验 |
 | --- | --- | --- | --- |
-| 执行入口 | `AGENTS.md`、`CLAUDE.md` | 文档治理 Owner | 人审 |
-| 门户与导航 | `docs/README.md` | 文档治理 Owner | 结构、链接、生命周期 |
-| 放置规则 | `docs/documentation-rules.md`（本文件） | 文档治理 Owner | 人审 |
-| 术语与事实状态 | `docs/governance/terminology-and-status.md` | 文档治理 Owner | 链接、Registry 引用 |
-| 当前状态 | `docs/status/current.md` | 产品负责人 | 权威页元数据 |
-| 待验证台账 | `docs/status/pending-verification.md` | 产品负责人 | 生命周期、链接 |
-| 决策 | `docs/adr/registry.md` | 架构 Owner | 权威页元数据 |
-| 证据 | `docs/evidence/` | 对应证据 Owner | RuntimeEvidence schema |
-| 运维专题 | `docs/backend/*.md` | 各专题 Owner | 生命周期、链接 |
-| 模块设计 | `docs/modules/<模块>/product.md`、`technical.md` | 模块 Owner | 生命周期 |
-| 历史 | `docs/archive/` | 文档治理 Owner | 历史 banner |
+| 执行入口 | `AGENTS.md`、`CLAUDE.md` | 文档治理 Owner | 人审（另有 `governance-document-drift.spec.mjs` 定向回归与跨仓漂移提示） |
+| 门户与导航 | `docs/README.md` | 文档治理 Owner | 受控文档：结构、ID、状态、链接、Registry 引用 |
+| 放置规则 | `docs/documentation-rules.md`（本文件） | 文档治理 Owner | 通用链接/围栏/ID 唯一性/敏感模式扫描；语义人审 |
+| 产品总设计 | [docs/product.md](product.md) | 产品负责人 | 通用链接/围栏/ID 唯一性/敏感模式扫描；语义人审（未纳入受控/权威清单） |
+| 术语与事实状态 | `docs/governance/terminology-and-status.md` | 文档治理 Owner | 受控文档：结构、ID、状态、链接、Registry 引用 |
+| 当前状态 | `docs/status/current.md` | 产品负责人 | 权威当前页元数据、结构、链接、时效告警与定向回归 |
+| 待验证台账 | `docs/status/pending-verification.md` | 产品负责人 | `lifecycleRequired`：生命周期 token、链接、通用结构 |
+| 决策 | `docs/adr/registry.md` | 架构 Owner | 权威当前页元数据、结构、链接、时效告警与定向回归 |
+| 证据 | `docs/evidence/` | 对应证据 Owner | 不可变证据：链接与敏感模式；`docs/evidence/runtime/` 另走 RuntimeEvidence schema |
+| 运维专题 | `docs/backend/*.md` | 各专题 Owner | `lifecycleRequired`：生命周期 token、链接（`provider-registry.md` 与 `oss-registry.md` 另属受控检查） |
+| 模块设计 | `docs/modules/<模块>/product.md`、`technical.md` | 模块 Owner | 通用链接/围栏/ID 唯一性/敏感模式扫描；生命周期当前按人工约定维护（未纳入 `lifecycleRequired`） |
+| 历史 | `docs/archive/` | 文档治理 Owner | 通用链接/围栏/敏感模式扫描；历史 banner 机检当前只覆盖政策登记的 Site Builder 历史路径 |
 
 新增角色、改变归属或改变存储位置必须先改本表并走 PR；不得在正文中自行建立平行清单。

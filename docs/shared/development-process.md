@@ -80,7 +80,7 @@ ADR 的 `ACCEPTED` 只表示决定生效，不等于实现或验收；`docs/evid
 
 **批次规则**：同主题的 micro 改动可以攒一个工作段（或一天）合成一个 PR；不相关的修复不合并，保留 bisect 与 revert 的清晰度；紧急热修单独走热修通道。**已开 PR 的同主题修正追加到该 PR，不新开**——例如 PR 因门禁超限需要压缩入口文件、或补一条规则，属于原 PR 的收尾。
 
-**为什么不是「改一下就提 PR」**：入库必须经过 PR（主干保护），但 PR 按逻辑单元开，不按编辑次数开。审查经济学也支持这一点：业界综述给出的量级是 <200 行的变更批准快约 3 倍、缺陷少约 40%，每多 100 行约多 25 分钟审查，超过约 1,000 行缺陷检出率明显下降。参考：Google [Small CLs](https://google.github.io/eng-practices/review/developer/small-cls.html)、GitHub 原生 stacked PR（2026-10 GA）、Graphite merge queue 指南。
+**为什么不是「改一下就提 PR」**：入库必须经过 PR（主干保护），但 PR 按逻辑单元开，不按编辑次数开。审查经济学也支持这一点：业界综述给出的量级是 <200 行的变更批准快约 3 倍、缺陷少约 40%，每多 100 行约多 25 分钟审查，超过约 1,000 行缺陷检出率明显下降。参考：Google [Small CLs](https://google.github.io/eng-practices/review/developer/small-cls.html)、Graphite merge queue 指南。
 
 **拆不动怎么办**：先把纯重构或 expand 步骤单独合入（与行为变化分开）；宽范围机械改动（整文件删除、自动重命名）按 Google 规则视为小改动。
 

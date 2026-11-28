@@ -3,9 +3,9 @@
 > 文档 ID：`DOC-PRODUCT-DESIGN-001`
 > 生命周期：`CURRENT`
 > 维护 Owner：`OWN-PRODUCT`（具体人员与模块分工由责任表承接）
-> 最近实质更新：2026-10-27
+> 最近实质更新：2026-10-27（2026-11-28 补充现役两仓落点与待裁决边界对照，未改动目标模块与待决项）
 > 适用范围：整个 Global 产品的目标、模块职责、核心业务对象和跨模块协作。
-> 当前事实来源：[产品范围与本仓边界](product-scope.md)、[当前架构](architecture/current.md)、[ADR/PDR 注册表](adr/registry.md)、[当前状态](status/current.md)及[发布路线](status/release-plan.md)。
+> 当前事实来源：[产品范围与本仓边界](product-scope.md)、[当前架构](architecture/current.md)、[ADR/PDR 注册表](adr/registry.md)、[当前状态](status/current.md)、[发布路线](status/release-plan.md)，以及现役 SaaS 仓的 [gain-saas 现役产品说明](https://github.com/mlhjyx/gain-saas/blob/main/apps/web/PRODUCT.md) 与 [gain-saas 当前状态](https://github.com/mlhjyx/gain-saas/blob/main/docs/status/current.md)。
 > 文档规则：[文档目录与维护规则](documentation-rules.md)。
 > 来源承接：原工作区根目录 `global-backend-product-logic-guide.md`，本次整体迁移至 `docs/product.md`。
 
@@ -20,6 +20,7 @@
 | 日期 | 主要变更 | 原因 | 影响范围 | 确认来源 |
 | --- | --- | --- | --- | --- |
 | 2026-10-27 | 将根目录产品逻辑稿整体迁移为 `docs/product.md`，补齐总设计定位、文档信息与来源记录；修正相对链接，将时间敏感状态改为引用集中状态页 | 按统一目录规则建立整个产品的总设计入口 | 文档角色、路径、入口与引用；保留九模块、对象定义、业务图及现有待决项 | 产品负责人本次明确要求升级并移动文档 |
+| 2026-11-28 | 补充现役 `gain-saas` 入口链接，在第六章对齐现役两仓落点（现役 QGO、受控触达代码、预付积分钱包代码与商业采用边界、建站租户入口现状） | 按 G4 / D3 事实校准消除目标设计与现役两仓源码之间的误读 | 头部事实来源链接与第六章对照说明；不改动九模块目标定义、第四章对象归属与第七章未决项 | 产品负责人批准 Global 治理实施方案 D3 |
 
 ## 阅读前：核心术语
 
@@ -587,17 +588,17 @@ GoodJob 的对照价值在于说明 CRM 侧重销售接手后的买家关系、�
 
 | 差异 | 当前仓库权威边界 | 九模块目标蓝图 | 本文处理方式 |
 |---|---|---|---|
-| 触达、会话与商机 | 当前 `global-backend` 仓库止于 `LeadQualifiedPackage`；触达、Conversation、Opportunity/QGO 归外部 SaaS | 完整产品包含模块 7 和模块 8 | 将它们作为完整产品模块，不宣称由当前仓库实现 |
-| 社媒传播与 GEO | 当前 MVP 未提供 Campaign、内容发布和多渠道执行 | 目标产品包含模块 6 | 作为目标能力保留，当前状态仍是后续建设 |
+| 触达、会话与商机 | 当前 `global-backend` 仓库止于 `LeadQualifiedPackage`；触达、Conversation、Opportunity/QGO 归现役 SaaS 仓 `gain-saas`（现役 QGO/SAO/Outcome 与受控邮件触达代码均在该仓，外发源代码已接入，正式发送状态与验收见状态页；QGO 未来宿主仍待 `PRD4-D4`） | 完整产品包含模块 7 和模块 8 | 将它们作为完整产品模块，不宣称由当前后端仓库实现；实际状态看 [gain-saas 当前状态](https://github.com/mlhjyx/gain-saas/blob/main/docs/status/current.md) |
+| 社媒传播与 GEO | `gain-saas` 已有 Campaign 控制面（默认影子模式）与邮件触达组件，尚未建成普通用户统一的多社媒公开发布及 GEO 效果回收主线 | 目标产品包含模块 6 | 作为目标能力保留，不把局部 Campaign/触达组件当作完整多渠道公开发布 |
 | 买家知识网络 | 当前资料分散在 Buyer Intelligence 的采集、身份、证据和信号能力中 | 将其提升为独立战略模块 | 这是产品模块重构建议，尚未改变现有仓库 ownership |
 | 买家画像 / ICP | 当前[产品范围](product-scope.md)将长期 `ICPVersion` 归 SaaS Growth Strategy | 模块 4 负责形成和使用本轮任务级买家画像 | 长期画像与单轮快照的归属尚未对齐；确认前不得据此迁移现有对象责任 |
 
 因此，本文同时采用两层视角：
 
 - **目标产品层**：九个模块共同构成完整海外增长产品；
-- **当前仓库层**：现阶段主要拥有买家智能和独立站后端，其他模块由 SaaS 或未来产品建设承接。
+- **当前仓库层**：现阶段由两仓共同交付：`global-backend` 负责卖家知识、买家知识与采集、买家发现/资格与不可变 `LeadQualifiedPackage`，以及独立建站上下文（租户 SaaS 端目前无普通建站入口，正式冻结待 `PRD4-D1` 裁决）；`gain-saas`（Vue 3 / Vben 5 / Ant Design Vue，一企一空间，2026-10-31 起取代已退役的 GrowthOS）负责账户与工作空间、任务尝试 `TaskRun`、受控触达代码、现役 QGO/SAO/Outcome、独立 `/ops` 运营台、官网合作意向 `cooperation` 模块及预付积分钱包代码（代码默认关闭 `WALLET_BILLING_ENABLED=false`，实际开关与商业收费待产品负责人裁决）。
 
-“资格交付包 → Opportunity → 人工 QGO → 结果反馈”定义产品的目标主路径；触达、会话与这条路径协作，但不以 QGO 为统一开关。该主路径及独立站公开发布、询盘和正式用户体验的实际完成情况统一查阅[当前状态](status/current.md)及对应验收证据，本页不复制时点读数。目标设计用于指导产品方向，不能替代当前实现、运行或用户验收证据。
+“资格交付包 → Opportunity → 人工 QGO → 结果反馈”定义产品的目标主路径；触达、会话与这条路径协作，但不以 QGO 为统一开关。该主路径及独立站公开发布、询盘、钱包商业采用和正式用户体验的实际完成情况统一查阅[本仓当前状态](status/current.md)、[gain-saas 当前状态](https://github.com/mlhjyx/gain-saas/blob/main/docs/status/current.md)及对应验收证据，本页不复制时点读数。目标设计用于指导产品方向，不能替代当前实现、运行或用户验收证据。
 
 ## 七、仍需在产品层决定的问题
 

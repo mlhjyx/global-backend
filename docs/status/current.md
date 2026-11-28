@@ -4,7 +4,7 @@
 > 生命周期：`CURRENT`
 > 状态：`CURRENT`
 > 当前事实来源：[产品范围](../product-scope.md)、[当前架构](../architecture/current.md)、[ADR registry](../adr/registry.md)、[发布路线](../status/release-plan.md)、[冲突与开放决策登记](../governance/conflict-register.md)，以及本页逐项注明的 Git/GitHub 回读与 xin `global_dev` 只读查询
-> 最后核验：2026-11-27（本页开头的源码与 xin 运行形态；历史计数与验收仍以原记录的时间为准）。
+> 最后核验：2026-11-28（以 `backend@a5ef77f64a240129c49cb14d187db40cdaae385e` 与 `gain-saas@ff45fa404701532785e41706dddfb9455701a50d` 核对源码、2026-11-28 CST 时点运行/CI 观测与受控证据基线；折叠区及 11-27 以前的历史计数与验收仍以原记录时间为准）。
 > 写法：按 PRD 4.0 L2 §5 的四问填写——做了什么（四态：未做 / 可运行 / 已验证 / 已验收）、证据、谁验收、怎么回退。四态口径（PRD 4.0 L0 §9.3「4.0 新锁定」的 `D-029`，与待拍板项 `PRD4-D<n>` 不是同一编号序列）尚未逐条拍板，本页先按它组织。2026-09-20 核验的旧版正文见文末[历史](#历史2026-09-20-核验)。
 
 ## 一页结论
@@ -12,11 +12,13 @@
 | 事项 | 核验结论 | 来源 |
 | --- | --- | --- |
 | 已合入源码 | 企业资料分片与后续解析、共享绿色事实域、个人数据加密 v2、流式寻源旁路与终态事件、平台授权轻量模式、建站按开关加载 | [changelog 片段](../roadmap/changelog.d/) · [实现状态](implementation-matrix.md) |
-| 获客与渠道增量（截至 `792e07a6`） | 展会目录采用已审核企业记录，按版本与来源许可写入绿色事实层。Wave 1 增加联系人证据与接受拦截、富集结果读回、Worker 租约丢失后的停止轮询 | [渠道变更](../roadmap/changelog.d/2026-11-27-mainline-a-channel-synergy.md) · [Wave 1](../roadmap/changelog.d/2026-11-27-wave1-precision-intel.md) |
-| 验收覆盖 | 获客验收 F1–F12 接入实际源码的合成数据入口，F13–F15 保留设计自检。多租户、Temporal 与 SaaS 投影的运行串联和正式试点仍需核验 | [验收口径](../roadmap/changelog.d/2026-11-27-e2e-precision-intel.md) |
-| xin 运行观察（2026-11-27） | API 与 Worker 镜像 revision 为 `bd4f2f41`，API readiness HTTP 200。客户 Temporal 与平台 PostgreSQL Temporal 同时在运行 | 镜像 OCI revision、容器状态与本机 readiness 只读回读 |
-| 跨仓交付 | 流式寻源收尾发布 `DiscoveryRunCompleted`。SaaS 消费终态并保护已有终态，部署与客户验证见 [SaaS 状态](https://github.com/mlhjyx/gain-saas/blob/main/docs/status/current.md) | [终态回传变更](../roadmap/changelog.d/2026-11-27-fix-discovery-bypass-lease-and-completed-event.md) |
-| 尚待核验 | 近期获客及建站变更的制品采用、真实普通客户寻源与联系人证据、Temporal 单集群切换和平台 `internal_db` 采用 | [运行开关](../architecture/current.md#运行模式与开关) · [待验证台账](pending-verification.md) |
+| 获客与渠道增量（截至 `a5ef77f6` / #1156） | 2026-11-27 起合入展会目录通用抽取、Wave 1 联系人证据与租约停轮询、英澳巴注册库导入、Google Places 源、寻源 v3 来源/联系人/实收回执（#1141）；2026-11-28 合入 L0.5 缺域补官网与 24h 缓存、平台监控自动纳管、API/Worker 容器健康检查、决策人邮箱双正验真漏斗、fit-v3 Prompt Caching、去帽每源查询预算修复与 ISO2 国家码规范化（#1152–#1156） | [去帽与国别修复](../roadmap/changelog.d/2026-11-28-query-plan-uncapped-budget-and-country-norm.md) · [缓存与健康检查](../roadmap/changelog.d/2026-11-28-prompt-cache-golden-eval-healthchecks.md) · [邮箱验真漏斗](../roadmap/changelog.d/2026-11-28-enrichment-valid-email-funnel.md) · [L0.5 与缓存](../roadmap/changelog.d/2026-11-28-l05-domain-resolution-and-24h-cache.md) · [L0.5 精度与监控](../roadmap/changelog.d/2026-11-28-l05-precision-and-platform-watch-handoff.md) |
+| 主线 CI 与制品发布（2026-11-28 观测） | `backend@a5ef77f6`（#1156）合入后 main push CI 两项失败：`postgres semantics · permissions`（`Runtime lease principal PostgreSQL permissions` 步骤中 native Discovery v3 厂家证据计数期望 1、实际 0，见 [断言](../../apps/api/src/discovery/discovery-v3-operations.postgres.spec.ts)）与汇总检查；同 Git tree `87d57a00…` 在 PR #1156 合入前对应检查通过。同一提交的手动受保护容器镜像发布检查单独通过。**镜像发布与服务就绪不能关闭主线 CI 失败**，根因待隔离复验 | GitHub Actions 只读回读 [PR 对应检查](https://github.com/mlhjyx/global-backend/actions/runs/46064120174/job/140725299586)、[main 失败检查](https://github.com/mlhjyx/global-backend/actions/runs/46064949689/job/140727974608) 与 [main 汇总检查](https://github.com/mlhjyx/global-backend/actions/runs/46064949689/job/140729122386)；[待验证台账](pending-verification.md) `PV-004` |
+| 验收覆盖 | 获客验收 F1–F12 接入实际源码的合成数据入口，F13–F15 保留设计自检。`a5ef77f6` + `ff45fa4` 候选组合尚未完成正常用户端到端验收；多租户、Temporal、SaaS 投影与正式试点仍需核验 | [验收口径](../roadmap/changelog.d/2026-11-27-e2e-precision-intel.md) · [待验证台账](pending-verification.md) `PV-006` |
+| xin 运行观察（2026-11-28 CST 时点读回） | 04:58 CST 切换前为 `1085d5a2…`（镜像 `sha256:a06247b6…`）；05:05:30 CST 切换后及 05:33 CST 复核：API / Worker / platform Worker 三容器均 `running / healthy`，OCI revision `a5ef77f64a240129c49cb14d187db40cdaae385e`、镜像 `sha256:50b3ff38dd630f0672a3aba11d9e63b5f61bded8a91c6291cfc1b45403390b9a`、`/health/build` `attested`（artifact digest `sha256:5adacdd9…`、`migration_revision=20261127180000_google_places_discovery_provider`）、`/api/v1/health/ready` 返回 `200/ready`（05:20 与 05:33 均观测 16/16 硬组件 `ok`）。受管范围观测到 PostgreSQL Temporal 三组件运行，未见旧 SQLite Temporal 容器（旧历史排空与三方路由未单独取证）。仅代表观测时点，不等于实时状态或用户验收 | 2026-11-28 CST 镜像 OCI revision、`/health/build`、`/api/v1/health/ready` 与容器状态只读回读 |
+| 跨仓交付与现役边界 | `gain-saas` 是现役 SaaS 前端和控制面。2026-11-28 Web 与 Worker 于 04:45:01 CST 启动，制品为 `gain-saas-ff45fa4-20261128`，05:33 CST 复核 readiness 为 `200/ok`。详细运行与开关读回见 SaaS 状态。SaaS 实现 Program C 入箱、投影及 ACK，持有现役 QGO/SAO/Outcome 和钱包源码。禁联有五条 SaaS 管理员 BFF 路由，Backend 的 `GET /suppressions` 校验 `compliance:manage` 且仅读取当前工作空间。隔离事件运营恢复、v3 切换所需的 API 绑定、SaaS 合同、`QUEUED` 终态投影和非模型成本聚合仍待处理。`SiteBuildCostSummaryUpdated` 的微美元字符串与 SaaS `budget.spentCents` 待对账 | [终态回传变更](../roadmap/changelog.d/2026-11-27-fix-discovery-bypass-lease-and-completed-event.md) · [gain-saas 当前状态](https://github.com/mlhjyx/gain-saas/blob/main/docs/status/current.md) · [gain-saas 现役产品说明](https://github.com/mlhjyx/gain-saas/blob/main/apps/web/PRODUCT.md) |
+| 受控证据与追踪基线（2026-11-28） | 仓内 `docs/evidence/runtime/` 6 份 RuntimeEvidence（`valid_until` 均为 2026-09-02 或 09-05）均已过期自动降为 `HISTORICAL`；`docs/releases/` 3 份 Release Bundle 均为 `CANDIDATE` / `EXTERNAL_UNVERIFIED`；`docs/governance/delivery-traceability.json` 13 条追踪链全部为 `INTERNAL_ONLY` | [证据索引](../evidence/README.md) · [追踪登记](../governance/delivery-traceability.json) |
+| 尚待核验 | `#1156` main push CI 失败根因、Discovery v3 成组切换前提、正常用户九条旅程验收、现网钱包/触达开关与商业规则、Temporal 历史排空、平台 `internal_db` 采用与个人数据访问审计保留候选边界 | [运行开关](../architecture/current.md#运行模式与开关) · [待验证台账](pending-verification.md) |
 
 RL1 试点范围、G0–G7 定义和退出条件见 [发布路线](release-plan.md)。下面保留此前验收和决策记录，业务计数须按实际使用环境和口径重新核验。
 
@@ -99,7 +101,7 @@ PRD 4.0 待拍板项 D1–D19 的全量状态见[冲突与开放决策登记](..
 
 ## 5. 下一步与需要的决定
 
-当前验收优先复核正常客户寻源、SaaS 终态投影、钱包结算和跨租户边界。每次环境切换分别记录迁移与回退证据，试点与正式发布走现行晋级门。
+当前优先顺序（2026-11-28 核对）：① 查明 `a5ef77f6`（#1156）合入后 main push CI 失败根因及发布前实际证据门；② 在精准候选（`a5ef77f6` + `ff45fa4`）上推进正常用户九条旅程有界验收，并核对事件隔离恢复与 `SiteBuildCostSummaryUpdated` 金额形状；③ 涉及业务行为、权限、费用与发送的高风险事项（Discovery v3 成组切换与非模型成本覆盖、钱包启用与不明受理、触达外发与回复停发、成员写权限/匿名查重、运营 DB 写闸、访问审计保留候选、健康探针口径对齐）按独立规格与产品负责人单独裁决推进。每次环境切换分别记录迁移与回退证据，试点与正式发布走现行晋级门。
 
 以下为 2026-11-02 的分阶段验收记录，近期实现见上方当前核验与[实现状态](implementation-matrix.md)。
 
@@ -108,14 +110,14 @@ PRD 4.0 待拍板项 D1–D19 的全量状态见[冲突与开放决策登记](..
 3. **Phase 2 进行中**：卖家资料库 MVP（seller_document/seller_document_chunk、独立 bucket、presign/commit、Docling→分块→BGE-M3→pgvector 检索、前端资料库 tab）；**Phase 2b** 寻源性能改造与 Phase 2 并行（首批线索 ≤10 分钟、25 家 ≤30 分钟）。
 4. Phase 4「任务对象 + 重试」已立项（含 retry-account 放宽设计评估），排在 Phase 2 之后。
 
-需要产品负责人拍板的：M5 Golden Set 取样口径（20 家名单）；D6 per-tenant LIA 采集页排期；D8 开源融合顺序（theHarvester/social-analyzer、JobSpy、Trafilatura、Common Crawl、跨进程熔断）；`google_patents` 启用条件（等 patent cache 刷新恢复 + BQ 实测）；平台 4 个 schedule 是否恢复运行；`secrets-backup` 交互执行与异地副本；new-api gemini 渠道扩容（换密钥/加渠道）；PRD4-D1（Site Builder 正式冻结）、PRD4-D4/D19（文档各有两案）、PRD4-D8（design partner 人选）等既有待拍板项不变。（PRD4-D12 已于 2026-11-11 拍板，见下。）
+需要产品负责人拍板的：M5 Golden Set 取样口径（20 家名单）；D6 per-tenant LIA 采集页排期；D8 开源融合顺序（theHarvester/social-analyzer、JobSpy、Trafilatura、Common Crawl、跨进程熔断）；`google_patents` 启用条件（等 patent cache 刷新恢复 + BQ 实测）；平台 4 个 schedule 是否恢复运行；`secrets-backup` 交互执行与异地副本；new-api gemini 渠道扩容（换密钥/加渠道）；PRD4-D1（Site Builder 正式冻结）、PRD4-D4/D19（文档各有两案，其中现役 QGO 源码已在 `gain-saas`）、PRD4-D8（design partner 人选）等既有待拍板项不变。（PRD4-D12 已于 2026-11-11 拍板，见下。）
 
 ## 6. 不变的边界与工程门
 
 - 源码合入、单测或 CI 通过不等于运行采用；xin 的运行观察不是 RuntimeEvidence，也不产生可信 Release Bundle。
-- 预付积分钱包的商用账本、界面和验收归 SaaS；引擎的技术预算与供应商成本记录见[运行模式与开关](../architecture/current.md#运行模式与开关)。开发者临时调用另依任务授权。
+- 预付积分钱包的源码、商用账本、界面和验收归 `gain-saas`（代码默认 `WALLET_BILLING_ENABLED=false`，实际环境开关与商业收费待单独核验与批准）；引擎的技术预算与供应商成本记录见[运行模式与开关](../architecture/current.md#运行模式与开关)。开发者临时调用另依任务授权。
 - 当前非运行时模型候选合同仍为 `site-builder-model-candidate-baseline/2026-08-07-v3`，详见[生成页](../site-builder/model-candidate-baseline.md)；它不等于 active route、质量证明或真实 dispatch 授权。
-- 受控触达已建成（M2 步 11，2026-11-08 验收），但**发送默认关闭**：生产发送需产品负责人开启，且真实域名与 SPF/DKIM/DMARC 实检待提供（D1②）。RL1 试点本身不做任何发送。
+- SaaS 源码接入 SMTP 和发送 Worker。已有隔离库与 Mailpit 的历史测试。M2 真实域名外发 11-5 仍待验收，包含实际域名认证及经授权的发送验证。`OUTREACH_SEND_ENABLED` 和 `OUTREACH_SENDER_ENABLED` 的代码默认值均为 `false`，`CAMPAIGN_EXECUTION_SHADOW` 默认 `true`。现役运行开关未知，正式发送待产品负责人批准，RL1 试点的范围为零发送。[M2 步 11 记录](../evidence/2026-11-08-m2-acceptance.md) · [隔离测试索引](../evidence/README.md)
 - `PILOT`/`GA` 晋级门：PRD4-D12 于 2026-11-11 拍板为**产品负责人 SSH 签名回执**（`external_provenance.status=OWNER_SIGNED`，verifier=`PRODUCT_OWNER_SSH_SIGNATURE`），回执绑定 bundle 摘要/commit/证据集/机器 check 结论/审查记录，验证器离线验签；`EXTERNAL_UNVERIFIED` 仍阻断、自证 `VERIFIED` 仍拒绝，RuntimeEvidence 与 Release Bundle 仍是晋级条件。首个真实 `PILOT` 仍需相应 PASS RuntimeEvidence 与产品负责人的签名授权。
 
 工程门 G0–G7 的定义见[发布路线](../status/release-plan.md)。自 2026-09-20 核验以来没有任何一道门晋级，下表的裁决不变，所缺证据按当前事实改写：
@@ -123,14 +125,14 @@ PRD 4.0 待拍板项 D1–D19 的全量状态见[冲突与开放决策登记](..
 | Gate | 当前裁决 | 所缺证据 |
 | --- | --- | --- |
 | G0 — Truth & Ownership | PARTIAL | 权威文档已回写到 2026-11 决定；PRD 4.0 仍只在私有目录（PRD4-D10 未拍板），不是仓内权威 |
-| G1 — Product/UX/Contract | PARTIAL | 引擎周报 CSV 与反馈端点已有机器合同（#650/#729；SaaS 侧周报功能已于 2026-11-11 取消）；交付包 v1.1 合同、可达性口径写入产品范围仍待补 |
-| G2 — Source/TDD/Security | PARTIAL / MERGED_FIXES_VERIFIED | 每个修复 PR 自带 TDD 与必需检查；不推广到未改动的模块 |
-| G3 — Integration/Data | PARTIAL / PRODUCT_E2E_PARTIAL | 13 次 PARTIAL + 首次 `DONE` run（11-03）；真实评分与 ACK 计数见「一页结论」；`DONE` 之外的 run 仍以 PARTIAL/FAILED 收尾 |
-| G4 — Release Candidate | DEVELOPMENT_CANDIDATE_ONLY | xin 运行的是按 digest 钉住、带构建证明的开发镜像；没有可信外部 provenance readback |
-| G5-Site — Runtime Observed | HISTORICAL_ONLY | Site 线未推进（PRD4-D1 未拍板）；历史观察不可晋级 |
-| G5-Acquisition — Runtime Observed | NOT_VERIFIED | 有首次 `DONE` run，但没有当前 RuntimeEvidence（普通 run 观察不构成 RuntimeEvidence PASS） |
-| G6 — UAT Accepted | NOT_RUN | RL1 退出指标：推荐队列计数见「一页结论」（目标 ≥15 已达），`DONE` run 与 design partner 回填仍未达成 |
-| G7 — Pilot/GA Authorized | NOT_AUTHORIZED | 晋级门可达（PRD4-D12：Owner 签名回执）；尚未取得 PASS RuntimeEvidence、Release Bundle 与产品负责人签名授权 |
+| G1 — Product/UX/Contract | PARTIAL | 引擎周报 CSV 与反馈端点已有机器合同（#650/#729；SaaS 侧周报功能已于 2026-11-11 取消）；交付包 v1.1 合同、可达性口径写入产品范围与 v3 合同对齐仍待补 |
+| G2 — Source/TDD/Security | PARTIAL / MERGED_FIXES_VERIFIED | 各修复 PR 自带 TDD 与必需检查，但不推广到未改动模块；`a5ef77f6`（#1156）合入后 main push CI 存在 `postgres semantics · permissions`（native Discovery v3 厂家证据断言）失败待查 |
+| G3 — Integration/Data | PARTIAL / PRODUCT_E2E_PARTIAL | 历史 13 次 PARTIAL + 首次 `DONE` run（11-03）；`a5ef77f6` + `ff45fa4` 候选尚未补齐多租户/Temporal/SaaS 投影与隔离恢复集成验收 |
+| G4 — Release Candidate | DEVELOPMENT_CANDIDATE_ONLY | 一页结论记录了该后端制品的采用。对应 main CI 尚有失败，成对候选的完整发布证明与已测试回退输入仍待取得 |
+| G5-Site — Runtime Observed | HISTORICAL_ONLY | Site 线待 PRD4-D1 裁决，证据时效与追踪范围见[一页结论](#一页结论) |
+| G5-Acquisition — Runtime Observed | NOT_VERIFIED | 无当前有效 RuntimeEvidence（本机时点观测与普通 run 不构成 RuntimeEvidence PASS） |
+| G6 — UAT Accepted | NOT_RUN | 精确组合尚缺正常用户端到端验收。连续三轮通过、受控恢复和产品负责人验收按[待验证台账](pending-verification.md) `PV-006` 取证 |
+| G7 — Pilot/GA Authorized | NOT_AUTHORIZED | 待取得当前 PASS RuntimeEvidence、有效 Release Bundle 与产品负责人 `OWNER_SIGNED` 签名回执。按 PRD4-D12 复验 |
 
 相同动作、目标和范围的有效授权继续沿用。源码 / PR 合入不自动授权生产部署、保留数据库迁移、凭据与端口修改、付费调用或 Pilot/GA。
 

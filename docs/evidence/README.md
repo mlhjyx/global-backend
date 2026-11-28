@@ -3,11 +3,14 @@
 > 文档 ID：`EVIDENCE-INDEX-001`
 > 生命周期：`CURRENT`
 > 状态：`CURRENT`
+> 最后核验：2026-11-28（核对受控证据目录、时效分层与历史/跨仓证据索引；所有原始证据文件未改写）
 > 当前事实来源：本目录 tracked artifacts、`docs/governance/runtime-evidence.schema.json` 与 `scripts/governance-verify.mjs`
 
 本页是证据导航，不是第二份 current 状态。原始 artifact 保持追加式/不可改写；当前能力、路由、运行健康和发布状态仍分别由权威文档、机器合同、fresh RuntimeEvidence 与 Release Bundle 决定。
 
 当前证据计数、有效窗口和 Release Bundle 接纳状态统一见[当前状态](../status/current.md)，不在本索引维护第二份实时计数。历史观察见 [changelog](../roadmap/changelog.md)；机器真值由 RuntimeEvidence、Release Bundle 文件及 verifier 给出。索引、文件存在或结构校验均不延长证据窗口，也不构成 Pilot/GA 晋级。
+
+2026-11-28 复核。容器状态、readiness、发布归档、主线 CI、镜像发布检查及 Markdown 记录各覆盖其观测范围。RuntimeEvidence 按有效窗口归档，Release Bundle 按接纳状态管理。当前读数、计数和晋级证据见[当前状态的一页结论](../status/current.md#一页结论)，机器核验见 `pnpm governance:verify`。
 
 2026-09-20 的[依赖队列、根同步与历史处置记录](dependency-queue-closeout-20260920.md)提供来源提交、验证范围、原 PR provenance 与回执位置；它不是 RuntimeEvidence，也不授予历史分支/worktree 删除或运行发布权限。
 
@@ -57,7 +60,7 @@
 | ---------------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
 | [`model-routing/`](model-routing/) | `HISTORICAL / FROZEN_EVIDENCE`                                                          | 对应提交和评测合同下的候选、失败、诊断与 route-decision provenance                              | 当前模型目录、余额、settlement、运行路由、生产健康或新提交可晋级 |
 | [`site-builder/`](site-builder/)   | `HISTORICAL / FROZEN_EVIDENCE`，其中显式 successor readback 由对应 RuntimeEvidence 限定 | M1-f/M1-g 历史 provenance；2026-09-01 与 2026-09-04 development runtime readback 的脱敏详细事实 | 超出 RuntimeEvidence 窗口的当前性、Pilot/GA、模型质量或公开发布  |
-| `runtime/`（仅在有记录时创建）     | `CURRENT` 或 `HISTORICAL`                                                               | 由单条 schema-valid 记录的 commit、environment、窗口、kind、result 与 digest 限定               | 超出 `valid_until` 的状态，或其他 commit/environment 的状态      |
+| [`runtime/`](runtime/)             | `CURRENT` 或 `HISTORICAL`（有时效，核对每条记录的 `valid_until`） | 由单条 schema-valid 记录的 commit、environment、窗口、kind、result 与 digest 限定               | 超出 `valid_until` 的状态，或其他 commit/environment 的状态      |
 
 现有 model-routing 和 Site Builder 文件不会因被索引而升级为 current。判断当前运行证据只运行：
 
@@ -95,9 +98,12 @@ Release Bundle 必须分别引用：
 
 Bundle 内的 provenance 枚举、actor、SHA、时间和 URL 都是声明。`PILOT`/`GA` 的晋级 provenance 自 PRD4-D12（2026-11-11）起由产品负责人 SSH 签名回执承载：`external_provenance.status=OWNER_SIGNED`、verifier=`PRODUCT_OWNER_SSH_SIGNATURE`，回执绑定 bundle 摘要、commit、证据集、签名时从 GitHub 回读的必需 check 结论与独立审查记录，验证器离线验签。`EXTERNAL_UNVERIFIED / NONE / NONE` 仍使 `PILOT/GA` fail closed；伪造 `VERIFIED`、攻击者 URL、PR 正文、机器人建议或共享 URL 都不能充当这些门。签名流程见 [CI / 审查与合并流程](../backend/ci-merge-automation.md#发布授权签名owner-操作)。
 
-## 4. 历史入口迁移
+## 4. 历史入口迁移与跨仓证据衔接
 
 2026-08-07 治理瘦身把 `AGENTS.md` 和 `docs/status/current.md` 中的日期化 Site Builder、模型评测、开发真测与 provider 叙述迁出日常入口。迁移没有改写或删除本目录 artifact；完整迁移前文字可从 Git 对象 `35145699db63fc8aef2350a0ca331fef9724f617:AGENTS.md` 与同提交的 `docs/status/current.md` 恢复。后续 successor 只在 [追加式 changelog](../roadmap/changelog.md) 记录，不复制原始 evidence 内容。
+
+- **本仓历史归档入口**：[2026-09-20 状态归档](../archive/status/current-20260920.md)、[2026-08-09 建站横幅归档](../archive/architecture/current-site-builder-banners-20260809.md)与[顶层设计 v1 归档](../archive/research/platform-top-level-design-v1.md)均为只读历史原件，不代表当前状态。
+- **跨仓 SaaS 证据入口**：租户端、前端走查与现役控制面的历史验收记录见 [gain-saas 证据目录](https://github.com/mlhjyx/gain-saas/tree/main/docs/evidence)，分层运行读回与未验项见 [gain-saas 当前状态](https://github.com/mlhjyx/gain-saas/blob/main/docs/status/current.md)。
 
 ## 5. 常用索引
 
