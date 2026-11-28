@@ -144,15 +144,9 @@ API 与 Worker 使用同一 OCI image digest、同一 `global-runtime-build-atte
 
 ## 6. 事件目录与 LeadQualifiedPackage
 
-**事件以注册表为准**：哪些事件存在、走哪条分支，唯一真值是 `apps/api/src/relay/event-registry.ts`（当前 6 个内部命令、13 个集成事件）；本节不手抄之外的事件名。
+**事件以[注册表](../../apps/api/src/relay/event-registry.ts)为准**。内部命令由 relay 拉起 Temporal，集成事件进入 `outbox_delivery`。不同事件按注册的 payload 校验器或明确的信封约定投递，未登记或未分类的事件停靠并报错。值域、版本和字段见[事件 payload 合同](../../packages/contracts/events/payloads/)，兼容告警与阻断门分别核对。
 
-**本仓发布（集成事件，进 `outbox_delivery`）**：**LeadQualified** · LeadsScored · CandidateBatchCompleted · DiscoveryRunCompleted · ICPActivated · ClaimApproved · ClaimRevoked · ClaimExpired · KnowledgeConflictDetected · DeletionCompleted · CampaignPlanJobFailed · SanctionsListStale · SiteBuildCostSummaryUpdated。其中 LeadQualified、LeadsScored、DiscoveryRunCompleted、CandidateBatchCompleted、DeletionCompleted、SiteBuildCostSummaryUpdated 有专用 payload schema（`packages/contracts/events/payloads/`）；截至 2026-11-13，运行期只有 SiteBuildCostSummaryUpdated 在注册表内有 fail-closed 校验器，LeadsScored/DiscoveryRunCompleted 为 warn-only 兼容校验（不阻断交付），LeadQualified/DeletionCompleted 有 ajv consumer test，CandidateBatchCompleted schema 尚无消费者，其余 7 个走信封通用契约。
-
-**内部命令（relay 拉起 Temporal 工作流，不对外交付）**：CompanyProfileCreated · DiscoveryRunRequested · QualifyRequested · DeletionRequested · PersonalArtifactCleanupRequested · AssetObjectCleanupRequested。
-
-此前列在这里的 CompanyProfileActivated、DiscoveryRunPartiallyCompleted、CompanyResolved、IntentSignalDetected/Expired、ContactPointVerified、LeadQualificationRevoked、LeadSuppressed、LeadDecisionRecorded 都不在注册表里，属于目标设计、尚未实现；新增事件须先进注册表（未注册类型会被 park 并报错）。
-
-**LeadQualified 不可变交付快照**（幂等 ID + schema version）：
+**LeadQualified 不可变交付快照**。当前生产者写 [v2 schema](../../packages/contracts/events/payloads/lead-qualified.v2.schema.json)，relay 保留 [v1 schema](../../packages/contracts/events/payloads/lead-qualified.v1.schema.json) 兼容。下面是早期快照与评分规则索引，结构和版本以对应合同为准。
 
 ```
 lead_id / workspace_id / initiative_id? / icp_id + icp_version
@@ -164,11 +158,11 @@ recommended_action / valid_until
 scored_at? / queue_basis?（2026-10-14 起的可选字段：评分时刻；接受时队列的依据 fit_gate_preset | score | human_accept | human_reject）
 ```
 
-scores 与 as-built 六维映射注记：现行六维=fit/role/intent/dataQuality/reachability/engagement（scoring.ts）；`demand_proof` ✅ 收口⑤起由一等 Signal 填充（需求证据类事件=TENDER_PUBLISHED+SOURCING_OPENED，evidence 判据强制；FDA_CLEARANCE 属上市时机留 Intent 维）——**观测维不进总分**（乘法门待 R2 backtest ≥50 QGO 标签），`qualification_rule_version` 升 `additive-6dim-v2` 供消费端区分；**v1 契约预留 number|null 槽位使填充零破坏，snapshot_version 保持 1、不开 v2 文件**（避免 v1/v2 混流坑消费者——release-plan「升 v2」以此达成）。null=lead 评分早于 v2 规则。 **v3（2026-10-14，`additive-6dim-v3`）**：Reachability = max(公司级联系路径 `company_contact_point`（kind ∈ contact_page/impressum_page/contact_form/supplier_page，status ∈ VALID/UNVERIFIED，读时禁联过滤）, 个人旧口径)；权重 fit .45 / role 0 / intent .15 / dataQuality .15 / reachability .20 / engagement .05（RL1 无具名联系人，Role 闲置并入；门槛 0.55 不变，Role 仍上报）；关键词代理只扫属性值（跳过 `_` 前缀的记账键）、Latin token ≥3 且按词边界匹配（CJK ≥2、按子串）、排除 extraction_* 与 website_profile.evidence；权威 Fit 存在时只有 MUST_HAVE 的镜像 EXCLUSION（同 field 同 value、否定操作符）只记进 ruleEvaluations（advisory）不改队列，非镜像的否定型 EXCLUSION 与正向 EXCLUSION 一样最高优先（W5-f 收窄）；ICP 生成拒绝镜像 EXCLUSION，IcpDto.ruleLint 对存量 ICP 的每条否定型 EXCLUSION 提示（镜像：建议删除；非镜像：仍然排除，请确认取值）；score_detail.reasonCodes（MISSING_CONTACT_POINT）。六维键与值域不变、snapshot_version 仍 1。**规则版本随 lead 存**（W5-f）：scoreCandidates 把计分用的版本写进 `score_detail.ruleVersion`，快照的 `qualification_rule_version` 读它；score_detail 无版本 → `additive-6dim-v2`，未计分 → null。
+v1 快照历史。收口时的六维键为 fit/role/intent/dataQuality/reachability/engagement（scoring.ts）；`demand_proof` ✅ 收口⑤起由一等 Signal 填充（需求证据类事件=TENDER_PUBLISHED+SOURCING_OPENED，evidence 判据强制；FDA_CLEARANCE 属上市时机留 Intent 维）——**观测维不进总分**（乘法门待 R2 backtest ≥50 QGO 标签），`qualification_rule_version` 升 `additive-6dim-v2` 供消费端区分；**v1 契约预留 number|null 槽位使填充零破坏，snapshot_version 保持 1、不开 v2 文件**（避免 v1/v2 混流坑消费者——release-plan「升 v2」以此达成）。null=lead 评分早于 v2 规则。 **v3（2026-10-14，`additive-6dim-v3`）**：Reachability = max(公司级联系路径 `company_contact_point`（kind ∈ contact_page/impressum_page/contact_form/supplier_page，status ∈ VALID/UNVERIFIED，读时禁联过滤）, 个人旧口径)；权重 fit .45 / role 0 / intent .15 / dataQuality .15 / reachability .20 / engagement .05（RL1 无具名联系人，Role 闲置并入；门槛 0.55 不变，Role 仍上报）；关键词代理只扫属性值（跳过 `_` 前缀的记账键）、Latin token ≥3 且按词边界匹配（CJK ≥2、按子串）、排除 extraction_* 与 website_profile.evidence；权威 Fit 存在时只有 MUST_HAVE 的镜像 EXCLUSION（同 field 同 value、否定操作符）只记进 ruleEvaluations（advisory）不改队列，非镜像的否定型 EXCLUSION 与正向 EXCLUSION 一样最高优先（W5-f 收窄）；ICP 生成拒绝镜像 EXCLUSION，IcpDto.ruleLint 对存量 ICP 的每条否定型 EXCLUSION 提示（镜像：建议删除；非镜像：仍然排除，请确认取值）；score_detail.reasonCodes（MISSING_CONTACT_POINT）。六维键与值域不变、snapshot_version 仍 1。**规则版本随 lead 存**（W5-f）：scoreCandidates 把计分用的版本写进 `score_detail.ruleVersion`，快照的 `qualification_rule_version` 读它；score_detail 无版本 → `additive-6dim-v2`，未计分 → null。
 
 **SaaS 回传（仅作学习标签）**：QgoCreated · SalesAccepted · CommercialOutcomeVerified · LeadOutcomeRejected。
 
-**投递语义（✅ 收口③已落地，PR #46）**：事件注册表三分支（`relay/event-registry.ts` 穷举）——内部 workflow command（PR #46 时 3 种，现 6 种，→Temporal，AlreadyStarted 幂等）/外部 integration event（PR #46 时 8 种，现 10 种，→`outbox_delivery` 账本单事务原子路由，`publishedAt` 语义=已路由进交付层）/未注册类型 `parkedAt` 停靠+大声报错（不假发布、不毒化轮询）。sink：`saas` 拉模式（`GET /events` 游标=**交付账本行 id**、任意重放 at-least-once、`POST /events/ack` 幂等且锁死 pull sink）+ `webhook` 推模式（URL+SECRET 且 https 才启用；HMAC-SHA256 签名、指数退避封顶 1h、10 次 DEAD=DLQ、双路径 CAS）。LeadQualified payload=快照 v1（`packages/contracts/events/payloads/lead-qualified.v1.schema.json`，ajv Consumer Test；contact_refs 只带 ref+职务元数据不嵌 PII，含具名 refs 事件分级 RESTRICTED）。**部署约束**：relay 单写者（多副本前需 advisory lock）；除 LeadQualified、DeletionCompleted、SiteBuildCostSummaryUpdated 外，其余 7 种 integration 事件的专用 payload schema 待补（现走 envelope 通契约）。交付是否真被消费（ACK）是运行事实，只见[当前状态](../status/current.md)。
+**投递与消费**。内部命令创建工作流时对 AlreadyStarted 幂等。集成事件创建交付记录，`publishedAt` 表示已路由。SaaS pull sink 按交付账本游标拉取并幂等 ACK，启用的 webhook sink 独立签名、重试与记录死信。快照按所用 schema 版本提供联系人引用与职务元数据。派发、SaaS 入箱、业务投影及 ACK 分别按证据核对，部署和接收回执见[当前状态](../status/current.md)。relay 保持单写者。
 
 ## 7. API ownership
 

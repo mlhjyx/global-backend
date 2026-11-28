@@ -6,8 +6,8 @@
 > 2026-07-10 v2（合流定稿）。上游基底：[docs/platform/](platform/) 两份交付包 docx（《顶层产品与系统架构设计 v1.0》=L1、《文档体系重构方案 v1.0》=文档治理，均「待批准评审稿」）；两份 v3.0 Word 已冻结为研究综合稿。产出方法：12 视角全平台设计 × Codex as-built 代码审计 × 交付包（TA-001 至 TA-012 / OD-01 至 OD-06）三方收敛 + 双员对抗审查。
 > 本仓 as-built 架构见 [architecture/current.md](architecture/current.md)；决策注册表见 [adr/registry.md](adr/registry.md)；当前状态与待拍板见 [status/current.md](status/current.md)；路线见 [status/release-plan.md](status/release-plan.md)。
 > **2026-08-04 补**：本文主体定义**获客后端**产品范围（止于 LeadQualifiedPackage）。获客侧冻结已解除，Site Builder M1 也已完成阶段收口；下一施工任务须重新审计后选择，产品边界不变。Site Builder 范围/边界/决策见本文 §4A、[status/current.md](status/current.md)、「活文档」[site-builder/](site-builder/) 00–14 和 [adr/registry.md](adr/registry.md) **ADR-013~019**。
-
-> 最后核验：2026-11-27（跨仓责任与预付积分边界）。
+>
+> 最后核验：2026-11-28（以 `backend@a5ef77f6` 与 `gain-saas@ff45fa4` 校准已接 Program C 事件消费、现役 QGO 归属、钱包代码与商业采用边界；既有 ADR 与授权门不变）。
 
 ## 0. 术语表
 
@@ -22,7 +22,7 @@
 | **Reachability**         | 可达性——有没有可用的联系路径：公司级联系路径（官网联系页 / Impressum / 联系表单 / 供应商页，官网公开、未验证投递、不等于发送许可）或个人联系点，两者取大；联系不上的公司分再高也不进推荐队列 |
 | **Evidence / 证据**      | 每个关键字段都记录「从哪来、什么时候、什么许可、多可信」，可回溯可删除                                                                                           |
 | **DSR**                  | 数据主体请求——欧盟个人依法要求查看/删除其数据，必须能精确执行                                                                                                    |
-| **Budget Grant**         | SaaS Control Plane 对单次 Site Builder BuildRun 签发的一次性、短期、请求绑定费用授权；本仓验签并执行 durable reserve/settle/reconcile，不拥有订阅或 Credits 主账 |
+| **Budget Grant**         | SaaS Control Plane 对适用执行路径（含 Site Builder BuildRun）签发的一次性、短期、请求绑定费用授权；本仓在 `enforce` 模式下验签并执行 durable reserve/settle/reconcile，不拥有订阅或 Credits 主账（与 `gain-saas` 预付积分钱包及引擎技术安全上限分开管理） |
 
 ## 1. 产品是什么
 
@@ -64,16 +64,18 @@
 以下详细状态使用[唯一七轴模型](governance/terminology-and-status.md#6-多轴交付状态)：`PRODUCT / UX / SOURCE / TEST / RUNTIME / RELEASE / PILOT_GA`。`UAT` 是用户验收证据限定词，不是第八轴；所有 `*_EVIDENCE / *_GAP / *_QUALIFIER` 只解释基态，不改变本表的 SoR 或授权真值。
 
 > 2026-11-12 工程审计回写：Opportunity & Sales 与 Growth Execution 两行按 M2 实际交付更新（证据见 [实现状态矩阵](status/implementation-matrix.md) 与 `docs/evidence/2026-11-08-m2-acceptance.md`）；本表只改基态，不改变 SoR、授权或发布门。
+>
+> 2026-11-28 事实校准（D3）：依据 `gain-saas@ff45fa4` 与 `backend@a5ef77f6` 源码更新 `Qualification & Handoff`、`SaaS Control Plane`、`Opportunity & Sales` 与 `Learning & Economics`：① `gain-saas` 已实现 Program C 服务端事件消费（`event_inbox` 幂等落库、`LeadQualified`→`qualified_lead` 投影、`DiscoveryRunCompleted` 任务/钱包结算、`DeletionCompleted` 级联清理与批量 ACK），不再标为 `PROGRAM_C_CONSUMER_NOT_IMPLEMENTED`；但 ACK 与投影解耦且缺运营隔离恢复入口、存在 `QUEUED` 终态投影及 `SiteBuildCostSummaryUpdated` 形状漂移，故 `SOURCE` 保持 `PARTIAL_AS_BUILT`；② 现役 `gain-saas` 前端（Vue 3 / Vben 5 / Ant Design Vue）及预付积分钱包源码已合入（代码默认 `WALLET_BILLING_ENABLED=false`，商业采用待定）；③ 现役 QGO/SAO/CommercialOutcome 源码在 `gain-saas`，未来宿主仍待 `PRD4-D4`；④ 成本账本与线索/ICP 反馈已有局部入口，全链路学习与归因仍未验收。所有域 `RUNTIME`、`RELEASE`、`PILOT_GA` 与 `UAT` 均不越级提升。
 
 | Bounded context | 唯一 SoR / 产品边界 | 当前七轴基态 + UAT/限定词 |
 |---|---|---|
-| SaaS Control Plane | SaaS 拥有身份、Organization、Workspace、Membership、Billing/Credits 与 Site Builder Budget Grant 签发 | `PRODUCT=APPROVED; UX=NONE; SOURCE=PARTIAL_AS_BUILT; TEST=NOT_RUN; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=UNVERIFIED; PILOT_GA=NOT_AUTHORIZED; UAT=NOT_RUN; UX_GAP=NO_VERIFIED_UX; SOURCE_EVIDENCE=LOCAL_SOURCE_AUTHORITY_FOUND; RELEASE_GAP=REMOTE_CI_RELEASE_UNVERIFIED` |
+| SaaS Control Plane | 现役 `gain-saas` 拥有身份、Organization、Workspace（一企一空间）、Membership、预付积分钱包源码/Billing·Credits SoR（商业采用待定）与 Budget Grant 签发 | `PRODUCT=APPROVED; UX=FLOW_ONLY; SOURCE=PARTIAL_AS_BUILT; TEST=CONTRACT_PASS; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=UNVERIFIED; PILOT_GA=NOT_AUTHORIZED; UAT=NOT_RUN; UX_QUALIFIER=LOCAL_SOURCE_OBSERVED; SOURCE_EVIDENCE=LOCAL_SOURCE_AUTHORITY_FOUND; TEST_QUALIFIER=CURRENT_SCOPE_NOT_RUN; RELEASE_GAP=REMOTE_CI_RELEASE_UNVERIFIED` |
 | Growth Strategy | SaaS 拥有 Goal、GrowthInitiative、OfferingSnapshot、MarketThesis、ICPVersion 与 Pack Snapshot | `PRODUCT=APPROVED; UX=NONE; SOURCE=NOT_IMPLEMENTED; TEST=NOT_IMPLEMENTED; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=NOT_IMPLEMENTED; PILOT_GA=NOT_AUTHORIZED; UAT=NOT_RUN; PRODUCT_EVIDENCE=APPROVED_PHASE_0_SPEC; UX_GAP=NOT_IMPLEMENTED` |
 | Buyer Intelligence | 本仓拥有采集、Identity/Canonical、Evidence、数据权利、Signal、Reachability 与资格输入 | `PRODUCT=APPROVED; UX=NONE; SOURCE=AS_BUILT; TEST=NOT_RUN; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=UNVERIFIED; PILOT_GA=NOT_AUTHORIZED; UAT=NOT_RUN; UX_GAP=NOT_IMPLEMENTED; TEST_QUALIFIER=CURRENT_SCOPE_NOT_RUN` |
-| Qualification & Handoff | 本仓止于不可变 `LeadQualifiedPackage + Outbox/ACK`；SaaS Program C 独占服务端 consumer/receipt/snapshot 事务 | `PRODUCT=APPROVED; UX=NONE; SOURCE=PARTIAL_AS_BUILT; TEST=NOT_IMPLEMENTED; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=UNVERIFIED; PILOT_GA=NOT_AUTHORIZED; UAT=NOT_RUN; UX_GAP=NOT_IMPLEMENTED; SOURCE_EVIDENCE=BACKEND_PRODUCER_AS_BUILT; SOURCE_GAP=PROGRAM_C_CONSUMER_NOT_IMPLEMENTED; TEST_GAP=PROGRAM_C_NOT_IMPLEMENTED; RELEASE_GAP=BACKEND_UNVERIFIED,PROGRAM_C_NOT_IMPLEMENTED` |
-| Opportunity & Sales | SaaS Program C 拥有单一 Opportunity 聚合及 QGO/SAO/CLOSED、SalesAcceptance、CommercialOutcome、Conversation linkage | `PRODUCT=APPROVED; UX=FLOW_ONLY; SOURCE=AS_BUILT; TEST=E2E_PASS; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=NOT_IMPLEMENTED; PILOT_GA=NOT_AUTHORIZED; UAT=NOT_RUN; PRODUCT_EVIDENCE=APPROVED_PHASE_0_SPEC; UX_QUALIFIER=LOCAL_SOURCE_OBSERVED; SOURCE_EVIDENCE=LOCAL_SOURCE_AUTHORITY_FOUND` |
-| Growth Execution | SaaS/执行系统拥有 Campaign、ExecutionAuthorization、Content、Outreach、Publish 与 provider loop | `PRODUCT=APPROVED; UX=FLOW_ONLY; SOURCE=PARTIAL_AS_BUILT; TEST=INTEGRATION_PASS; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=NOT_IMPLEMENTED; PILOT_GA=NOT_AUTHORIZED; UAT=NOT_RUN; PRODUCT_QUALIFIER=CURRENT_MVP; UX_QUALIFIER=LOCAL_SOURCE_OBSERVED; SOURCE_EVIDENCE=LOCAL_SOURCE_AUTHORITY_FOUND; SOURCE_GAP=PUBLISH_AND_REAL_SEND_NOT_IMPLEMENTED; RELEASE_GAP=REMOTE_CI_RELEASE_UNVERIFIED` |
-| Learning & Economics | SaaS 拥有 Touchpoint、Attribution、Feedback、Experiment、ROI 主状态；本仓只接收结构化学习标签并保留域内成本事实 | `PRODUCT=APPROVED; UX=NONE; SOURCE=NOT_IMPLEMENTED; TEST=NOT_IMPLEMENTED; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=NOT_IMPLEMENTED; PILOT_GA=NOT_AUTHORIZED; UAT=NOT_RUN; PRODUCT_EVIDENCE=APPROVED_PHASE_0_SPEC; UX_GAP=NOT_IMPLEMENTED` |
+| Qualification & Handoff | 本仓止于不可变 `LeadQualifiedPackage + Outbox/ACK`；`gain-saas`（Program C）实现服务端事件消费/入箱/快照投影与 ACK（投影隔离恢复、v3 兼容与建站成本事件形状缺口待专项关闭） | `PRODUCT=APPROVED; UX=FLOW_ONLY; SOURCE=PARTIAL_AS_BUILT; TEST=CONTRACT_PASS; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=UNVERIFIED; PILOT_GA=NOT_AUTHORIZED; UAT=NOT_RUN; UX_QUALIFIER=LOCAL_SOURCE_OBSERVED; SOURCE_EVIDENCE=BACKEND_PRODUCER_AS_BUILT,LOCAL_SOURCE_AUTHORITY_FOUND; SOURCE_GAP=LOCAL_SOURCE_DRIFT; TEST_QUALIFIER=CURRENT_SCOPE_NOT_RUN; RELEASE_GAP=REMOTE_CI_RELEASE_UNVERIFIED` |
+| Opportunity & Sales | 现役 `gain-saas`（Program C）持有 `Qgo`、`Sao` 和 `OpportunityOutcome`。单一 `Opportunity` 聚合与 `CLOSED` 属 ADR-025 目标。未来 QGO 宿主待 `PRD4-D4`。表内 E2E 证据对应 [2026-11-08 M2 步 10](evidence/2026-11-08-m2-acceptance.md) 的专用测试空间 | `PRODUCT=APPROVED; UX=FLOW_ONLY; SOURCE=AS_BUILT; TEST=E2E_PASS; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=NOT_IMPLEMENTED; PILOT_GA=NOT_AUTHORIZED; UAT=NOT_RUN; PRODUCT_EVIDENCE=APPROVED_PHASE_0_SPEC; UX_QUALIFIER=LOCAL_SOURCE_OBSERVED; SOURCE_EVIDENCE=LOCAL_SOURCE_AUTHORITY_FOUND; TEST_QUALIFIER=CURRENT_SCOPE_NOT_RUN` |
+| Growth Execution | 目标归属为 SaaS/执行系统，覆盖 Campaign、ExecutionAuthorization、Content、Outreach、Publish 与 provider loop（现役 `gain-saas` 源码接入 SMTP 与发送 Worker，测试历史覆盖隔离邮件接收，正式外发启用和验收见[当前状态](status/current.md)，多社媒发布仍待实现） | `PRODUCT=APPROVED; UX=FLOW_ONLY; SOURCE=PARTIAL_AS_BUILT; TEST=INTEGRATION_PASS; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=NOT_IMPLEMENTED; PILOT_GA=NOT_AUTHORIZED; UAT=NOT_RUN; PRODUCT_QUALIFIER=CURRENT_MVP; UX_QUALIFIER=LOCAL_SOURCE_OBSERVED; SOURCE_EVIDENCE=LOCAL_SOURCE_AUTHORITY_FOUND; SOURCE_GAP=LOCAL_SOURCE_DRIFT; TEST_QUALIFIER=CURRENT_SCOPE_NOT_RUN; RELEASE_GAP=REMOTE_CI_RELEASE_UNVERIFIED` |
+| Learning & Economics | SaaS 拥有 Touchpoint、Attribution、Feedback、Experiment、ROI 主状态；本仓只接收结构化学习标签并保留域内成本事实（当前仅含局部成本账本与反馈入口） | `PRODUCT=APPROVED; UX=NONE; SOURCE=PARTIAL_AS_BUILT; TEST=NOT_RUN; RUNTIME=NO_TRUSTED_OBSERVATION; RELEASE=NOT_IMPLEMENTED; PILOT_GA=NOT_AUTHORIZED; UAT=NOT_RUN; PRODUCT_EVIDENCE=APPROVED_PHASE_0_SPEC; UX_GAP=NOT_IMPLEMENTED; SOURCE_QUALIFIER=PARTIAL_AS_BUILT_TARGET_SPECIFIED; TEST_QUALIFIER=CURRENT_SCOPE_NOT_RUN` |
 
 横切控制仍包括 Evidence、Data Rights、Policy、Suppression、Budget、Approval、Audit、幂等、Temporal、Outbox、Trace 与 Eval。执行层、商机域、Pack 和前端 IA 的详细设计输入见附录 A；它们不扩大本仓边界。
 
@@ -82,7 +84,7 @@
 本节及 §6 的 A/B/C 是团队：SaaS 平台方（A）/接口层（B）/本仓开发（C）；ADR-025、status 与 release-plan 的 Program A/B/C 是工作包，两者不可混用。
 
 - **本仓 = 买家智能与机会资格引擎**：Understand → Target → Discover → Qualify → **LeadQualifiedPackage 交付**（=交付包 TA-007）。
-- 本仓**不建、任何时候也不在本仓新增**：身份/用户/角色、Campaign、发送/触达、Conversation/Inbox、Opportunity/QGO/SAO、归因。SaaS 消费 `LeadQualified` 事件创建 Opportunity（CANDIDATE 态）；成交结果（QgoCreated/SalesAccepted/CommercialOutcomeVerified/LeadOutcomeRejected）**只回流为质量学习标签**，QGO 主状态不复制回本仓。
+- 本仓**不建、任何时候也不在本仓新增**：身份/用户/角色、Campaign、发送/触达、Conversation/Inbox、Opportunity/QGO/SAO、归因。现役 SaaS（`gain-saas`，2026-10-31 起取代已退役的 GrowthOS）消费 `LeadQualified` 事件维护合格线索快照并承载现役 QGO/SAO/Outcome 主状态（未来 QGO 宿主仍按 `PRD4-D4` 待定）；成交结果（QgoCreated/SalesAccepted/CommercialOutcomeVerified/LeadOutcomeRejected）**只回流为质量学习标签**，QGO 主状态不复制回本仓。
 - **存储侧合规必须留在本仓**（个人数据在摄取/富集时已发生处理）：Data Rights、PII 分类、保留期、Suppression、DSR 删除。发送侧合规、Approval、ExecutionAuthorization 由 SaaS/执行系统负责，但**消费本仓的政策结论**。
 - 边界判据一句话：动「人、权、审、发、看」不进本仓；动「挖、并、证、分、存」是本仓。
 - **改边界的唯一途径**：修订 ADR-001 并经 SaaS 平台方（A）/接口层（B）/业务负责人三方书面确认——不存在其他「过流程就能加」的后门。
@@ -91,7 +93,7 @@
 ## 4A. Site Builder 产品面与当前边界【2026-07-24 真值】
 
 - **本仓负责**：注册建站、建站档案/素材/知识库、SiteSpec、固定 DAG 的 Temporal 构建、封闭组件渲染、预览与后续不可变 Release/发布能力；AI 只能执行有界 Task，不使用自由 Planner。
-- **外部 SaaS 负责**：身份、Workspace 控制面、完整产品 UI、运营/商机/成交。Site Builder 不改变 ADR-001 对获客交付边界的定义。
+- **外部 SaaS 负责**：身份、Workspace 控制面、完整产品 UI、运营/商机/成交。Site Builder 不改变 ADR-001 对获客交付边界的定义。现役 `gain-saas` 租户端当前无 Site Builder 页面入口，正式冻结待 `PRD4-D1` 裁决，未来开放范围另待确定。
 - **费用权威接缝（ADR-024）**：SaaS 是 subscription、Billing 与 Credits 的 SoR，并为正常产品 BuildRun 签发一次性 Budget Grant；本仓只验证 workspace/operation/request/cap（已有 Site 时也验证 site）、原子消费授权、执行持久预算账本并追加结算/对账。Backend 不另设隐藏的产品总金额门，产品 Grant 也不授权 Codex/operator 的 ad-hoc/evaluation 调用。
 - **环境语义（ADR-024）**：development、pilot、production 采用同一产品运行路径和不可变制品；凭据、JWKS、endpoint、数据、资源和网络暴露可以独立配置，但不得替换业务实现、验证、持久化、费用、错误或 readiness 语义。测试替身与 fixture 不进入产品 composition root、Release 或用户站点。
 - **as-built 审计基线**：M0、R0–R4、M1-c、M1-d、R1-min、DI-0、M1-e-A 与 M1-e-B 均已进入主线。Demo v0 固定 `SiteSpec 1.0` / ReleaseManifest v1；受控精装修链使用 `SiteSpec 1.1` / ReleaseManifest v2，旧版本保持双读兼容且不后台迁移。
@@ -117,7 +119,7 @@ Goal（业务目标：如进入德国市场）
 
 | 方                                     | 拥有                                                                                                                         |
 | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| SaaS 平台方（A）                         | 身份/登录/角色、全部 UI、Campaign/触达/Inbox、Opportunity(QGO/SAO)/归因、Billing/Credits SoR、Site Builder Budget Grant 签发 |
+| SaaS 平台方（A，现役为 `gain-saas`）    | 身份/登录/角色、全部 UI、Campaign/触达/Inbox、Opportunity(QGO/SAO)/归因、Billing/Credits SoR、Site Builder Budget Grant 签发 |
 | 接口层（B，同库）                      | JWKS 与 Budget Grant 校验、controller/DTO、OpenAPI 契约、事件拉取端点、roles→scopes 映射                                     |
 | 本仓开发（C，当前开发主体为 Claude Code；用户拍板） | Company/ICP/Discovery/Identity/Signal/Contact/Lead/Suppression 应用服务 + Temporal 编排 + 存储侧合规                         |
 
@@ -130,12 +132,12 @@ Goal（业务目标：如进入德国市场）
 - 交付模式：Managed/Collaborative 起步，逐步 Self-service。
 - MVP 假设：「对上述企业，输入官网、产品和目标市场后，平台在可解释成本内持续产出有证据、可联系的海外进口商/采购企业，并在 **30 天内形成至少一个人工确认 QGO**。」北极星保持“每活跃 Workspace 每月新增 QGO”，SAO 只作为后续商业验证。
 - 首版不做：4 个发布平台、完整视频、全渠道 Inbox、专家市场、多行业同时商业化、多触点归因。
-- SaaS 已合入预付积分钱包、流水和运营管理。具体计价、支持的消费路径及运行验收见 [SaaS 当前状态与钱包说明入口](https://github.com/mlhjyx/gain-saas/blob/main/docs/status/current.md)。客户订阅、自助收款和商业验收分别记录；引擎负责技术限额与实际供应商用量。
+- 预付积分钱包源码（账户、积分批次、预占、流水与运营充值）已合入 `gain-saas`，代码默认 `WALLET_BILLING_ENABLED=false`（实际环境开关未读回）；**正式商业收费、定价规则、自助收款与用户验收均尚未批准或验证**，具体接线见 [gain-saas 钱包说明](https://github.com/mlhjyx/gain-saas/blob/main/docs/technical/credits-wallet.md) 与 [gain-saas 当前状态](https://github.com/mlhjyx/gain-saas/blob/main/docs/status/current.md)。引擎侧只负责技术限额与供应商实际用量记录（`usage_ledger`），不承担商业计费主账。
 
 ## 8. 文档权威关系
 
 1. 两份 v3.0 Word=冻结的研究综合稿（权威链断裂：自称待批准且母本 v2.1 不在仓库）。
-2. [docs/platform/](platform/) 交付包=L0/L1 全平台基底（待批准评审稿）；本文件+architecture+adr 是其获客模块层实现。
+2. [docs/platform/](platform/) 交付包=L0/L1 全平台基底（待批准评审稿）；[Global 产品总设计](product.md) 定义九模块目标结构，本文件+architecture+adr 是其获客模块层权威边界，现役租户产品事实见 [gain-saas 现役产品说明](https://github.com/mlhjyx/gain-saas/blob/main/apps/web/PRODUCT.md)。
 3. 本仓范围与分工：本文件。当前完成度：[status/current.md](status/current.md) + 代码 + 真实验证（roadmap 已降级为 [roadmap/changelog.md](roadmap/changelog.md)）。
 4. API：code-first 导出的 `packages/contracts/openapi/openapi.json` 唯一 REST 真值（旧 openapi.yaml 链路已删除，收口④完成）；SiteSpec 类型真值为 `@global/contracts`（DQ-1/#117）。
 5. TED/openFDA spec：以其「审查修正」章节+代码为准，已降级为 [implementation-records/](implementation-records/)。

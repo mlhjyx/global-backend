@@ -3,7 +3,7 @@
 > 生命周期：`GUIDE`
 > 生命周期依据：CI、审查与合并的现行流程；2026-09-21 随 #548–#553 更新
 
-> 2026-09-21 起，当前开发主体是 Claude Code；Codex 只在 Claude Code 指派下执行边界明确的任务。旧 Claude `merge-judge` workflow 已退役；合并遵循 `DEC-AIDEV-004`：开发代理独立审查通过、必需检查全绿并满足其余门后可 squash 合并，不包括 ruleset/仓库设置/权限变更、部署发布与付费调用。权威简版见 [AGENTS.md §8](../../AGENTS.md)。
+> 日常开发与专项授权见 [AGENTS.md §5](../../AGENTS.md)。旧 Claude `merge-judge` workflow 已退役；合并遵循 `DEC-AIDEV-004`：开发代理独立审查通过、必需检查全绿并满足其余门后可 squash 合并，不包括 ruleset/仓库设置/权限变更、部署发布与付费调用。
 
 ## 合并模型
 

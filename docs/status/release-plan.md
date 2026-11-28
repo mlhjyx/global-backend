@@ -2,7 +2,7 @@
 
 > 文档 ID：`DOC-ROADMAP-001`
 > 生命周期：`CURRENT`
-> 最后核验：2026-11-12（工程审计元数据核对；正文未逐条复验）
+> 最后核验：2026-11-28（校准现役 `gain-saas` 与退役 GrowthOS、现役 QGO 归属及钱包源码与商业采用边界；既有阶段门与批准口径不变）。
 > 当前事实来源：[当前状态](current.md) · [as-built 架构](../architecture/current.md)。
 > 2026-07-10 v2（获客合流定稿）；2026-07-27 模型候选重基线更新；2026-09-04 产品顺序与 currentness 分离更新；2026-11-02 按 [文档目录与维护规则](../documentation-rules.md) 从 `docs/roadmap/` 迁至 `docs/status/`。历史实施日志见 [changelog.md](../roadmap/changelog.md)。
 >
@@ -10,15 +10,17 @@
 >
 > **2026-11-02 追加**：联系人线 M1–M4 已上线（run 内联系人阶段、社媒三层降级、邮箱补全双闸、决策人卡片），`email_guess` 已按 D3 重开（双闸：`decision_maker.config.lawfulBasis` interim LIA + `smtp_self`）；下文的「email guessing … disabled」与「Pilot 3-A 只跑 TED/GLEIF/官网」均属历史 Pilot 范围，不再是当前约束。Agent auto-send、Publish/Domain 等边界不变。
 >
+> **2026-11-28 边界校准（D3）**：下文历史「Ordered delivery」中出现的 GrowthOS 已于 2026-10-31 退役并由 [gain-saas](https://github.com/mlhjyx/gain-saas/blob/main/docs/README.md) 承接现役 SaaS 前端、控制面与 R4 平台权威；Program C 事件消费与现役 QGO/SAO/CommercialOutcome 源码已在 `gain-saas` 落地（未来 QGO 宿主归属仍按 `PRD4-D4` 待定）；预付积分钱包源码已合入 `gain-saas`（代码默认关闭 `WALLET_BILLING_ENABLED=false`），但商业收费规则、定价、自助收款与正式验收仍未批准。具体提交、CI、部署读回与受控证据状态统一见[当前状态](current.md)。
+>
 > **PRD 4.0 Release 结构**（只列结构与退出指标名称；范围、门槛与时间以 PRD 4.0 为准，并行度不超过两条线）：
 >
 > - **RL1 线索试点**（当前 Release）：一个 ICP、一个国家、一个品类，Managed 周报交付。退出指标：真实产出、精度、可达、证据、成本、商机、合规、节奏。
 > - **RL2 可达与合规**：每条线索有合法联系路径与「为什么现在」，加第二个 ICP / 国家。退出指标：两个 ICP 的周报、推荐精度、建议联系路径覆盖、LIA 签署。
-> - **RL3 商机与反馈**：QGO 宿主落地（宿主待 PRD4-D4），客户在页面上判断，结果回流评分。退出指标：月度 QGO 数、7 天 Outcome 回写率、客户独立完成判断。
+> - **RL3 商机与反馈**：QGO 宿主落地（现役 QGO/SAO/Outcome 源码已在 `gain-saas` 落地，未来宿主归属仍待 `PRD4-D4` 裁决），客户在页面上判断，结果回流评分。退出指标：月度 QGO 数、7 天 Outcome 回写率、客户独立完成判断。
 > - **RL4 受控触达**：用户授权的单一发送渠道。退出指标：投诉率、退信率、回复进入 Conversation。
 > - **RL5 对话与 Inbox**：回复识别 → Conversation → 商机候选。退出指标：一个渠道闭环。
 > - **RL6 内容与站点**：Site Builder 作为「被找到」的信任资产按条件复活。退出指标：客户主动要求（触发条件）。
-> - **X 减负线**（与 RL1–RL2 并行）：冻结 Site / R4、门改 lint、文档归档、缩短 CI（Site 冻结待 PRD4-D1，门改 lint 待 PRD4-D12，归档清单待 PRD4-D11；R4 冻结已由 PRD4-D2 于 2026-10-31 重开并完成向 gain-saas 的迁移，平台 schedule 恢复仍待单独拍板）。退出指标：每 PR 固定开销。
+> - **X 减负线**（与 RL1–RL2 并行）：冻结 Site / R4、门改 lint、文档归档、缩短 CI（Site 冻结待 PRD4-D1，门改 lint 仍为历史提案，PRD4-D12 生效内容见下方 G7，归档清单待 PRD4-D11；R4 冻结已由 PRD4-D2 于 2026-10-31 重开并完成向 gain-saas 的迁移，平台 schedule 恢复仍待单独拍板）。退出指标：每 PR 固定开销。
 
 > 当前执行与运行采用先看[当前状态](current.md)。旧执行预算、平台调度与 Site Builder 模式见[运行架构](../architecture/current.md#运行模式与开关)。下文保留 RL 阶段、退出门与选定时的授权口径。
 
@@ -109,7 +111,7 @@ This document owns the stable product sequence and gate definitions; it does not
 
 The stable product spine is `Onboarding → ICP → LeadQualifiedPackage → Opportunity → Human QGO → Feedback`; the parallel Site spine `Quote → Grant → Build → Preview` does not replace QGO.
 
-The first Job is evidence-backed overseas importer/procurement discovery for Chinese B2B manufacturing, trade-integrated and high-ticket exporters. Human QGO is the north star. Dealer recruitment, Campaign, social/publishing, analytics, Agent auto-send, Site Publish/Domain/Inquiry/Analytics and customer Billing/Credits are outside this critical path. Billing/Credits is `DEFERRED / NOT_IMPLEMENTED`; `cap_microusd` is an execution safety envelope, not customer billing.
+The first Job is evidence-backed overseas importer/procurement discovery for Chinese B2B manufacturing, trade-integrated and high-ticket exporters. Human QGO is the north star. Dealer recruitment, Campaign, social/publishing, analytics, Agent auto-send, Site Publish/Domain/Inquiry/Analytics and customer Billing/Credits adoption are outside this critical path. Customer billing rules, commercial pricing, self-serve payment and acceptance remain `DEFERRED` pending approval (`gain-saas` has merged Prepaid Credits Wallet source with `WALLET_BILLING_ENABLED` defaulting to `false`, see [current status](current.md) and [gain-saas wallet spec](https://github.com/mlhjyx/gain-saas/blob/main/docs/technical/credits-wallet.md)); Backend `cap_microusd` remains an execution safety envelope, not customer billing.
 
 ### Program boundaries
 
@@ -131,7 +133,7 @@ The G0–G7 meanings below are stable. Their current verdicts are intentionally 
 | G4 — Release Candidate   | Clean exact commits, hosted CI, reproducible artifacts/images, SBOM and a tested rollback input form one candidate.                                          |
 | G5 — Runtime Observed    | Exact runtime identity, migrations, leases/readiness and fresh RuntimeEvidence prove the candidate running in the named environment.                         |
 | G6 — UAT Accepted        | Critical user journeys execute successfully in three consecutive runs, including controlled restart/recovery, and the product owner accepts the user result. |
-| G7 — Pilot/GA Authorized | A current Release Bundle, trusted external readback, explicit user authorization, monitoring and rollback are all present.                                   |
+| G7 — Pilot/GA Authorized | Fresh RuntimeEvidence with a successful result, a current Release Bundle, the product owner’s SSH-signed `OWNER_SIGNED` receipt under [PRD4-D12](../adr/registry.md#prd-40-决定prd4--前缀2026-10-10-起), explicit user authorization, monitoring and rollback are present. |
 
 ### Ordered delivery
 

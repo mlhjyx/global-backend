@@ -4,9 +4,9 @@
 > 层级：`L1 / Navigation`
 > 状态：`CURRENT`
 > 维护 Owner：`OWN-DOC-GOV`
-> 最后核验：2026-11-27（维护入口与跨仓链接）。
+> 最后核验：2026-11-28（以 `backend@a5ef77f6` 与 `gain-saas@ff45fa4` 核对产品总设计、现役 SaaS 与 ADR 入口可达性）。
 
-这是后端仓库的文档导航。按下面的入口定位工作；实际实现、运行采用和验收记录见[当前状态](status/current.md)。租户应用的页面、账本与发布记录由 [gain-saas 文档](https://github.com/mlhjyx/gain-saas/tree/main/docs) 维护。
+这是后端仓库的文档导航。按下面的入口定位工作；实际实现、运行采用和验收记录见[当前状态](status/current.md)。整个产品的目标模块与对象关系见[Global 产品总设计](product.md)。现役租户应用的页面、钱包源码与运行读回由 [gain-saas 文档入口](https://github.com/mlhjyx/gain-saas/blob/main/docs/README.md)、[gain-saas 现役产品说明](https://github.com/mlhjyx/gain-saas/blob/main/apps/web/PRODUCT.md) 与 [gain-saas 当前状态](https://github.com/mlhjyx/gain-saas/blob/main/docs/status/current.md) 维护。
 
 ## 1. 先读五份当前真值
 
@@ -18,18 +18,20 @@
 4. [ADR 注册表](adr/registry.md)：仍然生效的承重决策。
 5. [发布路线](status/release-plan.md)：下一施工顺序。
 
+需要从全产品视角理解九个模块目标分工、核心业务对象和待决产品问题时，查阅[Global 产品总设计](product.md)（目标设计入口，不替代上述五份当前权威真值与实现/验收状态）。
+
 任何“已完成、已接入、已发布、生产可用”声明都必须回到上述事实源、机器合同和相应证据核验。旧 Word、研究稿、原型、历史分支或外部项目不能升级当前状态。
 
-### 1.1 历史与冻结文档的定位（2026-11-02 标注）
+### 1.1 历史与冻结文档的定位（2026-11-02 标注；2026-11-28 补充现役边界）
 
 - [`archive/research/platform-top-level-design-v1.md`](archive/research/platform-top-level-design-v1.md)：**SUPERSEDED**——顶层设计 v1，已被 [产品边界](product-scope.md) + [as-built 架构](architecture/current.md) + [ADR 注册表](adr/registry.md) 取代，其中「QGO 归本仓」等表述已被 ADR-001 改判，已归档，不得再当现行设计引用。
-- `docs/frontend/` 系列（19 份）：**目标规范 / 设计基线，不是 as-built**；实际运行的 SaaS 前端以 gain-saas 仓库为准，本目录不描述其实现状态。
-- `docs/site-builder/` 保留独立站任务合同与历史设计；先读 [源码与运行边界](architecture/current.md#运行模式与开关)，再判断本次任务适用的章节。
+- `docs/frontend/` 系列（19 份）：**目标规范 / 设计基线（`ACTIVE_INPUT`），不是 as-built**；现役 SaaS 前端位于 [gain-saas](https://github.com/mlhjyx/gain-saas/blob/main/apps/web/PRODUCT.md)（`apps/web`，Vue 3 / Vben 5 / Ant Design Vue），原 GrowthOS 已于 2026-10-31 退役，未来框架选择（如 Next.js/React）仍按[冲突登记](governance/conflict-register.md) `CON-FE-006` 待定。
+- `docs/site-builder/` 保留独立站任务合同与历史设计；先读 [源码与运行边界](architecture/current.md#运行模式与开关)，再判断本次任务适用的章节（现役 SaaS 租户端无建站入口，正式冻结待 `PRD4-D1`）。
 - `docs/archive/`：只读历史，正文不改写，链接问题按历史结构告警处理。
 
 ## 2. 模块设计文档（docs/modules/）
 
-按 [文档目录与维护规则](documentation-rules.md) 建立的模块产品与技术方案；当前为 `DRAFT`，实现状态见 [实现状态矩阵](status/implementation-matrix.md)。
+按 [文档目录与维护规则](documentation-rules.md) 建立的模块产品与技术方案，承接[Global 产品总设计](product.md)；当前为 `DRAFT`，实现状态见 [实现状态矩阵](status/implementation-matrix.md)。
 
 | 模块 | 产品说明 | 技术方案 |
 | --- | --- | --- |
@@ -46,6 +48,8 @@
 
 | 任务 | 入口 | 说明 |
 |---|---|---|
+| 理解整个产品的目标与九模块分工 | [Global 产品总设计](product.md) | 九模块目标、核心对象归属与待决项；不替代仓边界与实现状态 |
+| 了解现役 SaaS 产品、路由与运行现状 | [gain-saas 现役产品说明](https://github.com/mlhjyx/gain-saas/blob/main/apps/web/PRODUCT.md) · [gain-saas 当前状态](https://github.com/mlhjyx/gain-saas/blob/main/docs/status/current.md) | 现役 Vue 3 / Vben 5 / Ant Design Vue 租户产品、现役 QGO、触达与钱包源码（代码默认关闭，实际开关与商业采用待定） |
 | 理解整个 SaaS 前端目标 | [统一 SaaS 前端规范](frontend/README.md) | IA、旅程、权限、状态、AI、设计、合同与质量目标；不是前端 as-built |
 | 设计/开发独立站管理 | [Capability Pack](frontend/modules/independent-site-management/README.md) | 当前唯一达到详细规格深度的 SaaS 产品域 |
 | 实现 Site Builder 后端 | [Site Builder 决策入口](site-builder/00-decisions-and-coordination.md) | PRD、架构、SiteSpec、API、测试与施工顺序 |
@@ -55,9 +59,9 @@
 | 查询 OSS/外部能力决定 | [OSS / 外部能力注册表](backend/oss-registry.md) | 32 项采用决定、许可边界、Adapter/SoR、Owner 与退出门 |
 | 运行和维护开发环境 | [后端运行文档](backend/compose-project-migration.md) | Compose 迁移、Worktree、CI 及现役后端专题 |
 | 用自然语言需求与 AI 代理协作开发 | [AI 辅助开发协作入口](ai-development/README.md) | 运行模式、需求验收、升级规则与记忆/检索边界（开发主体为 Claude Code，Codex 仅受派） |
-| 核验文档一致性 | [文档自动校验](governance/docs-verification.md) | 运行 `pnpm docs:verify` |
+| 核验文档一致性 | [文档自动校验](governance/docs-verification.md) | 运行 `pnpm docs:verify`，涉及跨仓入口时可按需运行只读漂移检查 |
 | 改获客主链（发现 / 评分 / 联系人） | [AGENTS.md](../AGENTS.md) → [当前状态](status/current.md) → [模块技术方案](modules/discovery-qualification/technical.md) | 先读 no-go 与不变量；入口、文件与测试锚点见[代码地图](governance/code-map.md) |
-| 做验收、交付或回填 | [当前状态](status/current.md) → [证据索引](evidence/README.md) | 四态与 RuntimeEvidence 口径，不把「跑通」当「验收」 |
+| 做验收、交付或回填 | [当前状态](status/current.md) → [待验证台账](status/pending-verification.md) → [证据索引](evidence/README.md) | 四态、RuntimeEvidence 与 Release Bundle 口径，不把「跑通」当「验收」 |
 | 查「为什么这样决定」 | [ADR registry](adr/registry.md) → [冲突与开放决策登记](governance/conflict-register.md) | 决策与冲突分开，不按更新时间判断 |
 | 平台调度或 Temporal 迁移 | [平台授权模式](runbooks/platform-authority-internal-db-and-slimming.md) · [客户 Temporal](backend/postgres-temporal-customer-migration.md) | 切换前核对运行模式、队列与回退材料 |
 | 日常运维与排障 | 工作区 `local-config/RUNBOOK.md` → [后端专题](backend/) | 按 RUNBOOK 顺序，不裸跑 `docker compose` |
@@ -75,7 +79,7 @@
 7. [独立站管理线框](design/independent-site-management-wireframes.md)
 8. [独立站管理实施蓝图](frontend/implementation/independent-site-management-blueprint.md)
 
-正式 SaaS 前端位于 **gain-saas 仓库**（`apps/web`，vben SPA；2026-10-31 P8 起与 SaaS 身份/平台权威同仓），其运行状态与设计事实以该仓文档为准。本目录的 `docs/frontend/` 仍是目标规范与设计基线，不是 as-built；本地 Mock、截图和导出代码不能证明正式前端已实现。
+正式 SaaS 前端位于 **gain-saas 仓库**（`apps/web`，Vue 3 / Vben 5 / Ant Design Vue SPA；2026-10-31 P8 起与 SaaS 身份/平台权威同仓，取代已退役的 GrowthOS），其运行状态与设计事实以 [gain-saas 文档入口](https://github.com/mlhjyx/gain-saas/blob/main/docs/README.md) 与 [gain-saas 现役产品说明](https://github.com/mlhjyx/gain-saas/blob/main/apps/web/PRODUCT.md) 为准。本目录的 `docs/frontend/` 仍是目标规范与设计基线，不是 as-built；本地 Mock、截图和导出代码不能证明正式前端已实现。
 
 ### Site Builder 后端与契约
 
@@ -106,7 +110,7 @@
 | 层级 | 用途 | 主要位置 |
 |---|---|---|
 | Authority | 当前边界、架构、决策、状态和路线 | `product-scope.md`、`architecture/`、`adr/`、`status/`、`status/release-plan.md` |
-| Normative / Registry | 当前目标规则、稳定 ID、责任和关系 | `frontend/`、`governance/`、`backend/oss-registry.md` |
+| Normative / Registry | 当前目标规则、稳定 ID、责任和关系 | `product.md`、`frontend/`、`governance/`、`backend/oss-registry.md` |
 | Capability / Guide | 完成具体产品或运行任务 | `frontend/modules/independent-site-management/`、`site-builder/`、`backend/`、`ai-development/` |
 | Evidence / Record | 实现、测试、模型和专题实施证明 | `evidence/`、`implementation-records/`、`roadmap/changelog.md` |
 | Research / Historical input | 研究、旧 Word 和 dated proposal | `research/`、`platform/`、明确标记的 Site Builder 历史稿 |

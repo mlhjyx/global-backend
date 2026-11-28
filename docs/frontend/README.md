@@ -6,21 +6,23 @@
 > 评审状态：`APPROVED_AT_GATE_4`
 > 内容 Owner：`OWN-DESIGN`
 > 工程基线：`origin/main@23d111f7b400403deb7466abf34ab709685b8376`
-> 最后核验：2026-08-29
+> 最后核验：2026-11-28（校准 GrowthOS 退役、现役 `gain-saas` 前端仓与候选框架边界；原始 2026-08-29 规范基线保留）
 
-> **2026-10-30 现状注记**：产品前端已迁到 [gain-saas](https://github.com/mlhjyx/gain-saas)（本机 `127.0.0.1:4020`，PRD 见该仓 `docs/prd/phase-1-01-04.md`）。本目录描述的 GrowthOS 页面/契约是 2026-08 的基线，只保留作历史对照；GrowthOS 目前仅承担 R4 平台权威，P8 退役。新前端工作以 gain-saas 仓为准。
+> **2026-10-30 现状注记（历史时点）**：产品前端已迁到 [gain-saas](https://github.com/mlhjyx/gain-saas)（当时本机 `127.0.0.1:4020`，一期 PRD 见该仓 `docs/prd/phase-1-01-04.md`）。本目录描述的 GrowthOS 页面/契约是 2026-08 的基线，只保留作历史对照；注：GrowthOS 已于 2026-10-31 随 `PRD4-D2` 退役（卷保留作回退），R4 平台权威同期迁入 `gain-saas`。新前端工作以 `gain-saas` 仓为准。
 >
-> **2026-11-12 生命周期修订**：本目录（含 `modules/`）是目标规范/设计基线，不是 as-built；生命周期由 `CURRENT` 改为 `ACTIVE_INPUT`，避免与 gain-saas 的实际实现混读。
+> **2026-11-12 生命周期修订**：本目录（含 `modules/`）是目标规范/设计基线，不是 as-built；生命周期由 `CURRENT` 改为 `ACTIVE_INPUT`，避免与 `gain-saas` 的实际实现混读。
+>
+> **2026-11-28 现役仓与框架边界（D3）**：现役 SaaS 前端位于正常 Git 仓库 [gain-saas](https://github.com/mlhjyx/gain-saas)（`apps/web`，技术栈为 Vue 3 / Vben 5 / Ant Design Vue），具备 GitHub remote、托管 CI 与本机部署 SPA 制品；现役产品事实、路由与分层读回见 [gain-saas 文档入口](https://github.com/mlhjyx/gain-saas/blob/main/docs/README.md)、[gain-saas 现役产品说明](https://github.com/mlhjyx/gain-saas/blob/main/apps/web/PRODUCT.md) 与 [gain-saas 当前状态](https://github.com/mlhjyx/gain-saas/blob/main/docs/status/current.md)。现役租户端无 Site Builder 入口（正式冻结待 `PRD4-D1`）。Next.js/React、双端改造与去租户化仍为待定后续输入（见[冲突登记](../governance/conflict-register.md) `CON-FE-006`）。
 
 本目录定义整个 SaaS 共用的目标前端规则，回答“不同产品域如何保持一致”。它是交给独立前端团队的产品与工程约束，不是本仓已实现的前端，也不替代产品边界、as-built 架构、ADR、状态或机器合同。
 
 ## 1. 当前效力
 
 - `DEC-FE-P4-001..011` 继续有效；批准结论统一在[冲突登记](../governance/conflict-register.md)维护。
-- 前端 source 状态为 `LOCAL_SOURCE_AUTHORITY_FOUND / REMOTE_CI_RELEASE_UNVERIFIED`：`/global/frontend/growthos-source` 是 archive+patch authority package，不是正常 mutable remote-backed repo。owner、remote、hosted CI、deployment 与 current release adoption 未验证。
+- **现役仓与历史输入区分（2026-11-28 校准）**：2026-08 基线所指 `/global/frontend/growthos-source`（archive+patch 包，`LOCAL_SOURCE_AUTHORITY_FOUND / REMOTE_CI_RELEASE_UNVERIFIED`）对应已退役的 GrowthOS 历史快照，不再代表现役 SaaS 前端。现役 SaaS 前端源码位于 `gain-saas`（`apps/web`），已有 remote、CI 与本机 SPA 制品；但本目录目标规格对应的 `OWN-SAAS-FE`/`OWN-DESIGN` 正式责任人指派、受控设计源与正常用户端到端验收仍未关闭，继续按[冲突登记](../governance/conflict-register.md)跟踪。
 - GrowthOS local source、Readdy、模板、截图和竞品只能作为 source/reference evidence；不能证明页面、组件、runtime、release、UAT 或用户可用。
 - 独立站管理是统一 SaaS 的一级区域；Astro 公开站是版本化输出，不是第二套管理前端。
-- 除独立站管理外，其他产品域当前只完成地图级覆盖，仍为 `MAP_COMPLETE / NOT_DEV_READY`。
+- 除独立站管理外，其他产品域在本目录目标规格中只完成地图级覆盖，仍为 `MAP_COMPLETE / NOT_DEV_READY`（现役获客/线索/商机/触达/运营页面实现状态另见 [gain-saas 当前状态](https://github.com/mlhjyx/gain-saas/blob/main/docs/status/current.md)）。
 - 六个 primary IA area 固定为 Today、Customer Development、Site Management、Growth Execution、Engagement & Opportunities、Insights。Enterprise facts/trust 是 cross-cutting context；Team、Integrations、Security、Privacy、Settings 与 Admin 是 secondary management surfaces。
 - Design system、a11y、visual/performance 与 responsive 规则是 `NORMATIVE_SPEC_ONLY`；受控设计源、Token/component implementation、executable tests、release 与 UAT 均未实现或未运行。
 
@@ -64,7 +66,7 @@
 ## 5. 当前承接边界
 
 - 独立站管理当前纵切是 `SPEC_READY_WITH_BLOCKERS`；后置公网发布链仍为 `TARGET_NOT_RUNNABLE`。
-- 非 Site 产品域按[当前状态](../status/current.md)中各 Program 的实现、接纳与验收证据分别判定；本设计导航页不另设 M1 时间门或统一 readiness 状态。
+- 非 Site 产品域按[当前状态](../status/current.md)与 [gain-saas 当前状态](https://github.com/mlhjyx/gain-saas/blob/main/docs/status/current.md)中各 Program 的实现、接纳与验收证据分别判定；本设计导航页不另设 M1 时间门或统一 readiness 状态。
 - 不决定 React/Next/Vite、BFF、UI 库、状态库、分析 SDK、i18n 库或设计工具。
 - 不生成高保真页面、生产 Token 数值、可执行 Fixture 或部署声明。
 - 不把首个用户承诺扩展到公网发布、域名、回滚、询盘、站点分析或诊断。

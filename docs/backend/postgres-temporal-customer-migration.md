@@ -8,7 +8,7 @@
 
 ## 1. 现状与迁移目标
 
-- **现状**：平台定时调度（`platform-automation` 命名空间）已运行在 PostgreSQL 支撑的 `temporal-platform` 上，而客户工作流默认仍指向单节点 SQLite `temporal-dev`（`namespace=default`）。单机 SQLite 在高并发任务和异常断电下存在锁竞争与历史恢复风险。
+- **迁移前配置**：平台定时调度使用 PostgreSQL 的 `platform-automation` 命名空间，客户工作流可使用单节点 SQLite 的 `default` 命名空间。单机 SQLite 在高并发任务和异常断电下存在锁竞争与历史恢复风险。当前实际采用见[状态页](../status/current.md)。容器是否运行、API 与两种 Worker 实际路由、旧队列与历史保留情况分别核对。
 - **目标**：通过双模配置让客户工作流以独立命名空间（如 `customer-workflows`）切入 PostgreSQL Temporal，全程**不动** `temporal-platform` 容器、**不碰** `platform-automation` 命名空间、**不破坏** `/api/v1/health/ready` 契约，待旧任务排空后再下线 `temporal-dev`。
 
 ## 2. 双模环境变量说明
@@ -32,7 +32,7 @@
    - 设置上述 5 个 `TEMPORAL_CUSTOMER_*` 变量，排空旧任务后再重定向产出和消费。若批准在切换窗口并行，保留原集群及轮询原命名空间和队列的兼容 Worker，直到旧任务结束。
    - 启动诊断 `ConfigDriftDiagnosticsService` 会在启动日志检查双模配置；若有 `TEMPORAL_CUSTOMER_CONFIG_DRIFT` 告警则先修正再切流。
 3. **验证 `/api/v1/health/ready` 与灰度跑通**
-   - 重启客户 API 与客户 Worker 后，核实 `GET /api/v1/health/ready` 返回 `200` 且 `temporal` 探针正常。
+   - 重启客户 API 与客户 Worker 后，核实 `GET /api/v1/health/ready` 返回 `200`、`status=ready` 且 `components.temporal_control_plane` 正常。
    - 在用户明确授权的试点窗口发起有界任务，确认工作流执行记录落入 `customer-workflows` 命名空间且 PostgreSQL 持久化表有对应记录。
 4. **排空并安全退役 SQLite `temporal-dev`**
    - 查询旧 `temporal-dev`（`default` 命名空间）是否仍有 `Running` 状态的工作流；等待全部完成或安全取消。
